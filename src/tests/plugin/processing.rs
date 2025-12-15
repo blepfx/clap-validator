@@ -427,14 +427,13 @@ pub fn test_process_varying_sample_rates(
         None => None,
     };
 
-    let mut note_event_rng = note_ports_config.map(NoteGenerator::new);
+    const BUFFER_SIZE: usize = 512;
+    let (mut input_buffers, mut output_buffers) = audio_ports_config.create_buffers(BUFFER_SIZE);
 
     for &sample_rate in SAMPLE_RATES {
         host.handle_callbacks_once();
 
-        const BUFFER_SIZE: usize = 512;
-        let (mut input_buffers, mut output_buffers) =
-            audio_ports_config.create_buffers(BUFFER_SIZE);
+        let mut note_event_rng = note_ports_config.clone().map(NoteGenerator::new);
 
         ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?
             .run(
@@ -459,6 +458,71 @@ pub fn test_process_varying_sample_rates(
             .context(format!(
                 "Error while processing with {:.2}hz sample rate",
                 sample_rate
+            ))?;
+
+        host.callback_error_check()
+            .context("An error occured during a host callback")?;
+    }
+
+    Ok(TestStatus::Success { details: None })
+}
+
+/// The test for `ProcessingTest::ProcessVaryingBlockSizes`.
+pub fn test_process_varying_block_sizes(
+    library: &PluginLibrary,
+    plugin_id: &str,
+) -> Result<TestStatus> {
+    const BLOCK_SIZES: &[u32] = &[
+        1, 8, 32, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 1536, 10, 1000, 10000, 2027,
+    ];
+
+    let mut prng = new_prng();
+
+    let host = Host::new();
+    let plugin = library
+        .create_plugin(plugin_id, host.clone())
+        .context("Could not create the plugin instance")?;
+    plugin.init().context("Error during initialization")?;
+
+    let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
+        Some(audio_ports) => audio_ports
+            .config()
+            .context("Error while querying 'audio-ports' IO configuration")?,
+        None => AudioPortConfig::default(),
+    };
+
+    let note_ports_config = match plugin.get_extension::<NotePorts>() {
+        Some(note_ports) => Some(
+            note_ports
+                .config()
+                .context("Error while querying 'note-ports' IO configuration")?,
+        ),
+        None => None,
+    };
+
+    for &buffer_size in BLOCK_SIZES {
+        host.handle_callbacks_once();
+
+        let mut note_event_rng = note_ports_config.clone().map(NoteGenerator::new);
+        let (mut input_buffers, mut output_buffers) =
+            audio_ports_config.create_buffers(buffer_size as usize);
+
+        ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?
+            .run(5, ProcessConfig::default(), |process_data| {
+                if let Some(note_event_rng) = note_event_rng.as_mut() {
+                    note_event_rng.fill_event_queue(
+                        &mut prng,
+                        &process_data.input_events,
+                        buffer_size,
+                    )?;
+                }
+
+                process_data.buffers.randomize(&mut prng);
+                Ok(())
+            })
+            .context(format!(
+                "Error while processing with buffer size of {}",
+                buffer_size
             ))?;
 
         host.callback_error_check()
@@ -507,14 +571,18 @@ pub fn test_process_random_block_sizes(
         20,
         ProcessConfig::default(),
         |process_data| {
-            process_data.block_size = prng.gen_range(1..=BUFFER_SIZE as u32);
-            process_data.buffers.randomize(&mut prng);
+            process_data.block_size = if prng.gen_bool(0.8) {
+                prng.gen_range(1..=BUFFER_SIZE as u32)
+            } else {
+                1
+            };
 
+            process_data.buffers.randomize(&mut prng);
             if let Some(note_event_rng) = note_event_rng.as_mut() {
                 note_event_rng.fill_event_queue(
                     &mut prng,
                     &process_data.input_events,
-                    BUFFER_SIZE as u32,
+                    process_data.block_size,
                 )?;
             }
 

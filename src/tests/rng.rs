@@ -111,6 +111,10 @@ impl NoteGenerator {
         queue: &EventQueue<VTable>,
         num_samples: u32,
     ) -> Result<()> {
+        if self.config.inputs.is_empty() {
+            return Ok(());
+        }
+
         // The range for the next event's timing relative to the `current_sample`. This will be
         // capped at 0, so there's a ~58% chance the next event occurs on the same time interval as
         // the previous event.

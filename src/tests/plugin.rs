@@ -31,6 +31,8 @@ pub enum PluginTestCase {
     ProcessNoteInconsistent,
     #[strum(serialize = "process-varying-sample-rates")]
     ProcessVaryingSampleRates,
+    #[strum(serialize = "process-varying-block-sizes")]
+    ProcessVaryingBlockSizes,
     #[strum(serialize = "process-random-block-sizes")]
     ProcessRandomBlockSizes,
     #[strum(serialize = "param-conversions")]
@@ -73,18 +75,6 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  tests whether the output does not contain any non-finite or subnormal values. \
                  Uses out-of-place audio processing.",
             ),
-            PluginTestCase::ProcessVaryingSampleRates => String::from(
-                "Processes random audio and random note events through the plugin with its \
-                 default parameter values while trying different sample rates ranging from 1kHz \
-                 to 768kHz, and tests whether the output does not contain any non-finite or \
-                 subnormal values. Uses out-of-place audio processing.",
-            ),
-            PluginTestCase::ProcessRandomBlockSizes => String::from(
-                "Processes random audio and random note events through the plugin with maximum \
-                 block size of 2048 while randomizing block sizes for each process call, and \
-                 tests whether the output does not contain any non-finite or subnormal values. \
-                 Uses out-of-place audio processing.",
-            ),
             PluginTestCase::ProcessNoteOutOfPlaceBasic => String::from(
                 "Sends audio and random note and MIDI events to the plugin with its default \
                  parameter values and tests the output for consistency. Uses out-of-place audio \
@@ -93,6 +83,25 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::ProcessNoteInconsistent => String::from(
                 "Sends intentionally inconsistent and mismatching note and MIDI events to the \
                  plugin with its default parameter values and tests the output for consistency. \
+                 Uses out-of-place audio processing.",
+            ),
+            PluginTestCase::ProcessVaryingSampleRates => String::from(
+                "Processes random audio and random note events through the plugin with its \
+                 default parameter values while trying different sample rates ranging from 1kHz \
+                 to 768kHz, including fractional rates, and tests whether the output does not \
+                 contain any non-finite or subnormal values. Uses out-of-place audio processing.",
+            ),
+            PluginTestCase::ProcessVaryingBlockSizes => String::from(
+                "Processes random audio and random note events through the plugin with its \
+                 default parameter values while trying different maximum block sizes ranging from \
+                 1 to 32768, including non-power-of-two ones, and tests whether the output does \
+                 not contain any non-finite or subnormal values. Uses out-of-place audio \
+                 processing.",
+            ),
+            PluginTestCase::ProcessRandomBlockSizes => String::from(
+                "Processes random audio and random note events through the plugin with maximum \
+                 block size of 2048 while randomizing block sizes for each process call, and \
+                 tests whether the output does not contain any non-finite or subnormal values. \
                  Uses out-of-place audio processing.",
             ),
             PluginTestCase::ParamConversions => String::from(
@@ -181,6 +190,9 @@ impl<'a> TestCase<'a> for PluginTestCase {
             }
             PluginTestCase::ProcessVaryingSampleRates => {
                 processing::test_process_varying_sample_rates(library, plugin_id)
+            }
+            PluginTestCase::ProcessVaryingBlockSizes => {
+                processing::test_process_varying_block_sizes(library, plugin_id)
             }
             PluginTestCase::ProcessRandomBlockSizes => {
                 processing::test_process_random_block_sizes(library, plugin_id)

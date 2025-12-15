@@ -29,6 +29,10 @@ pub enum PluginTestCase {
     ProcessNoteOutOfPlaceBasic,
     #[strum(serialize = "process-note-inconsistent")]
     ProcessNoteInconsistent,
+    #[strum(serialize = "process-varying-sample-rates")]
+    ProcessVaryingSampleRates,
+    #[strum(serialize = "process-random-block-sizes")]
+    ProcessRandomBlockSizes,
     #[strum(serialize = "param-conversions")]
     ParamConversions,
     #[strum(serialize = "param-fuzz-basic")]
@@ -66,6 +70,18 @@ impl<'a> TestCase<'a> for PluginTestCase {
             }
             PluginTestCase::ProcessAudioOutOfPlaceBasic => String::from(
                 "Processes random audio through the plugin with its default parameter values and \
+                 tests whether the output does not contain any non-finite or subnormal values. \
+                 Uses out-of-place audio processing.",
+            ),
+            PluginTestCase::ProcessVaryingSampleRates => String::from(
+                "Processes random audio and random note events through the plugin with its \
+                 default parameter values while trying different sample rates ranging from 1kHz \
+                 to 768kHz, and tests whether the output does not contain any non-finite or \
+                 subnormal values. Uses out-of-place audio processing.",
+            ),
+            PluginTestCase::ProcessRandomBlockSizes => String::from(
+                "Processes random audio and random note events through the plugin with maximum \
+                 block size of 2048 while randomizing block sizes for each process call, and \
                  tests whether the output does not contain any non-finite or subnormal values. \
                  Uses out-of-place audio processing.",
             ),
@@ -162,6 +178,12 @@ impl<'a> TestCase<'a> for PluginTestCase {
             }
             PluginTestCase::ProcessNoteInconsistent => {
                 processing::test_process_note_inconsistent(library, plugin_id)
+            }
+            PluginTestCase::ProcessVaryingSampleRates => {
+                processing::test_process_varying_sample_rates(library, plugin_id)
+            }
+            PluginTestCase::ProcessRandomBlockSizes => {
+                processing::test_process_random_block_sizes(library, plugin_id)
             }
             PluginTestCase::ParamConversions => params::test_param_conversions(library, plugin_id),
             PluginTestCase::ParamFuzzBasic => params::test_param_fuzz_basic(library, plugin_id),

@@ -1,9 +1,5 @@
 //! Contains most of the boilerplate around testing audio processing.
 
-use std::sync::atomic::Ordering;
-
-use anyhow::{Context, Result};
-
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::NotePorts;
 use crate::plugin::ext::Extension;
@@ -15,6 +11,9 @@ use crate::plugin::instance::Plugin;
 use crate::plugin::library::PluginLibrary;
 use crate::tests::rng::{new_prng, NoteGenerator};
 use crate::tests::TestStatus;
+use anyhow::{Context, Result};
+use rand::Rng;
+use std::sync::atomic::Ordering;
 
 /// A helper to handle the boilerplate that comes with testing a plugin's audio processing behavior.
 pub struct ProcessingTest<'a> {
@@ -107,7 +106,7 @@ impl<'a> ProcessingTest<'a> {
                     })?;
 
                     process_data.clear_events();
-                    process_data.advance_transport(buffer_size as u32);
+                    process_data.advance_transport(process_data.block_size);
 
                     // Restart processing as necesasry
                     if plugin
@@ -187,7 +186,7 @@ impl<'a> ProcessingTest<'a> {
             .context("Failed during processing")?;
 
             process_data.clear_events();
-            process_data.advance_transport(buffer_size as u32);
+            process_data.advance_transport(process_data.block_size);
 
             plugin.stop_processing();
 
@@ -394,6 +393,141 @@ pub fn test_process_note_inconsistent(
     Ok(TestStatus::Success { details: None })
 }
 
+/// The test for `ProcessingTest::ProcessVaryingSampleRates`.
+pub fn test_process_varying_sample_rates(
+    library: &PluginLibrary,
+    plugin_id: &str,
+) -> Result<TestStatus> {
+    const SAMPLE_RATES: &[f64] = &[
+        1000.0, 10000.0, 22050.0, 32000.0, 44100.0, 48000.0, 88200.0, 96000.0, 192000.0, 384000.0,
+        768000.0, 1234.5678, 12345.678, 45678.901, 123456.78,
+    ];
+
+    let mut prng = new_prng();
+
+    let host = Host::new();
+    let plugin = library
+        .create_plugin(plugin_id, host.clone())
+        .context("Could not create the plugin instance")?;
+    plugin.init().context("Error during initialization")?;
+
+    let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
+        Some(audio_ports) => audio_ports
+            .config()
+            .context("Error while querying 'audio-ports' IO configuration")?,
+        None => AudioPortConfig::default(),
+    };
+
+    let note_ports_config = match plugin.get_extension::<NotePorts>() {
+        Some(note_ports) => Some(
+            note_ports
+                .config()
+                .context("Error while querying 'note-ports' IO configuration")?,
+        ),
+        None => None,
+    };
+
+    let mut note_event_rng = note_ports_config.map(NoteGenerator::new);
+
+    for &sample_rate in SAMPLE_RATES {
+        host.handle_callbacks_once();
+
+        const BUFFER_SIZE: usize = 512;
+        let (mut input_buffers, mut output_buffers) =
+            audio_ports_config.create_buffers(BUFFER_SIZE);
+
+        ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?
+            .run(
+                5,
+                ProcessConfig {
+                    sample_rate,
+                    ..ProcessConfig::default()
+                },
+                |process_data| {
+                    if let Some(note_event_rng) = note_event_rng.as_mut() {
+                        note_event_rng.fill_event_queue(
+                            &mut prng,
+                            &process_data.input_events,
+                            BUFFER_SIZE as u32,
+                        )?;
+                    }
+
+                    process_data.buffers.randomize(&mut prng);
+                    Ok(())
+                },
+            )
+            .context(format!(
+                "Error while processing with {:.2}hz sample rate",
+                sample_rate
+            ))?;
+
+        host.callback_error_check()
+            .context("An error occured during a host callback")?;
+    }
+
+    Ok(TestStatus::Success { details: None })
+}
+
+/// The test for `ProcessingTest::ProcessRandomBlockSizes`.
+pub fn test_process_random_block_sizes(
+    library: &PluginLibrary,
+    plugin_id: &str,
+) -> Result<TestStatus> {
+    let mut prng = new_prng();
+
+    let host = Host::new();
+    let plugin = library
+        .create_plugin(plugin_id, host.clone())
+        .context("Could not create the plugin instance")?;
+    plugin.init().context("Error during initialization")?;
+
+    let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
+        Some(audio_ports) => audio_ports
+            .config()
+            .context("Error while querying 'audio-ports' IO configuration")?,
+        None => AudioPortConfig::default(),
+    };
+
+    let note_ports_config = match plugin.get_extension::<NotePorts>() {
+        Some(note_ports) => Some(
+            note_ports
+                .config()
+                .context("Error while querying 'note-ports' IO configuration")?,
+        ),
+        None => None,
+    };
+
+    let mut note_event_rng = note_ports_config.map(NoteGenerator::new);
+
+    host.handle_callbacks_once();
+
+    const BUFFER_SIZE: usize = 2048;
+    let (mut input_buffers, mut output_buffers) = audio_ports_config.create_buffers(BUFFER_SIZE);
+    ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?.run(
+        20,
+        ProcessConfig::default(),
+        |process_data| {
+            process_data.block_size = prng.gen_range(1..=BUFFER_SIZE as u32);
+            process_data.buffers.randomize(&mut prng);
+
+            if let Some(note_event_rng) = note_event_rng.as_mut() {
+                note_event_rng.fill_event_queue(
+                    &mut prng,
+                    &process_data.input_events,
+                    BUFFER_SIZE as u32,
+                )?;
+            }
+
+            Ok(())
+        },
+    )?;
+
+    host.callback_error_check()
+        .context("An error occured during a host callback")?;
+
+    Ok(TestStatus::Success { details: None })
+}
+
 /// The process for consistency. This verifies that the output buffer doesn't contain any NaN,
 /// infinite, or denormal values, that the input buffers have not been modified by the plugin, and
 /// that the output event queue is monotonically ordered.
@@ -413,7 +547,11 @@ fn check_out_of_place_output_consistency(
     }
     for (port_idx, channel_slices) in output_buffers.iter().enumerate() {
         for (channel_idx, channel_slice) in channel_slices.iter().enumerate() {
-            for (sample_idx, sample) in channel_slice.iter().enumerate() {
+            for (sample_idx, sample) in channel_slice
+                .iter()
+                .enumerate()
+                .take(process_data.block_size as usize)
+            {
                 if !sample.is_finite() {
                     anyhow::bail!(
                         "The sample written to output port {port_idx}, channel {channel_idx}, and \

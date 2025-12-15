@@ -29,6 +29,8 @@ pub struct ProcessData<'a> {
     pub input_events: Pin<Box<EventQueue<clap_input_events>>>,
     /// The output events.
     pub output_events: Pin<Box<EventQueue<clap_output_events>>>,
+    /// The length of the current block in samples.
+    pub block_size: u32,
 
     config: ProcessConfig,
     /// The current transport information. This is populated when constructing this object, and the
@@ -79,6 +81,7 @@ pub struct OutOfPlaceAudioBuffers<'a> {
     // `*const *const f32`
     _input_channel_pointers: Vec<Vec<*const f32>>,
     _output_channel_pointers: Vec<Vec<*const f32>>,
+
     clap_inputs: Vec<clap_audio_buffer>,
     clap_outputs: Vec<clap_audio_buffer>,
 
@@ -146,9 +149,10 @@ impl<'a> ProcessData<'a> {
     // TODO: More transport info options. Missing fields, loop regions, flags, etc.
     pub fn new(buffers: &'a mut AudioBuffers<'a>, config: ProcessConfig) -> Self {
         ProcessData {
-            buffers,
             input_events: EventQueue::new_input(),
             output_events: EventQueue::new_output(),
+            block_size: buffers.len() as u32,
+            buffers,
 
             config,
             transport_info: clap_event_transport {
@@ -186,12 +190,16 @@ impl<'a> ProcessData<'a> {
     /// contains raw pointers to this struct's data, so the closure is there to prevent dangling
     /// pointers.
     pub fn with_clap_process_data<T, F: FnOnce(clap_process) -> T>(&mut self, f: F) -> T {
-        let num_samples = self.buffers.len();
+        assert!(
+            self.block_size as usize <= self.buffers.len(),
+            "internal error: invalid block size"
+        ); //TODO: should this be a result instead of a panic?
+
         let (inputs, outputs) = self.buffers.io_buffers();
 
         let process_data = clap_process {
             steady_time: self.sample_pos as i64,
-            frames_count: num_samples as u32,
+            frames_count: self.block_size as u32,
             transport: &self.transport_info,
             audio_inputs: if inputs.is_empty() {
                 std::ptr::null()

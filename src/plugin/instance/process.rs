@@ -19,16 +19,17 @@ use rand_pcg::Pcg32;
 use std::ffi::c_void;
 use std::pin::Pin;
 
+use crate::plugin::ext::audio_ports::AudioPortConfig;
 use crate::util::check_null_ptr;
 
 /// The input and output data for a call to `clap_plugin::process()`.
 pub struct ProcessData<'a> {
     /// The input and output audio buffers.
-    pub buffers: &'a mut AudioBuffers<'a>,
+    pub buffers: &'a mut AudioBuffers,
     /// The input events.
-    pub input_events: Pin<Box<EventQueue<clap_input_events>>>,
+    pub input_events: Pin<Box<EventQueue>>,
     /// The output events.
-    pub output_events: Pin<Box<EventQueue<clap_output_events>>>,
+    pub output_events: Pin<Box<EventQueue>>,
     /// The length of the current block in samples.
     pub block_size: u32,
 
@@ -55,32 +56,20 @@ pub struct ProcessConfig {
     pub time_sig_denominator: u16,
 }
 
-/// Audio buffers for [`ProcessData`]. CLAP allows hosts to do both in-place and out-of-place
-/// processing, so we'll support and test both methods.
-pub enum AudioBuffers<'a> {
-    /// Out-of-place processing with separate non-aliasing input and output buffers.
-    OutOfPlace(OutOfPlaceAudioBuffers<'a>),
-    // TODO: In-place processing, figure out a safe abstraction for this if the in-place pairs
-    //       aren't symmetrical between the inputs and outputs (e.g. when it's not just
-    //       input1<->output1, input2<->output2, etc.).
-}
-
 /// Audio buffers for out-of-place processing. This wrapper allocates and sets up the channel
 /// pointers. To avoid an unnecessary level of abstraction where the `Vec<Vec<f32>>`s need to be
 /// converted to a slice of slices, this data structure borrows the vectors directly.
-//
-// TODO: This only does f32 for now, we'll also want to test f64 and mixed configurations later.
-pub struct OutOfPlaceAudioBuffers<'a> {
+///
+#[derive(Clone)]
+pub struct AudioBuffers {
     // These are all indexed by `[port_idx][channel_idx][sample_idx]`. The inputs also need to be
     // mutable because reborrwing them from here is the only way to modify them without
     // reinitializing the pointers.
-    inputs: &'a mut [Vec<Vec<f32>>],
-    outputs: &'a mut [Vec<Vec<f32>>],
+    buffers: Vec<AudioBuffer>,
 
     // These are point to `inputs` and `outputs` because `clap_audio_buffer` needs to contain a
     // `*const *const f32`
-    _input_channel_pointers: Vec<Vec<*const f32>>,
-    _output_channel_pointers: Vec<Vec<*const f32>>,
+    _pointers: Vec<Vec<*const ()>>,
 
     clap_inputs: Vec<clap_audio_buffer>,
     clap_outputs: Vec<clap_audio_buffer>,
@@ -89,22 +78,33 @@ pub struct OutOfPlaceAudioBuffers<'a> {
     num_samples: usize,
 }
 
+#[derive(Clone, Debug)]
+pub enum AudioBuffer {
+    Float32 {
+        input: Option<u32>,
+        output: Option<u32>,
+        data: Vec<Vec<f32>>,
+    },
+
+    Float64 {
+        input: Option<u32>,
+        output: Option<u32>,
+        data: Vec<Vec<f64>>,
+    },
+}
+
 // SAFETY: Sharing these pointers with other threads is safe as they refer to the borrowed input and
 //         output slices. The pointers thus cannot be invalidated.
-unsafe impl Send for OutOfPlaceAudioBuffers<'_> {}
-unsafe impl Sync for OutOfPlaceAudioBuffers<'_> {}
+unsafe impl Send for AudioBuffers {}
+unsafe impl Sync for AudioBuffers {}
 
 /// An event queue that can be used as either an input queue or an output queue. This is always
 /// allocated through a `Pin<Box<EventQueue>>` so the pointers are stable. The `VTable` type
 /// argument should be either `clap_input_events` or `clap_output_events`.
-//
-// TODO: There's not much benefit in having this be generic over the VTable and it makes it more
-//        dififcult to reason about. Just split this up into two concrete structs.
 #[derive(Debug)]
-pub struct EventQueue<VTable> {
-    /// The vtable for this event queue. This will be either `clap_input_events` or
-    /// `clap_output_events`.
-    vtable: VTable,
+pub struct EventQueue {
+    vtable_input: clap_input_events,
+    vtable_output: clap_output_events,
     /// The actual event queue. Since we're going for correctness over performance, this uses a very
     /// suboptimal memory layout by just using an `enum` instead of doing fancy bit packing.
     pub events: Mutex<Vec<Event>>,
@@ -147,10 +147,10 @@ impl<'a> ProcessData<'a> {
     /// [`advance_transport()`][Self::advance_transport()] method.
     //
     // TODO: More transport info options. Missing fields, loop regions, flags, etc.
-    pub fn new(buffers: &'a mut AudioBuffers<'a>, config: ProcessConfig) -> Self {
+    pub fn new(buffers: &'a mut AudioBuffers, config: ProcessConfig) -> Self {
         ProcessData {
-            input_events: EventQueue::new_input(),
-            output_events: EventQueue::new_output(),
+            input_events: EventQueue::new(),
+            output_events: EventQueue::new(),
             block_size: buffers.len() as u32,
             buffers,
 
@@ -195,7 +195,7 @@ impl<'a> ProcessData<'a> {
             "internal error: invalid block size"
         ); //TODO: should this be a result instead of a panic?
 
-        let (inputs, outputs) = self.buffers.io_buffers();
+        let (inputs, outputs) = self.buffers.clap_buffers();
 
         let process_data = clap_process {
             steady_time: self.sample_pos as i64,
@@ -213,8 +213,8 @@ impl<'a> ProcessData<'a> {
             },
             audio_inputs_count: inputs.len() as u32,
             audio_outputs_count: outputs.len() as u32,
-            in_events: &self.input_events.vtable,
-            out_events: &self.output_events.vtable,
+            in_events: self.input_events.vtable_input(),
+            out_events: self.output_events.vtable_output(),
         };
 
         f(process_data)
@@ -248,122 +248,117 @@ impl<'a> ProcessData<'a> {
     }
 }
 
-impl AudioBuffers<'_> {
-    /// The number of samples in the buffer.
-    pub fn len(&self) -> usize {
-        match self {
-            AudioBuffers::OutOfPlace(buffers) => buffers.len(),
-        }
-    }
-
-    /// Pointers for the inputs and the outputs. These can be used to construct the `clap_process`
-    /// data.
-    pub fn io_buffers(&mut self) -> (&[clap_audio_buffer], &mut [clap_audio_buffer]) {
-        match self {
-            AudioBuffers::OutOfPlace(buffers) => buffers.io_buffers(),
-        }
-    }
-
-    /// Get a reference to the buffer's inputs.
-    pub fn inputs_ref(&self) -> &[Vec<Vec<f32>>] {
-        match self {
-            AudioBuffers::OutOfPlace(buffers) => buffers.inputs,
-        }
-    }
-
-    /// Get a reference to the buffer's outputs.
-    pub fn outputs_ref(&self) -> &[Vec<Vec<f32>>] {
-        match self {
-            AudioBuffers::OutOfPlace(buffers) => buffers.outputs,
-        }
-    }
-
-    /// Fill the input and output buffers with white noise. The values are distributed between `[-1,
-    /// 1]`, and denormals are snapped to zero.
-    pub fn randomize(&mut self, prng: &mut Pcg32) {
-        match self {
-            AudioBuffers::OutOfPlace(buffers) => buffers.randomize(prng),
-        }
-    }
-}
-
-impl<'a> OutOfPlaceAudioBuffers<'a> {
+impl AudioBuffers {
     /// Construct the out of place audio buffers. This allocates the channel pointers that are
-    /// handed to the plugin in the process function. The function will return an error if the
-    /// sample count doesn't match between all input and outputs vectors.
-    pub fn new(inputs: &'a mut [Vec<Vec<f32>>], outputs: &'a mut [Vec<Vec<f32>>]) -> Result<Self> {
-        // We need to make sure all inputs and outputs have the same number of channels. Since zero
-        // channel ports are technically legal and it's also possible to not have any inputs we
-        // can't just start with the first input.
-        let mut num_samples = None;
-        for channel_slices in inputs.iter().chain(outputs.iter()) {
-            for channel_slice in channel_slices {
-                match num_samples {
-                    Some(num_samples) if channel_slice.len() != num_samples => anyhow::bail!(
-                        "Inconsistent sample counts in audio buffers. Expected {}, found {}.",
-                        num_samples,
-                        channel_slice.len()
-                    ),
-                    Some(_) => (),
-                    None => num_samples = Some(channel_slice.len()),
-                }
-            }
-        }
+    /// handed to the plugin in the process function.
+    pub fn new_out_of_place_f32(config: &AudioPortConfig, num_samples: usize) -> Result<Self> {
+        assert!(num_samples > 0);
 
-        let input_channel_pointers: Vec<Vec<*const f32>> = inputs
-            .iter()
-            .map(|channel_slices| {
-                channel_slices
-                    .iter()
-                    .map(|channel_slice| channel_slice.as_ptr())
-                    .collect()
-            })
-            .collect();
-        // These are always `*const` pointers in CLAP, even for output buffers
-        let output_channel_pointers: Vec<Vec<*const f32>> = outputs
-            .iter()
-            .map(|channel_slices| {
-                channel_slices
-                    .iter()
-                    .map(|channel_slice| channel_slice.as_ptr())
-                    .collect()
-            })
-            .collect();
+        let mut buffers = vec![];
+        let mut pointers = vec![];
+        let mut clap_inputs = vec![];
+        let mut clap_outputs = vec![];
 
-        let clap_inputs: Vec<clap_audio_buffer> = input_channel_pointers
-            .iter()
-            .map(|channel_pointers| clap_audio_buffer {
-                data32: channel_pointers.as_ptr(),
+        for (port, index) in config.inputs.iter().zip(0u32..) {
+            let bus_data: Vec<Vec<f32>> =
+                vec![vec![0.0f32; num_samples]; port.num_channels as usize];
+            let bus_ptrs: Vec<*const ()> = bus_data
+                .iter()
+                .map(|channel| channel.as_ptr() as *const _)
+                .collect();
+
+            clap_inputs.push(clap_audio_buffer {
+                data32: bus_ptrs.as_ptr() as *const *const f32,
                 data64: std::ptr::null(),
-                channel_count: channel_pointers.len() as u32,
+                channel_count: port.num_channels,
                 // TODO: Do some interesting tests with these two fields
                 latency: 0,
                 constant_mask: 0,
-            })
-            .collect();
-        let clap_outputs: Vec<clap_audio_buffer> = output_channel_pointers
-            .iter()
-            .map(|channel_pointers| clap_audio_buffer {
-                data32: channel_pointers.as_ptr(),
+            });
+            buffers.push(AudioBuffer::Float32 {
+                input: Some(index),
+                output: None,
+                data: bus_data,
+            });
+            pointers.push(bus_ptrs);
+        }
+
+        for (port, index) in config.outputs.iter().zip(0u32..) {
+            let bus_data: Vec<Vec<f32>> =
+                vec![vec![0.0f32; num_samples]; port.num_channels as usize];
+            let bus_ptrs: Vec<*const ()> = bus_data
+                .iter()
+                .map(|channel| channel.as_ptr() as *const _)
+                .collect();
+
+            clap_outputs.push(clap_audio_buffer {
+                data32: bus_ptrs.as_ptr() as *const *const f32,
                 data64: std::ptr::null(),
-                channel_count: channel_pointers.len() as u32,
+                channel_count: port.num_channels,
+                // TODO: Do some interesting tests with these two fields
                 latency: 0,
                 constant_mask: 0,
-            })
-            .collect();
+            });
+            buffers.push(AudioBuffer::Float32 {
+                input: None,
+                output: Some(index),
+                data: bus_data,
+            });
+            pointers.push(bus_ptrs);
+        }
 
         Ok(Self {
-            inputs,
-            outputs,
-            _input_channel_pointers: input_channel_pointers,
-            _output_channel_pointers: output_channel_pointers,
+            buffers,
+            _pointers: pointers,
             clap_inputs,
             clap_outputs,
-
-            // This cannot default to 0, because 0 isn't a valid buffer size in CLAP
-            num_samples: num_samples.unwrap_or(512),
+            num_samples,
         })
     }
+
+    // pub fn new_in_place_f32(config: &AudioPortConfig, num_samples: usize) -> Result<Self> {
+    //     assert!(num_samples > 0);
+
+    //     let mut buffers = vec![];
+    //     let mut pointers = vec![];
+    //     let mut clap_inputs = vec![];
+    //     let mut clap_outputs = vec![];
+
+    //     for (port, index) in config.inputs.iter().zip(0u32..) {
+    //         let mut bus_data: Vec<Vec<f32>> =
+    //             vec![vec![0.0f32; num_samples]; port.num_channels as usize];
+    //         let mut bus_ptrs: Vec<*const ()> = bus_data
+    //             .iter()
+    //             .map(|channel| channel.as_ptr() as *const _)
+    //             .collect();
+    //         let bus_ptr = bus_ptrs.as_ptr();
+
+    //         pointers.push(bus_ptrs);
+    //         buffers.push(AudioBuffer::Float32 {
+    //             input: Some(index),
+    //             output: port.in_place_pair_idx.map(|x| x as u32),
+    //             data: bus_data,
+    //         });
+    //         clap_inputs.push(clap_audio_buffer {
+    //             data32: bus_ptrs.as_ptr() as *const *const f32,
+    //             data64: std::ptr::null(),
+    //             channel_count: port.num_channels,
+    //             // TODO: Do some interesting tests with these two fields
+    //             latency: 0,
+    //             constant_mask: 0,
+    //         });
+    //     }
+
+    //     for (port, index) in config.outputs.iter().zip(0u32..) {}
+
+    //     Ok(Self {
+    //         buffers,
+    //         _pointers: pointers,
+    //         clap_inputs,
+    //         clap_outputs,
+    //         num_samples,
+    //     })
+    // }
 
     /// The number of samples in the buffer.
     pub fn len(&self) -> usize {
@@ -372,62 +367,123 @@ impl<'a> OutOfPlaceAudioBuffers<'a> {
 
     /// Pointers for the inputs and the outputs. These can be used to construct the `clap_process`
     /// data.
-    pub fn io_buffers(&mut self) -> (&[clap_audio_buffer], &mut [clap_audio_buffer]) {
+    pub fn clap_buffers(&mut self) -> (&[clap_audio_buffer], &mut [clap_audio_buffer]) {
         (&self.clap_inputs, &mut self.clap_outputs)
+    }
+
+    pub fn buffers(&self) -> &[AudioBuffer] {
+        &self.buffers
+    }
+
+    pub fn fill_f32(&mut self, mut next: impl FnMut() -> f32) {
+        for bus in &mut self.buffers {
+            match bus {
+                AudioBuffer::Float32 { data, .. } => {
+                    for channel in data {
+                        for sample in channel {
+                            *sample = next();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn fill_f64(&mut self, mut next: impl FnMut() -> f64) {
+        for bus in &mut self.buffers {
+            match bus {
+                AudioBuffer::Float64 { data, .. } => {
+                    for channel in data {
+                        for sample in channel {
+                            *sample = next();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Fill the input and output buffers with white noise. The values are distributed between `[-1,
     /// 1]`, and denormals are snapped to zero.
     pub fn randomize(&mut self, prng: &mut Pcg32) {
-        randomize_audio_buffers(prng, self.inputs);
-        randomize_audio_buffers(prng, self.outputs);
+        self.fill_f32(|| {
+            let y = prng.gen_range(-1.0..=1.0f32);
+            if y.is_subnormal() {
+                0.0
+            } else {
+                y
+            }
+        });
+
+        self.fill_f64(|| {
+            let y = prng.gen_range(-1.0..=1.0f64);
+            if y.is_subnormal() {
+                0.0
+            } else {
+                y
+            }
+        });
     }
 }
 
-impl EventQueue<clap_input_events> {
+impl AudioBuffer {
+    pub fn is_input(&self) -> bool {
+        matches!(
+            self,
+            AudioBuffer::Float32 { input: Some(_), .. }
+                | AudioBuffer::Float64 { input: Some(_), .. }
+        )
+    }
+
+    pub fn is_output(&self) -> bool {
+        matches!(
+            self,
+            AudioBuffer::Float32 {
+                output: Some(_),
+                ..
+            } | AudioBuffer::Float64 {
+                output: Some(_),
+                ..
+            }
+        )
+    }
+}
+
+impl EventQueue {
     /// Construct a new event queue. This can be used as both an input and an output queue.
-    pub fn new_input() -> Pin<Box<Self>> {
-        let mut queue = Box::pin(EventQueue {
-            vtable: clap_input_events {
+    pub fn new() -> Pin<Box<Self>> {
+        let mut queue = Box::pin(Self {
+            vtable_input: clap_input_events {
                 // This is set to point to this object below
                 ctx: std::ptr::null_mut(),
                 size: Some(Self::size),
                 get: Some(Self::get),
             },
-            // Using a mutex here is obviously a terrible idea in a real host, but we're not a real
-            // host
-            events: Mutex::new(Vec::new()),
-        });
 
-        queue.vtable.ctx = &*queue as *const Self as *mut c_void;
-
-        queue
-    }
-}
-
-impl EventQueue<clap_output_events> {
-    /// Construct a new output event queue.
-    pub fn new_output() -> Pin<Box<Self>> {
-        let mut queue = Box::pin(EventQueue {
-            vtable: clap_output_events {
+            vtable_output: clap_output_events {
                 // This is set to point to this object below
                 ctx: std::ptr::null_mut(),
                 try_push: Some(Self::try_push),
             },
+
             // Using a mutex here is obviously a terrible idea in a real host, but we're not a real
             // host
             events: Mutex::new(Vec::new()),
         });
 
-        queue.vtable.ctx = &*queue as *const Self as *mut c_void;
-
+        queue.vtable_input.ctx = &*queue as *const Self as *mut c_void;
+        queue.vtable_output.ctx = &*queue as *const Self as *mut c_void;
         queue
     }
-}
 
-impl<VTable> EventQueue<VTable> {
-    pub fn vtable(self: &Pin<Box<Self>>) -> *const VTable {
-        &self.vtable
+    pub fn vtable_input(self: &Pin<Box<Self>>) -> *const clap_input_events {
+        &self.vtable_input
+    }
+
+    pub fn vtable_output(self: &Pin<Box<Self>>) -> *const clap_output_events {
+        &self.vtable_output
     }
 
     unsafe extern "C" fn size(list: *const clap_input_events) -> u32 {
@@ -514,20 +570,6 @@ impl Event {
             Event::ParamMod(event) => &event.header,
             Event::Midi(event) => &event.header,
             Event::Unknown(header) => header,
-        }
-    }
-}
-
-/// Set each sample in the buffers to a random value in `[-1, 1]`. Denormals are snapped to zero.
-fn randomize_audio_buffers(prng: &mut Pcg32, buffers: &mut [Vec<Vec<f32>>]) {
-    for channel_slices in buffers {
-        for channel_slice in channel_slices {
-            for sample in channel_slice {
-                *sample = prng.gen_range(-1.0..=1.0);
-                if sample.is_subnormal() {
-                    *sample = 0.0;
-                }
-            }
         }
     }
 }

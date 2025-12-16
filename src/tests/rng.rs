@@ -105,10 +105,10 @@ impl NoteGenerator {
     ///
     /// Returns an error if generating random events failed. This can happen if the plugin doesn't
     /// support any note event types.
-    pub fn fill_event_queue<VTable>(
+    pub fn fill_event_queue(
         &mut self,
         prng: &mut Pcg32,
-        queue: &EventQueue<VTable>,
+        queue: &EventQueue,
         num_samples: u32,
     ) -> Result<()> {
         if self.config.inputs.is_empty() {

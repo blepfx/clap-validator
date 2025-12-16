@@ -7,15 +7,15 @@ use rand::Rng;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-use super::processing::ProcessingTest;
 use super::PluginTestCase;
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::NotePorts;
 use crate::plugin::ext::params::Params;
 use crate::plugin::ext::Extension;
 use crate::plugin::host::Host;
-use crate::plugin::instance::process::{Event, ProcessConfig};
+use crate::plugin::instance::process::{AudioBuffers, Event};
 use crate::plugin::library::PluginLibrary;
+use crate::tests::plugin::ProcessingTest;
 use crate::tests::rng::{new_prng, NoteGenerator, ParamFuzzer};
 use crate::tests::{TestCase, TestStatus};
 
@@ -215,7 +215,8 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str) -> Result
     let audio_ports_config = audio_ports
         .map(|ports| ports.config())
         .transpose()
-        .context("Could not fetch the plugin's audio port config")?;
+        .context("Could not fetch the plugin's audio port config")?
+        .unwrap_or_default();
     let note_ports_config = note_ports
         .map(|ports| ports.config())
         .transpose()
@@ -236,41 +237,35 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str) -> Result
     // to a file if the test fails
     let mut current_events: Option<Vec<Event>>;
     let mut previous_events: Option<Vec<Event>> = None;
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE)?;
 
-    let (mut input_buffers, mut output_buffers) = audio_ports_config
-        .unwrap_or_default()
-        .create_buffers(BUFFER_SIZE);
     for permutation_no in 1..=FUZZ_NUM_PERMUTATIONS {
         current_events = Some(param_fuzzer.randomize_params_at(&mut prng, 0).collect());
 
         let mut have_set_parameters = false;
-        let run_result =
-            ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?
-                .run(
-                    FUZZ_RUNS_PER_PERMUTATION,
-                    ProcessConfig::default(),
-                    |process_data| {
-                        if !have_set_parameters {
-                            *process_data.input_events.events.lock() =
-                                current_events.clone().unwrap();
-                            have_set_parameters = true;
-                        }
+        let run_result = ProcessingTest::new(&plugin, &mut audio_buffers).run(
+            FUZZ_RUNS_PER_PERMUTATION,
+            |process_data| {
+                if !have_set_parameters {
+                    *process_data.input_events.events.lock() = current_events.clone().unwrap();
+                    have_set_parameters = true;
+                }
 
-                        // Audio and MIDI/note events are randomized in accordance to what the plugin
-                        // supports
-                        if let Some(note_event_rng) = note_event_rng.as_mut() {
-                            // This includes a sort if `random_param_set_events` also contained a queue
-                            note_event_rng.fill_event_queue(
-                                &mut prng,
-                                &process_data.input_events,
-                                BUFFER_SIZE as u32,
-                            )?;
-                        }
-                        process_data.buffers.randomize(&mut prng);
+                // Audio and MIDI/note events are randomized in accordance to what the plugin
+                // supports
+                if let Some(note_event_rng) = note_event_rng.as_mut() {
+                    // This includes a sort if `random_param_set_events` also contained a queue
+                    note_event_rng.fill_event_queue(
+                        &mut prng,
+                        &process_data.input_events,
+                        BUFFER_SIZE as u32,
+                    )?;
+                }
+                process_data.buffers.randomize(&mut prng);
 
-                        Ok(())
-                    },
-                );
+                Ok(())
+            },
+        );
 
         // If the run failed we'll want to write the parameter values to a file first
         if run_result.is_err() {
@@ -374,6 +369,7 @@ pub fn test_param_set_wrong_namespace(
     let param_fuzzer = ParamFuzzer::new(&param_infos);
     let mut random_param_set_events: Vec<_> =
         param_fuzzer.randomize_params_at(&mut prng, 0).collect();
+
     for event in random_param_set_events.iter_mut() {
         match event {
             Event::ParamValue(event) => event.header.space_id = INCORRECT_NAMESPACE_ID,
@@ -381,15 +377,12 @@ pub fn test_param_set_wrong_namespace(
         }
     }
 
-    let (mut input_buffers, mut output_buffers) = audio_ports_config.create_buffers(BUFFER_SIZE);
-    ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?.run_once(
-        ProcessConfig::default(),
-        move |process_data| {
-            *process_data.input_events.events.lock() = random_param_set_events;
-
-            Ok(())
-        },
-    )?;
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE)?;
+    ProcessingTest::new(&plugin, &mut audio_buffers).run_once(|process_data| {
+        process_data.buffers.randomize(&mut prng);
+        *process_data.input_events.events.lock() = random_param_set_events;
+        Ok(())
+    })?;
 
     // We'll check that the plugin has these sames values after reloading the state. These values
     // are rounded to the tenth decimal to provide some leeway in the serialization and

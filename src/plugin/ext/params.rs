@@ -1,7 +1,6 @@
 //! Abstractions for interacting with the `params` extension.
 
 use anyhow::{Context, Result};
-use clap_sys::events::{clap_input_events, clap_output_events};
 use clap_sys::ext::params::{
     clap_param_info, clap_param_info_flags, clap_plugin_params, CLAP_EXT_PARAMS,
     CLAP_PARAM_IS_AUTOMATABLE, CLAP_PARAM_IS_AUTOMATABLE_PER_CHANNEL,
@@ -327,11 +326,7 @@ impl Params<'_> {
     /// # Panics
     ///
     /// Panics if the plugin is active.
-    pub fn flush(
-        &self,
-        input_events: &Pin<Box<EventQueue<clap_input_events>>>,
-        output_events: &Pin<Box<EventQueue<clap_output_events>>>,
-    ) {
+    pub fn flush(&self, input_events: &Pin<Box<EventQueue>>, output_events: &Pin<Box<EventQueue>>) {
         // This may only be called on the audio thread when the plugin is active. This object is the
         // main thread interface for the parameters extension.
         assert_plugin_state_lt!(self, PluginStatus::Activated);
@@ -341,8 +336,8 @@ impl Params<'_> {
         unsafe_clap_call! {
             params=>flush(
                 plugin,
-                input_events.vtable(),
-                output_events.vtable(),
+                input_events.vtable_input(),
+                output_events.vtable_output(),
             )
         };
     }

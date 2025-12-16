@@ -5,18 +5,17 @@ use clap_sys::id::clap_id;
 use std::collections::BTreeMap;
 use std::io::Write;
 
+use super::PluginTestCase;
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::params::{ParamInfo, Params};
 use crate::plugin::ext::state::State;
 use crate::plugin::ext::Extension;
 use crate::plugin::host::Host;
-use crate::plugin::instance::process::{Event, EventQueue, ProcessConfig};
+use crate::plugin::instance::process::{AudioBuffers, Event, EventQueue};
 use crate::plugin::library::PluginLibrary;
+use crate::tests::plugin::ProcessingTest;
 use crate::tests::rng::{new_prng, ParamFuzzer};
 use crate::tests::{TestCase, TestStatus};
-
-use super::processing::ProcessingTest;
-use super::PluginTestCase;
 
 /// The file name we'll use to dump the expected state when a test fails.
 const EXPECTED_STATE_FILE_NAME: &str = "state-expected";
@@ -137,13 +136,11 @@ pub fn test_state_reproducibility_null_cookies(
             }
         }
 
-        let (mut input_buffers, mut output_buffers) = audio_ports_config.create_buffers(512);
-        ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?
-            .run_once(ProcessConfig::default(), move |process_data| {
-                *process_data.input_events.events.lock() = random_param_set_events;
-
-                Ok(())
-            })?;
+        let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512)?;
+        ProcessingTest::new(&plugin, &mut audio_buffers).run_once(move |process_data| {
+            *process_data.input_events.events.lock() = random_param_set_events;
+            Ok(())
+        })?;
 
         // We'll check that the plugin has these sames values after reloading the state. These
         // values are rounded to the tenth decimal to provide some leeway in the serialization and
@@ -305,9 +302,9 @@ pub fn test_state_reproducibility_flush(
         let random_param_set_events: Vec<_> =
             param_fuzzer.randomize_params_at(&mut prng, 0).collect();
 
-        let input_events = EventQueue::new_input();
+        let input_events = EventQueue::new();
+        let output_events = EventQueue::new();
         *input_events.events.lock() = random_param_set_events.clone();
-        let output_events = EventQueue::new_output();
         params.flush(&input_events, &output_events);
         host.handle_callbacks_once();
 
@@ -400,16 +397,12 @@ pub fn test_state_reproducibility_flush(
         }
     }
 
-    // In theprevious pass we used flush, and here we use the process funciton
-    let (mut input_buffers, mut output_buffers) = audio_ports_config.create_buffers(512);
-    ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?.run_once(
-        ProcessConfig::default(),
-        move |process_data| {
-            *process_data.input_events.events.lock() = new_random_param_set_events;
-
-            Ok(())
-        },
-    )?;
+    // In the previous pass we used flush, and here we use the process funciton
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512)?;
+    ProcessingTest::new(&plugin, &mut audio_buffers).run_once(move |process_data| {
+        *process_data.input_events.events.lock() = new_random_param_set_events;
+        Ok(())
+    })?;
 
     let actual_param_values: BTreeMap<clap_id, f64> = expected_param_values
         .keys()
@@ -495,7 +488,6 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
                 })
             }
         };
-        host.handle_callbacks_once();
 
         let param_infos = params
             .info()
@@ -503,13 +495,12 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
         let param_fuzzer = ParamFuzzer::new(&param_infos);
         let random_param_set_events: Vec<_> =
             param_fuzzer.randomize_params_at(&mut prng, 0).collect();
-        let (mut input_buffers, mut output_buffers) = audio_ports_config.create_buffers(512);
-        ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?
-            .run_once(ProcessConfig::default(), move |process_data| {
-                *process_data.input_events.events.lock() = random_param_set_events;
 
-                Ok(())
-            })?;
+        let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512)?;
+        ProcessingTest::new(&plugin, &mut audio_buffers).run_once(move |process_data| {
+            *process_data.input_events.events.lock() = random_param_set_events;
+            Ok(())
+        })?;
 
         let expected_param_values: BTreeMap<clap_id, f64> = param_infos
             .keys()

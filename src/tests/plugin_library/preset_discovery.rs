@@ -9,16 +9,13 @@ use crate::plugin::ext::audio_ports::AudioPorts;
 use crate::plugin::ext::preset_load::PresetLoad;
 use crate::plugin::ext::Extension;
 use crate::plugin::host::Host;
-use crate::plugin::instance::process::ProcessConfig;
+use crate::plugin::instance::process::AudioBuffers;
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::preset_discovery::{LocationValue, PluginAbi, Preset, PresetFile};
 use crate::tests::plugin::ProcessingTest;
 use crate::tests::TestStatus;
 
 // TODO: Test for duplicate locations and soundpacks in declared data across all providers
-
-/// The fixed buffer size to use for these tests.
-const BUFFER_SIZE: usize = 512;
 
 /// The test for `PluginLibraryTestCase::PresetDiscoveryCrawl`. Makes sure that all of a plugin's
 /// reported preset locations can be crawled successfully. If `load_presets` is enabled, then the
@@ -143,10 +140,10 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
             let audio_ports_config = audio_ports
                 .map(|ports| ports.config())
                 .transpose()
-                .context("Could not fetch the plugin's audio port config")?;
-            let (mut input_buffers, mut output_buffers) = audio_ports_config
-                .unwrap_or_default()
-                .create_buffers(BUFFER_SIZE);
+                .context("Could not fetch the plugin's audio port config")?
+                .unwrap_or_default();
+
+            let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512)?;
 
             for LoadablePreset {
                 location,
@@ -181,8 +178,8 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
 
                 // We'll process a single buffer of silent audio just to make sure everything's
                 // settled in
-                ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?
-                    .run_once(ProcessConfig::default(), |_| Ok(()))
+                ProcessingTest::new(&plugin, &mut audio_buffers)
+                    .run_once(move |_| Ok(()))
                     .with_context(|| {
                         format!(
                             "Error while processing an audio buffer after loading a preset for \

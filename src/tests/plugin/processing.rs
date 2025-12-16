@@ -4,9 +4,7 @@ use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::NotePorts;
 use crate::plugin::ext::Extension;
 use crate::plugin::host::Host;
-use crate::plugin::instance::process::{
-    AudioBuffers, OutOfPlaceAudioBuffers, ProcessConfig, ProcessData,
-};
+use crate::plugin::instance::process::{AudioBuffer, AudioBuffers, ProcessConfig, ProcessData};
 use crate::plugin::instance::Plugin;
 use crate::plugin::library::PluginLibrary;
 use crate::tests::rng::{new_prng, NoteGenerator};
@@ -16,53 +14,65 @@ use rand::Rng;
 use std::sync::atomic::Ordering;
 
 /// A helper to handle the boilerplate that comes with testing a plugin's audio processing behavior.
+/// Run the standard audio processing test for a still **deactivated** plugin. This calls the
+/// process function `num_iters` times, and checks the output for consistency each time.
+///
+/// The `Preprocess` closure is called before each processing cycle to allow the process data to be
+/// modified for the next process cycle.
+///
+/// Main-thread callbacks that were made to the plugin while the audio thread was active are
+/// handled implicitly.
 pub struct ProcessingTest<'a> {
     plugin: &'a Plugin<'a>,
-    audio_buffers: AudioBuffers<'a>,
+    buffers: &'a mut AudioBuffers,
+    config: ProcessConfig,
+    check_denormals: bool,
 }
 
 impl<'a> ProcessingTest<'a> {
-    /// Construct a new processing test using out-of-place processing. This allocates the CLAP audio
-    /// buffer structs needed for the test. Returns an error if the the inner vectors don't all have
-    /// the same length.
-    pub fn new_out_of_place(
-        plugin: &'a Plugin<'a>,
-        input_buffers: &'a mut [Vec<Vec<f32>>],
-        output_buffers: &'a mut [Vec<Vec<f32>>],
-    ) -> Result<Self> {
-        Ok(Self {
+    pub fn new(plugin: &'a Plugin<'a>, buffers: &'a mut AudioBuffers) -> Self {
+        Self {
             plugin,
-            audio_buffers: AudioBuffers::OutOfPlace(OutOfPlaceAudioBuffers::new(
-                input_buffers,
-                output_buffers,
-            )?),
-        })
+            buffers,
+            config: ProcessConfig::default(),
+            check_denormals: true,
+        }
     }
 
-    /// Run the standard audio processing test for a still **deactivated** plugin. This calls the
-    /// process function `num_iters` times, and checks the output for consistency each time.
-    ///
-    /// The `Preprocess` closure is called before each processing cycle to allow the process data to be
-    /// modified for the next process cycle.
-    ///
-    /// Main-thread callbacks that were made to the plugin while the audio thread was active are
-    /// handled implicitly.
-    pub fn run<Preprocess>(
-        &'a mut self,
-        num_iters: usize,
-        process_config: ProcessConfig,
-        mut preprocess: Preprocess,
-    ) -> Result<()>
+    #[allow(unused)] //TODO: use this for future denormal tests
+    pub fn allow_denormals(self) -> Self {
+        Self {
+            check_denormals: false,
+            ..self
+        }
+    }
+
+    pub fn with_sample_rate(self, sample_rate: f64) -> Self {
+        Self {
+            config: ProcessConfig {
+                sample_rate,
+                ..self.config
+            },
+            ..self
+        }
+    }
+
+    pub fn run<Preprocess>(self, num_iters: usize, mut preprocess: Preprocess) -> Result<()>
     where
         Preprocess: FnMut(&mut ProcessData) -> Result<()> + Send,
     {
+        // Handle callbacks the plugin may have made during init or these queries. The
+        // `ProcessingTest::run*` functions will implicitly handle all outstanding callbacks before they
+        // return.
+        self.plugin.host().handle_callbacks_once();
+
         self.plugin
             .state
             .requested_restart
             .store(false, Ordering::SeqCst);
 
-        let buffer_size = self.audio_buffers.len();
-        let mut process_data = ProcessData::new(&mut self.audio_buffers, process_config);
+        let buffer_size = self.buffers.len();
+        let mut process_data = ProcessData::new(self.buffers, self.config);
 
         // If the plugin requests a restart in the middle of processing, then the plugin will be
         // stopped, deactivated, reactivated, and started again. Because of that, we need to keep
@@ -70,7 +80,7 @@ impl<'a> ProcessingTest<'a> {
         let mut iters_done = 0;
         while iters_done < num_iters {
             self.plugin
-                .activate(process_config.sample_rate, 1, buffer_size)?;
+                .activate(self.config.sample_rate, 1, buffer_size)?;
 
             self.plugin.on_audio_thread(|plugin| -> Result<()> {
                 plugin.start_processing()?;
@@ -84,19 +94,17 @@ impl<'a> ProcessingTest<'a> {
 
                     // We'll check that the plugin hasn't modified the input buffers after the
                     // test
-                    let original_input_buffers = process_data.buffers.inputs_ref().to_owned();
+                    let original_buffers = process_data.buffers.clone();
 
                     plugin
                         .process(&mut process_data)
                         .context("Error during audio processing")?;
 
-                    // When we add in-place processing this will need some slightly different checks
-                    match process_data.buffers {
-                        AudioBuffers::OutOfPlace(_) => check_out_of_place_output_consistency(
-                            &process_data,
-                            &original_input_buffers,
-                        ),
-                    }
+                    check_process_call_consistency(
+                        &process_data,
+                        original_buffers,
+                        self.check_denormals,
+                    )
                     .with_context(|| {
                         format!(
                             "Failed during processing cycle {} out of {}",
@@ -139,66 +147,15 @@ impl<'a> ProcessingTest<'a> {
         Ok(())
     }
 
-    /// Run the standard audio processing test for a still **deactivated** plugin. This is identical
-    /// to the [`run()`][Self::run()] function, except that it does exactly one processing cycle and
-    /// thus non-copy values can be moved into the closure.
-    ///
-    /// Main-thread callbacks that were made to the plugin while the audio thread was active are
-    /// handled implicitly.
-    pub fn run_once<Preprocess>(
-        &'a mut self,
-        process_config: ProcessConfig,
-        preprocess: Preprocess,
-    ) -> Result<()>
+    pub fn run_once<Preprocess>(self, preprocess: Preprocess) -> Result<()>
     where
         Preprocess: FnOnce(&mut ProcessData) -> Result<()> + Send,
     {
-        self.plugin
-            .state
-            .requested_restart
-            .store(false, Ordering::SeqCst);
-
-        let buffer_size = self.audio_buffers.len();
-        let mut process_data = ProcessData::new(&mut self.audio_buffers, process_config);
-
-        self.plugin
-            .activate(process_config.sample_rate, 1, buffer_size)?;
-
-        self.plugin.on_audio_thread(|plugin| -> Result<()> {
-            plugin.start_processing()?;
-
-            preprocess(&mut process_data)?;
-
-            // We'll check that the plugin hasn't modified the input buffers after the
-            // test
-            let original_input_buffers = process_data.buffers.inputs_ref().to_owned();
-
-            plugin
-                .process(&mut process_data)
-                .context("Error during audio processing")?;
-
-            // When we add in-place processing this will need some slightly different checks
-            match process_data.buffers {
-                AudioBuffers::OutOfPlace(_) => {
-                    check_out_of_place_output_consistency(&process_data, &original_input_buffers)
-                }
-            }
-            .context("Failed during processing")?;
-
-            process_data.clear_events();
-            process_data.advance_transport(process_data.block_size);
-
-            plugin.stop_processing();
-
-            Ok(())
-        })?;
-
-        self.plugin.deactivate();
-
-        // Handle callbacks the plugin may have made during deactivate
-        self.plugin.host().handle_callbacks_once();
-
-        Ok(())
+        let mut preprocess = Some(preprocess);
+        self.run(1, |data| match preprocess.take() {
+            Some(preprocess) => preprocess(data),
+            None => unreachable!(),
+        })
     }
 }
 
@@ -228,21 +185,12 @@ pub fn test_process_audio_out_of_place_basic(
             })
         }
     };
-    // Handle callbacks the plugin may have made during init or these queries. The
-    // `ProcessingTest::run*` functions will implicitly handle all outstanding callbacks before they
-    // return.
-    host.handle_callbacks_once();
 
-    let (mut input_buffers, mut output_buffers) = audio_ports_config.create_buffers(512);
-    ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?.run(
-        5,
-        ProcessConfig::default(),
-        |process_data| {
-            process_data.buffers.randomize(&mut prng);
-
-            Ok(())
-        },
-    )?;
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512)?;
+    ProcessingTest::new(&plugin, &mut audio_buffers).run(5, |process_data| {
+        process_data.buffers.randomize(&mut prng);
+        Ok(())
+    })?;
 
     // The `Host` contains built-in thread safety checks
     host.callback_error_check()
@@ -294,28 +242,20 @@ pub fn test_process_note_out_of_place_basic(
             )),
         });
     }
-    host.handle_callbacks_once();
 
     // We'll fill the input event queue with (consistent) random CLAP note and/or MIDI
     // events depending on what's supported by the plugin supports
     let mut note_event_rng = NoteGenerator::new(note_ports_config);
-
-    const BUFFER_SIZE: usize = 512;
-    let (mut input_buffers, mut output_buffers) = audio_ports_config.create_buffers(BUFFER_SIZE);
-    ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?.run(
-        5,
-        ProcessConfig::default(),
-        |process_data| {
-            note_event_rng.fill_event_queue(
-                &mut prng,
-                &process_data.input_events,
-                BUFFER_SIZE as u32,
-            )?;
-            process_data.buffers.randomize(&mut prng);
-
-            Ok(())
-        },
-    )?;
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512)?;
+    ProcessingTest::new(&plugin, &mut audio_buffers).run(5, |process_data| {
+        process_data.buffers.randomize(&mut prng);
+        note_event_rng.fill_event_queue(
+            &mut prng,
+            &process_data.input_events,
+            process_data.block_size,
+        )?;
+        Ok(())
+    })?;
 
     host.callback_error_check()
         .context("An error occured during a host callback")?;
@@ -369,24 +309,18 @@ pub fn test_process_note_inconsistent(
 
     // This RNG (Random Note Generator) allows generates mismatching events
     let mut note_event_rng = NoteGenerator::new(note_port_config).with_inconsistent_events();
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512)?;
 
     // TODO: Use in-place processing for this test
-    const BUFFER_SIZE: usize = 512;
-    let (mut input_buffers, mut output_buffers) = audio_ports_config.create_buffers(BUFFER_SIZE);
-    ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?.run(
-        5,
-        ProcessConfig::default(),
-        |process_data| {
-            note_event_rng.fill_event_queue(
-                &mut prng,
-                &process_data.input_events,
-                BUFFER_SIZE as u32,
-            )?;
-            process_data.buffers.randomize(&mut prng);
-
-            Ok(())
-        },
-    )?;
+    ProcessingTest::new(&plugin, &mut audio_buffers).run(5, |process_data| {
+        process_data.buffers.randomize(&mut prng);
+        note_event_rng.fill_event_queue(
+            &mut prng,
+            &process_data.input_events,
+            process_data.block_size,
+        )?;
+        Ok(())
+    })?;
 
     host.callback_error_check()
         .context("An error occured during a host callback")?;
@@ -427,34 +361,25 @@ pub fn test_process_varying_sample_rates(
         None => None,
     };
 
-    const BUFFER_SIZE: usize = 512;
-    let (mut input_buffers, mut output_buffers) = audio_ports_config.create_buffers(BUFFER_SIZE);
-
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512)?;
     for &sample_rate in SAMPLE_RATES {
-        host.handle_callbacks_once();
-
         let mut note_event_rng = note_ports_config.clone().map(NoteGenerator::new);
 
-        ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?
-            .run(
-                5,
-                ProcessConfig {
-                    sample_rate,
-                    ..ProcessConfig::default()
-                },
-                |process_data| {
-                    if let Some(note_event_rng) = note_event_rng.as_mut() {
-                        note_event_rng.fill_event_queue(
-                            &mut prng,
-                            &process_data.input_events,
-                            BUFFER_SIZE as u32,
-                        )?;
-                    }
+        ProcessingTest::new(&plugin, &mut audio_buffers)
+            .with_sample_rate(sample_rate)
+            .run(5, |process_data| {
+                process_data.buffers.randomize(&mut prng);
 
-                    process_data.buffers.randomize(&mut prng);
-                    Ok(())
-                },
-            )
+                if let Some(note_event_rng) = note_event_rng.as_mut() {
+                    note_event_rng.fill_event_queue(
+                        &mut prng,
+                        &process_data.input_events,
+                        process_data.block_size,
+                    )?;
+                }
+
+                Ok(())
+            })
             .context(format!(
                 "Error while processing with {:.2}hz sample rate",
                 sample_rate
@@ -501,23 +426,22 @@ pub fn test_process_varying_block_sizes(
     };
 
     for &buffer_size in BLOCK_SIZES {
-        host.handle_callbacks_once();
-
         let mut note_event_rng = note_ports_config.clone().map(NoteGenerator::new);
-        let (mut input_buffers, mut output_buffers) =
-            audio_ports_config.create_buffers(buffer_size as usize);
+        let mut audio_buffers =
+            AudioBuffers::new_out_of_place_f32(&audio_ports_config, buffer_size as usize)?;
 
-        ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?
-            .run(5, ProcessConfig::default(), |process_data| {
+        ProcessingTest::new(&plugin, &mut audio_buffers)
+            .run(5, |process_data| {
+                process_data.buffers.randomize(&mut prng);
+
                 if let Some(note_event_rng) = note_event_rng.as_mut() {
                     note_event_rng.fill_event_queue(
                         &mut prng,
                         &process_data.input_events,
-                        buffer_size,
+                        process_data.block_size,
                     )?;
                 }
 
-                process_data.buffers.randomize(&mut prng);
                 Ok(())
             })
             .context(format!(
@@ -537,6 +461,8 @@ pub fn test_process_random_block_sizes(
     library: &PluginLibrary,
     plugin_id: &str,
 ) -> Result<TestStatus> {
+    const MAX_BUFFER_SIZE: u32 = 2048;
+
     let mut prng = new_prng();
 
     let host = Host::new();
@@ -562,33 +488,28 @@ pub fn test_process_random_block_sizes(
     };
 
     let mut note_event_rng = note_ports_config.map(NoteGenerator::new);
+    let mut audio_buffers =
+        AudioBuffers::new_out_of_place_f32(&audio_ports_config, MAX_BUFFER_SIZE as usize)?;
 
-    host.handle_callbacks_once();
+    ProcessingTest::new(&plugin, &mut audio_buffers).run(20, |process_data| {
+        process_data.block_size = if prng.gen_bool(0.8) {
+            prng.gen_range(2..=MAX_BUFFER_SIZE)
+        } else {
+            1
+        };
 
-    const BUFFER_SIZE: usize = 2048;
-    let (mut input_buffers, mut output_buffers) = audio_ports_config.create_buffers(BUFFER_SIZE);
-    ProcessingTest::new_out_of_place(&plugin, &mut input_buffers, &mut output_buffers)?.run(
-        20,
-        ProcessConfig::default(),
-        |process_data| {
-            process_data.block_size = if prng.gen_bool(0.8) {
-                prng.gen_range(1..=BUFFER_SIZE as u32)
-            } else {
-                1
-            };
+        process_data.buffers.randomize(&mut prng);
 
-            process_data.buffers.randomize(&mut prng);
-            if let Some(note_event_rng) = note_event_rng.as_mut() {
-                note_event_rng.fill_event_queue(
-                    &mut prng,
-                    &process_data.input_events,
-                    process_data.block_size,
-                )?;
-            }
+        if let Some(note_event_rng) = note_event_rng.as_mut() {
+            note_event_rng.fill_event_queue(
+                &mut prng,
+                &process_data.input_events,
+                process_data.block_size,
+            )?;
+        }
 
-            Ok(())
-        },
-    )?;
+        Ok(())
+    })?;
 
     host.callback_error_check()
         .context("An error occured during a host callback")?;
@@ -599,37 +520,83 @@ pub fn test_process_random_block_sizes(
 /// The process for consistency. This verifies that the output buffer doesn't contain any NaN,
 /// infinite, or denormal values, that the input buffers have not been modified by the plugin, and
 /// that the output event queue is monotonically ordered.
-fn check_out_of_place_output_consistency(
+fn check_process_call_consistency(
     process_data: &ProcessData,
-    original_input_buffers: &[Vec<Vec<f32>>],
+    original_buffers: AudioBuffers,
+    check_denormals: bool,
 ) -> Result<()> {
-    // The input buffer must not be overwritten during out of place processing, and the outputs
-    // should not contain any non-finite or denormal values
-    let num_samples = process_data.buffers.len() as u32;
-    let input_buffers = process_data.buffers.inputs_ref();
-    let output_buffers = process_data.buffers.outputs_ref();
-    if input_buffers != original_input_buffers {
-        anyhow::bail!(
-            "The plugin has overwritten the input buffers during out-of-place processing."
-        );
-    }
-    for (port_idx, channel_slices) in output_buffers.iter().enumerate() {
-        for (channel_idx, channel_slice) in channel_slices.iter().enumerate() {
-            for (sample_idx, sample) in channel_slice
-                .iter()
-                .enumerate()
-                .take(process_data.block_size as usize)
-            {
-                if !sample.is_finite() {
-                    anyhow::bail!(
-                        "The sample written to output port {port_idx}, channel {channel_idx}, and \
-                         sample index {sample_idx} is {sample:?}."
-                    );
-                } else if sample.is_subnormal() {
-                    anyhow::bail!(
-                        "The sample written to output port {port_idx}, channel {channel_idx}, and \
-                         sample index {sample_idx} is subnormal ({sample:?})."
-                    );
+    let block_size = process_data.block_size as usize;
+
+    for (buffer, before) in process_data
+        .buffers
+        .buffers()
+        .iter()
+        .zip(original_buffers.buffers())
+    {
+        // Input buffers must not be overwritten during out of place processing
+        if buffer.is_input() && !buffer.is_output() {
+            let matches = match (buffer, before) {
+                (
+                    AudioBuffer::Float32 { data: after, .. },
+                    AudioBuffer::Float32 { data: before, .. },
+                ) => after == before,
+
+                (
+                    AudioBuffer::Float64 { data: after, .. },
+                    AudioBuffer::Float64 { data: before, .. },
+                ) => after == before,
+
+                _ => unreachable!(),
+            };
+
+            if !matches {
+                anyhow::bail!(
+                    "The plugin has overwritten the input buffers during out-of-place processing."
+                );
+            }
+        }
+
+        // Output buffers must not contain any non-finite or denormal values
+        if buffer.is_output() {
+            match buffer {
+                AudioBuffer::Float32 { data, output, .. } => {
+                    let port_idx = output.unwrap();
+                    for (channel_idx, channel) in data.iter().enumerate() {
+                        for (sample_idx, sample) in channel.iter().enumerate().take(block_size) {
+                            if !sample.is_finite() {
+                                anyhow::bail!(
+                                    "The sample written to output port {port_idx}, channel \
+                                     {channel_idx}, and sample index {sample_idx} is {sample:?}."
+                                );
+                            } else if sample.is_subnormal() && check_denormals {
+                                anyhow::bail!(
+                                    "The sample written to output port {port_idx}, channel \
+                                     {channel_idx}, and sample index {sample_idx} is subnormal \
+                                     ({sample:?})."
+                                );
+                            }
+                        }
+                    }
+                }
+
+                AudioBuffer::Float64 { data, output, .. } => {
+                    let port_idx = output.unwrap();
+                    for (channel_idx, channel) in data.iter().enumerate() {
+                        for (sample_idx, sample) in channel.iter().enumerate().take(block_size) {
+                            if !sample.is_finite() {
+                                anyhow::bail!(
+                                    "The sample written to output port {port_idx}, channel \
+                                     {channel_idx}, and sample index {sample_idx} is {sample:?}."
+                                );
+                            } else if sample.is_subnormal() && check_denormals {
+                                anyhow::bail!(
+                                    "The sample written to output port {port_idx}, channel \
+                                     {channel_idx}, and sample index {sample_idx} is subnormal \
+                                     ({sample:?})."
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -649,10 +616,10 @@ fn check_out_of_place_output_consistency(
         last_event_time = event_time;
     }
 
-    if last_event_time >= num_samples {
+    if last_event_time >= block_size as u32 {
         anyhow::bail!(
             "The plugin output an event for sample {last_event_time} but the audio buffer only \
-             contains {num_samples} samples."
+             contains {block_size} samples."
         )
     }
 

@@ -237,7 +237,7 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str) -> Result
     // to a file if the test fails
     let mut current_events: Option<Vec<Event>>;
     let mut previous_events: Option<Vec<Event>> = None;
-    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE)?;
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
 
     for permutation_no in 1..=FUZZ_NUM_PERMUTATIONS {
         current_events = Some(param_fuzzer.randomize_params_at(&mut prng, 0).collect());
@@ -377,7 +377,7 @@ pub fn test_param_set_wrong_namespace(
         }
     }
 
-    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE)?;
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
     ProcessingTest::new(&plugin, &mut audio_buffers).run_once(|process_data| {
         process_data.buffers.randomize(&mut prng);
         *process_data.input_events.events.lock() = random_param_set_events;

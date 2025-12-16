@@ -136,7 +136,7 @@ pub fn test_state_reproducibility_null_cookies(
             }
         }
 
-        let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512)?;
+        let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
         ProcessingTest::new(&plugin, &mut audio_buffers).run_once(move |process_data| {
             *process_data.input_events.events.lock() = random_param_set_events;
             Ok(())
@@ -398,7 +398,7 @@ pub fn test_state_reproducibility_flush(
     }
 
     // In the previous pass we used flush, and here we use the process funciton
-    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512)?;
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
     ProcessingTest::new(&plugin, &mut audio_buffers).run_once(move |process_data| {
         *process_data.input_events.events.lock() = new_random_param_set_events;
         Ok(())
@@ -496,7 +496,7 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
         let random_param_set_events: Vec<_> =
             param_fuzzer.randomize_params_at(&mut prng, 0).collect();
 
-        let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512)?;
+        let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
         ProcessingTest::new(&plugin, &mut audio_buffers).run_once(move |process_data| {
             *process_data.input_events.events.lock() = random_param_set_events;
             Ok(())

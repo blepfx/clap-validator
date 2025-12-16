@@ -143,7 +143,7 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
                 .context("Could not fetch the plugin's audio port config")?
                 .unwrap_or_default();
 
-            let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512)?;
+            let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
 
             for LoadablePreset {
                 location,

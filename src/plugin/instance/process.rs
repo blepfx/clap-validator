@@ -17,7 +17,9 @@ use parking_lot::Mutex;
 use rand::Rng;
 use rand_pcg::Pcg32;
 use std::ffi::c_void;
+use std::fmt::Debug;
 use std::pin::Pin;
+use std::ptr::null;
 
 use crate::plugin::ext::audio_ports::AudioPortConfig;
 use crate::util::check_null_ptr;
@@ -56,11 +58,9 @@ pub struct ProcessConfig {
     pub time_sig_denominator: u16,
 }
 
-/// Audio buffers for out-of-place processing. This wrapper allocates and sets up the channel
-/// pointers. To avoid an unnecessary level of abstraction where the `Vec<Vec<f32>>`s need to be
-/// converted to a slice of slices, this data structure borrows the vectors directly.
-///
-#[derive(Clone)]
+/// Audio buffers for audio processing. These contain both input and output buffers, that can be either in-place
+/// or out-of-place, single or double precision.
+#[derive(Clone, Debug)]
 pub struct AudioBuffers {
     // These are all indexed by `[port_idx][channel_idx][sample_idx]`. The inputs also need to be
     // mutable because reborrwing them from here is the only way to modify them without
@@ -78,7 +78,7 @@ pub struct AudioBuffers {
     num_samples: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum AudioBuffer {
     Float32 {
         input: Option<u32>,
@@ -86,6 +86,7 @@ pub enum AudioBuffer {
         data: Vec<Vec<f32>>,
     },
 
+    #[allow(unused)] //TODO: use for future 64 bit processing tests
     Float64 {
         input: Option<u32>,
         output: Option<u32>,
@@ -192,8 +193,9 @@ impl<'a> ProcessData<'a> {
     pub fn with_clap_process_data<T, F: FnOnce(clap_process) -> T>(&mut self, f: F) -> T {
         assert!(
             self.block_size as usize <= self.buffers.len(),
-            "internal error: invalid block size"
-        ); //TODO: should this be a result instead of a panic?
+            "Process block size is larger than the maximum allowed buffer size. This is a \
+             clap-validator bug."
+        );
 
         let (inputs, outputs) = self.buffers.clap_buffers();
 
@@ -249,116 +251,168 @@ impl<'a> ProcessData<'a> {
 }
 
 impl AudioBuffers {
-    /// Construct the out of place audio buffers. This allocates the channel pointers that are
-    /// handed to the plugin in the process function.
-    pub fn new_out_of_place_f32(config: &AudioPortConfig, num_samples: usize) -> Result<Self> {
-        assert!(num_samples > 0);
+    /// Construct the audio buffers from the given buffer configurations. The number of samples must
+    /// be greater than zero and all channel vectors must have the same length.
+    pub fn new(buffers: Vec<AudioBuffer>, num_samples: usize) -> Self {
+        assert!(
+            num_samples > 0,
+            "Number of samples must be greater than zero."
+        );
 
-        let mut buffers = vec![];
         let mut pointers = vec![];
         let mut clap_inputs = vec![];
         let mut clap_outputs = vec![];
 
-        for (port, index) in config.inputs.iter().zip(0u32..) {
-            let bus_data: Vec<Vec<f32>> =
-                vec![vec![0.0f32; num_samples]; port.num_channels as usize];
-            let bus_ptrs: Vec<*const ()> = bus_data
-                .iter()
-                .map(|channel| channel.as_ptr() as *const _)
-                .collect();
+        for buffer in buffers.iter() {
+            let pointer_list = match buffer {
+                AudioBuffer::Float32 { data, .. } => {
+                    assert!(
+                        data.iter().all(|x| x.len() == num_samples),
+                        "Channel buffer length does not match"
+                    );
 
-            clap_inputs.push(clap_audio_buffer {
-                data32: bus_ptrs.as_ptr() as *const *const f32,
-                data64: std::ptr::null(),
-                channel_count: port.num_channels,
-                // TODO: Do some interesting tests with these two fields
-                latency: 0,
-                constant_mask: 0,
-            });
-            buffers.push(AudioBuffer::Float32 {
-                input: Some(index),
-                output: None,
-                data: bus_data,
-            });
-            pointers.push(bus_ptrs);
+                    data.iter()
+                        .map(|x| x.as_ptr() as *const ())
+                        .collect::<Vec<_>>()
+                }
+                AudioBuffer::Float64 { data, .. } => {
+                    assert!(
+                        data.iter().all(|x| x.len() == num_samples),
+                        "Channel buffer length does not match"
+                    );
+
+                    data.iter()
+                        .map(|x| x.as_ptr() as *const ())
+                        .collect::<Vec<_>>()
+                }
+            };
+
+            if let Some(input) = buffer.input() {
+                if clap_inputs.len() <= input as usize {
+                    clap_inputs.resize(input as usize + 1, None);
+                }
+
+                clap_inputs[input as usize] = Some(clap_audio_buffer {
+                    data32: if buffer.is_64bit() {
+                        null()
+                    } else {
+                        pointer_list.as_ptr() as *const _
+                    },
+
+                    data64: if buffer.is_64bit() {
+                        pointer_list.as_ptr() as *const _
+                    } else {
+                        null()
+                    },
+
+                    channel_count: pointer_list.len() as u32,
+                    latency: 0, //TODO: do some interesting tests with these 2 fields
+                    constant_mask: 0,
+                });
+            }
+
+            if let Some(output) = buffer.output() {
+                if clap_outputs.len() <= output as usize {
+                    clap_outputs.resize(output as usize + 1, None);
+                }
+
+                clap_outputs[output as usize] = Some(clap_audio_buffer {
+                    data32: if buffer.is_64bit() {
+                        null()
+                    } else {
+                        pointer_list.as_ptr() as *const _
+                    },
+
+                    data64: if buffer.is_64bit() {
+                        pointer_list.as_ptr() as *const _
+                    } else {
+                        null()
+                    },
+
+                    channel_count: pointer_list.len() as u32,
+                    latency: 0, //TODO: do some interesting tests with these 2 fields
+                    constant_mask: 0,
+                });
+            }
+
+            pointers.push(pointer_list);
+        }
+
+        Self {
+            buffers,
+            _pointers: pointers,
+            clap_inputs: clap_inputs
+                .into_iter()
+                .collect::<Option<Vec<_>>>()
+                .expect("Missing an input bus"),
+            clap_outputs: clap_outputs
+                .into_iter()
+                .collect::<Option<Vec<_>>>()
+                .expect("Missing an output bus"),
+            num_samples,
+        }
+    }
+
+    /// Construct the out of place audio buffers. This allocates the channel pointers that are
+    /// handed to the plugin in the process function.
+    pub fn new_out_of_place_f32(config: &AudioPortConfig, num_samples: usize) -> Self {
+        Self::new(
+            config
+                .inputs
+                .iter()
+                .zip(0u32..)
+                .map(|(port, index)| AudioBuffer::Float32 {
+                    input: Some(index),
+                    output: None,
+                    data: vec![vec![0.0f32; num_samples]; port.num_channels as usize],
+                })
+                .chain(config.outputs.iter().zip(0u32..).map(|(port, index)| {
+                    AudioBuffer::Float32 {
+                        input: None,
+                        output: Some(index),
+                        data: vec![vec![0.0f32; num_samples]; port.num_channels as usize],
+                    }
+                }))
+                .collect(),
+            num_samples,
+        )
+    }
+
+    /// Construct the in place audio buffers. This allocates the channel pointers that are handed to
+    /// the plugin in the process function.
+    pub fn new_in_place_f32(config: &AudioPortConfig, num_samples: usize) -> Self {
+        let mut buffers = vec![];
+
+        for (port, index) in config.inputs.iter().zip(0u32..) {
+            let in_place = port
+                .in_place_pair_idx
+                .filter(|output| config.outputs[*output].num_channels == port.num_channels) //TODO: is this guaranteed or do we have to handle a case with different in/out channel counts
+                .map(|output| output as u32);
+
+            if in_place.is_none() {
+                buffers.push(AudioBuffer::Float32 {
+                    input: Some(index),
+                    output: None,
+                    data: vec![vec![0.0f32; num_samples]; port.num_channels as usize],
+                });
+            }
         }
 
         for (port, index) in config.outputs.iter().zip(0u32..) {
-            let bus_data: Vec<Vec<f32>> =
-                vec![vec![0.0f32; num_samples]; port.num_channels as usize];
-            let bus_ptrs: Vec<*const ()> = bus_data
-                .iter()
-                .map(|channel| channel.as_ptr() as *const _)
-                .collect();
+            let in_place = port
+                .in_place_pair_idx
+                .filter(|input| config.inputs[*input].num_channels == port.num_channels) //TODO: is this guaranteed or do we have to handle a case with different in/out channel counts
+                .map(|input| input as u32);
 
-            clap_outputs.push(clap_audio_buffer {
-                data32: bus_ptrs.as_ptr() as *const *const f32,
-                data64: std::ptr::null(),
-                channel_count: port.num_channels,
-                // TODO: Do some interesting tests with these two fields
-                latency: 0,
-                constant_mask: 0,
-            });
             buffers.push(AudioBuffer::Float32 {
-                input: None,
+                input: in_place,
                 output: Some(index),
-                data: bus_data,
+                data: vec![vec![0.0f32; num_samples]; port.num_channels as usize],
             });
-            pointers.push(bus_ptrs);
         }
 
-        Ok(Self {
-            buffers,
-            _pointers: pointers,
-            clap_inputs,
-            clap_outputs,
-            num_samples,
-        })
+        Self::new(buffers, num_samples)
     }
-
-    // pub fn new_in_place_f32(config: &AudioPortConfig, num_samples: usize) -> Result<Self> {
-    //     assert!(num_samples > 0);
-
-    //     let mut buffers = vec![];
-    //     let mut pointers = vec![];
-    //     let mut clap_inputs = vec![];
-    //     let mut clap_outputs = vec![];
-
-    //     for (port, index) in config.inputs.iter().zip(0u32..) {
-    //         let mut bus_data: Vec<Vec<f32>> =
-    //             vec![vec![0.0f32; num_samples]; port.num_channels as usize];
-    //         let mut bus_ptrs: Vec<*const ()> = bus_data
-    //             .iter()
-    //             .map(|channel| channel.as_ptr() as *const _)
-    //             .collect();
-    //         let bus_ptr = bus_ptrs.as_ptr();
-
-    //         pointers.push(bus_ptrs);
-    //         buffers.push(AudioBuffer::Float32 {
-    //             input: Some(index),
-    //             output: port.in_place_pair_idx.map(|x| x as u32),
-    //             data: bus_data,
-    //         });
-    //         clap_inputs.push(clap_audio_buffer {
-    //             data32: bus_ptrs.as_ptr() as *const *const f32,
-    //             data64: std::ptr::null(),
-    //             channel_count: port.num_channels,
-    //             // TODO: Do some interesting tests with these two fields
-    //             latency: 0,
-    //             constant_mask: 0,
-    //         });
-    //     }
-
-    //     for (port, index) in config.outputs.iter().zip(0u32..) {}
-
-    //     Ok(Self {
-    //         buffers,
-    //         _pointers: pointers,
-    //         clap_inputs,
-    //         clap_outputs,
-    //         num_samples,
-    //     })
-    // }
 
     /// The number of samples in the buffer.
     pub fn len(&self) -> usize {
@@ -371,10 +425,12 @@ impl AudioBuffers {
         (&self.clap_inputs, &mut self.clap_outputs)
     }
 
+    /// Pointers to the internal audio buffers
     pub fn buffers(&self) -> &[AudioBuffer] {
         &self.buffers
     }
 
+    /// Fill the single precision input and output buffers with arbitrary values.
     pub fn fill_f32(&mut self, mut next: impl FnMut() -> f32) {
         for bus in &mut self.buffers {
             match bus {
@@ -390,6 +446,7 @@ impl AudioBuffers {
         }
     }
 
+    /// Fill the double precision input and output buffers with arbitrary values.
     pub fn fill_f64(&mut self, mut next: impl FnMut() -> f64) {
         for bus in &mut self.buffers {
             match bus {
@@ -429,25 +486,45 @@ impl AudioBuffers {
 }
 
 impl AudioBuffer {
-    pub fn is_input(&self) -> bool {
-        matches!(
-            self,
-            AudioBuffer::Float32 { input: Some(_), .. }
-                | AudioBuffer::Float64 { input: Some(_), .. }
-        )
+    /// Get the index of the input bus for this buffer.
+    pub fn input(&self) -> Option<u32> {
+        match self {
+            AudioBuffer::Float32 { input, .. } => *input,
+            AudioBuffer::Float64 { input, .. } => *input,
+        }
     }
 
-    pub fn is_output(&self) -> bool {
-        matches!(
-            self,
-            AudioBuffer::Float32 {
-                output: Some(_),
-                ..
-            } | AudioBuffer::Float64 {
-                output: Some(_),
-                ..
-            }
-        )
+    /// Get the index of the output bus for this buffer.
+    pub fn output(&self) -> Option<u32> {
+        match self {
+            AudioBuffer::Float32 { output, .. } => *output,
+            AudioBuffer::Float64 { output, .. } => *output,
+        }
+    }
+
+    /// Check whether this is a double precision buffer..
+    pub fn is_64bit(&self) -> bool {
+        match self {
+            AudioBuffer::Float32 { .. } => false,
+            AudioBuffer::Float64 { .. } => true,
+        }
+    }
+}
+
+impl Debug for AudioBuffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Float32 { input, output, .. } => f
+                .debug_struct("Float32")
+                .field("input", input)
+                .field("output", output)
+                .finish_non_exhaustive(),
+            Self::Float64 { input, output, .. } => f
+                .debug_struct("Float64")
+                .field("input", input)
+                .field("output", output)
+                .finish_non_exhaustive(),
+        }
     }
 }
 
@@ -478,10 +555,12 @@ impl EventQueue {
         queue
     }
 
+    /// Get the vtable pointer for input events.
     pub fn vtable_input(self: &Pin<Box<Self>>) -> *const clap_input_events {
         &self.vtable_input
     }
 
+    /// Get the vtable pointer for output events.
     pub fn vtable_output(self: &Pin<Box<Self>>) -> *const clap_output_events {
         &self.vtable_output
     }

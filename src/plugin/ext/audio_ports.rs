@@ -157,7 +157,7 @@ impl AudioPorts<'_> {
                     if output_pair_stable_id == input_stable_id =>
                 {
                     config.inputs[*input_port_idx].in_place_pair_idx = Some(*pair_output_port_idx);
-                    config.inputs[*pair_output_port_idx].in_place_pair_idx = Some(*input_port_idx);
+                    config.outputs[*pair_output_port_idx].in_place_pair_idx = Some(*input_port_idx);
                 }
                 Some((output_stable_id, (pair_output_port_idx, output_pair_stable_id))) => {
                     anyhow::bail!(

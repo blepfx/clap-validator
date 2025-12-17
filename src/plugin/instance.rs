@@ -265,6 +265,7 @@ impl<'lib> Plugin<'lib> {
 
         // Apparently 0 is invalid here
         assert!(min_buffer_size >= 1);
+        assert!(max_buffer_size >= min_buffer_size);
 
         let plugin = self.as_ptr();
         if unsafe_clap_call! {

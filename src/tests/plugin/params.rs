@@ -243,7 +243,7 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str) -> Result
         current_events = Some(param_fuzzer.randomize_params_at(&mut prng, 0).collect());
 
         let mut have_set_parameters = false;
-        let run_result = ProcessingTest::new(&plugin, &mut audio_buffers).run(
+        let run_result = ProcessingTest::new(&plugin, &mut audio_buffers).run_simple(
             FUZZ_RUNS_PER_PERMUTATION,
             |process_data| {
                 if !have_set_parameters {

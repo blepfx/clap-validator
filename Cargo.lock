@@ -163,6 +163,7 @@ dependencies = [
  "colored",
  "core-foundation",
  "crossbeam",
+ "either",
  "libloading",
  "log",
  "log-panics",

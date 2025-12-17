@@ -13,6 +13,7 @@ use clap_sys::events::{
 };
 use clap_sys::fixedpoint::{CLAP_BEATTIME_FACTOR, CLAP_SECTIME_FACTOR};
 use clap_sys::process::clap_process;
+use either::Either;
 use parking_lot::Mutex;
 use rand::Rng;
 use rand_pcg::Pcg32;
@@ -495,12 +496,12 @@ impl AudioBuffers {
         }
     }
 
-    /// Fill the input and output buffers with white noise. The values are distributed between `[-1,
-    /// 1]`, and denormals are snapped to zero.
+    /// Fill the input buffers with white noise ([-1, 1], denormals are snapped to zero).
+    /// Output buffers are filled with random NaN values to detect if they have been written to.
     pub fn randomize(&mut self, prng: &mut Pcg32) {
-        struct Randomizer<'a>(&'a mut Pcg32);
+        struct Randomize<'a>(&'a mut Pcg32);
 
-        impl AudioBufferFill for Randomizer<'_> {
+        impl AudioBufferFill for Randomize<'_> {
             fn fill_input_f32(&mut self, _bus: usize, _channel: usize, slice: &mut [f32]) {
                 for sample in slice.iter_mut() {
                     let y = self.0.gen_range(-1.0..=1.0f32);
@@ -535,7 +536,34 @@ impl AudioBuffers {
             }
         }
 
-        self.fill(Randomizer(prng));
+        self.fill(Randomize(prng));
+    }
+
+    pub fn silence_all_inputs(&mut self) {
+        struct Silence;
+
+        impl AudioBufferFill for Silence {
+            fn fill_input_f32(&mut self, _bus: usize, _channel: usize, slice: &mut [f32]) {
+                slice.fill(0.0);
+            }
+
+            fn fill_input_f64(&mut self, _bus: usize, _channel: usize, slice: &mut [f64]) {
+                slice.fill(0.0);
+            }
+
+            fn fill_output_f32(&mut self, _bus: usize, _channel: usize, _slice: &mut [f32]) {}
+            fn fill_output_f64(&mut self, _bus: usize, _channel: usize, _slice: &mut [f64]) {}
+        }
+
+        self.fill(Silence);
+
+        for input in &mut self.clap_inputs {
+            input.constant_mask = 1u64.unbounded_shl(input.channel_count).wrapping_sub(1);
+        }
+    }
+
+    pub fn output_constant_mask(&self, bus: usize) -> u64 {
+        self.clap_outputs[bus].constant_mask
     }
 }
 
@@ -556,11 +584,62 @@ impl AudioBuffer {
         }
     }
 
-    /// Check whether this is a double precision buffer..
+    /// Check whether this is a double precision buffer.
     pub fn is_64bit(&self) -> bool {
         match self {
             AudioBuffer::Float32 { .. } => false,
             AudioBuffer::Float64 { .. } => true,
+        }
+    }
+
+    pub fn is_same(&self, other: &Self) -> bool {
+        match (self, other) {
+            (AudioBuffer::Float32 { data: this, .. }, AudioBuffer::Float32 { data: other, .. }) => {
+                for (this, other) in this.iter().zip(other.iter()) {
+                    for (this, other) in this.iter().zip(other.iter()) {
+                        if this.to_bits() != other.to_bits() {
+                            return false;
+                        }
+                    }
+                }
+
+                true
+            }
+
+            (AudioBuffer::Float64 { data: this, .. }, AudioBuffer::Float64 { data: other, .. }) => {
+                for (this, other) in this.iter().zip(other.iter()) {
+                    for (this, other) in this.iter().zip(other.iter()) {
+                        if this.to_bits() != other.to_bits() {
+                            return false;
+                        }
+                    }
+                }
+
+                true
+            }
+
+            _ => false,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            AudioBuffer::Float32 { data, .. } => data.first().map_or(0, |x| x.len()),
+            AudioBuffer::Float64 { data, .. } => data.first().map_or(0, |x| x.len()),
+        }
+    }
+
+    pub fn channels(&self) -> usize {
+        match self {
+            AudioBuffer::Float32 { data, .. } => data.len(),
+            AudioBuffer::Float64 { data, .. } => data.len(),
+        }
+    }
+
+    pub fn get(&self, channel: usize, sample: usize) -> Either<f64, f32> {
+        match self {
+            AudioBuffer::Float32 { data, .. } => Either::Right(data[channel][sample]),
+            AudioBuffer::Float64 { data, .. } => Either::Left(data[channel][sample]),
         }
     }
 }

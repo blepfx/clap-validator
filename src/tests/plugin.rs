@@ -29,6 +29,8 @@ pub enum PluginTestCase {
     ProcessAudioOutOfPlaceBasic,
     #[strum(serialize = "process-audio-in-place-basic")]
     ProcessAudioInPlaceBasic,
+    #[strum(serialize = "process-audio-constant-mask")]
+    ProcessAudioConstantMask,
     #[strum(serialize = "process-note-out-of-place-basic")]
     ProcessNoteOutOfPlaceBasic,
     #[strum(serialize = "process-note-inconsistent")]
@@ -87,6 +89,12 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 "Processes random audio through the plugin with its default parameter values and \
                  tests whether the output does not contain any non-finite or subnormal values. \
                  Uses in-place audio processing for buses that support it.",
+            ),
+            PluginTestCase::ProcessAudioConstantMask => String::from(
+                "Processes random audio through the plugin with its default parameter values \
+                 while setting the constant mask on silent blocks, and tests whether the output \
+                 does not contain any non-finite or subnormal values and that the plugin sets the \
+                 constant mask correctly. Uses out-of-place audio processing.",
             ),
             PluginTestCase::ProcessNoteOutOfPlaceBasic => String::from(
                 "Sends audio and random note and MIDI events to the plugin with its default \
@@ -198,6 +206,9 @@ impl<'a> TestCase<'a> for PluginTestCase {
             }
             PluginTestCase::ProcessAudioInPlaceBasic => {
                 processing::test_process_audio_in_place_basic(library, plugin_id)
+            }
+            PluginTestCase::ProcessAudioConstantMask => {
+                processing::test_process_audio_constant_mask(library, plugin_id)
             }
             PluginTestCase::ProcessNoteOutOfPlaceBasic => {
                 processing::test_process_note_out_of_place_basic(library, plugin_id)

@@ -81,17 +81,36 @@ pub struct AudioBuffers {
 #[derive(Clone)]
 pub enum AudioBuffer {
     Float32 {
-        input: Option<u32>,
-        output: Option<u32>,
+        input: Option<usize>,
+        output: Option<usize>,
         data: Vec<Vec<f32>>,
     },
 
     #[allow(unused)] //TODO: use for future 64 bit processing tests
     Float64 {
-        input: Option<u32>,
-        output: Option<u32>,
+        input: Option<usize>,
+        output: Option<usize>,
         data: Vec<Vec<f64>>,
     },
+}
+
+pub trait AudioBufferFill {
+    fn fill_input_f32(&mut self, bus: usize, channel: usize, slice: &mut [f32]);
+    fn fill_input_f64(&mut self, bus: usize, channel: usize, slice: &mut [f64]);
+    fn fill_output_f32(&mut self, bus: usize, channel: usize, slice: &mut [f32]) {
+        self.fill_input_f32(bus, channel, slice);
+    }
+    fn fill_output_f64(&mut self, bus: usize, channel: usize, slice: &mut [f64]) {
+        self.fill_input_f64(bus, channel, slice);
+    }
+    fn fill_inplace_f32(&mut self, input: usize, output: usize, channel: usize, slice: &mut [f32]) {
+        let _ = output;
+        self.fill_input_f32(input, channel, slice);
+    }
+    fn fill_inplace_f64(&mut self, input: usize, output: usize, channel: usize, slice: &mut [f64]) {
+        let _ = output;
+        self.fill_input_f64(input, channel, slice);
+    }
 }
 
 // SAFETY: Sharing these pointers with other threads is safe as they refer to the borrowed input and
@@ -360,13 +379,13 @@ impl AudioBuffers {
             config
                 .inputs
                 .iter()
-                .zip(0u32..)
-                .map(|(port, index)| AudioBuffer::Float32 {
+                .enumerate()
+                .map(|(index, port)| AudioBuffer::Float32 {
                     input: Some(index),
                     output: None,
                     data: vec![vec![0.0f32; num_samples]; port.num_channels as usize],
                 })
-                .chain(config.outputs.iter().zip(0u32..).map(|(port, index)| {
+                .chain(config.outputs.iter().enumerate().map(|(index, port)| {
                     AudioBuffer::Float32 {
                         input: None,
                         output: Some(index),
@@ -383,11 +402,10 @@ impl AudioBuffers {
     pub fn new_in_place_f32(config: &AudioPortConfig, num_samples: usize) -> Self {
         let mut buffers = vec![];
 
-        for (port, index) in config.inputs.iter().zip(0u32..) {
+        for (index, port) in config.inputs.iter().enumerate() {
             let in_place = port
                 .in_place_pair_idx
-                .filter(|output| config.outputs[*output].num_channels == port.num_channels) //TODO: is this guaranteed or do we have to handle a case with different in/out channel counts
-                .map(|output| output as u32);
+                .filter(|output| config.outputs[*output].num_channels == port.num_channels);
 
             if in_place.is_none() {
                 buffers.push(AudioBuffer::Float32 {
@@ -398,11 +416,10 @@ impl AudioBuffers {
             }
         }
 
-        for (port, index) in config.outputs.iter().zip(0u32..) {
+        for (index, port) in config.outputs.iter().enumerate() {
             let in_place = port
                 .in_place_pair_idx
-                .filter(|input| config.inputs[*input].num_channels == port.num_channels) //TODO: is this guaranteed or do we have to handle a case with different in/out channel counts
-                .map(|input| input as u32);
+                .filter(|input| config.inputs[*input].num_channels == port.num_channels);
 
             buffers.push(AudioBuffer::Float32 {
                 input: in_place,
@@ -430,34 +447,50 @@ impl AudioBuffers {
         &self.buffers
     }
 
-    /// Fill the single precision input and output buffers with arbitrary values.
-    pub fn fill_f32(&mut self, mut next: impl FnMut() -> f32) {
+    /// Fill the input and output buffers with arbitrary values.
+    pub fn fill(&mut self, mut fill: impl AudioBufferFill) {
         for bus in &mut self.buffers {
             match bus {
-                AudioBuffer::Float32 { data, .. } => {
-                    for channel in data {
-                        for sample in channel {
-                            *sample = next();
+                AudioBuffer::Float32 {
+                    input,
+                    output,
+                    data,
+                } => {
+                    for (channel_idx, channel) in data.iter_mut().enumerate() {
+                        match (*input, *output) {
+                            (Some(input), Some(output)) => {
+                                fill.fill_inplace_f32(input, output, channel_idx, channel);
+                            }
+                            (Some(input), None) => {
+                                fill.fill_input_f32(input, channel_idx, channel);
+                            }
+                            (None, Some(output)) => {
+                                fill.fill_output_f32(output, channel_idx, channel);
+                            }
+                            (None, None) => {}
                         }
                     }
                 }
-                _ => {}
-            }
-        }
-    }
-
-    /// Fill the double precision input and output buffers with arbitrary values.
-    pub fn fill_f64(&mut self, mut next: impl FnMut() -> f64) {
-        for bus in &mut self.buffers {
-            match bus {
-                AudioBuffer::Float64 { data, .. } => {
-                    for channel in data {
-                        for sample in channel {
-                            *sample = next();
+                AudioBuffer::Float64 {
+                    input,
+                    output,
+                    data,
+                } => {
+                    for (channel_idx, channel) in data.iter_mut().enumerate() {
+                        match (*input, *output) {
+                            (Some(input), Some(output)) => {
+                                fill.fill_inplace_f64(input, output, channel_idx, channel);
+                            }
+                            (Some(input), None) => {
+                                fill.fill_input_f64(input, channel_idx, channel);
+                            }
+                            (None, Some(output)) => {
+                                fill.fill_output_f64(output, channel_idx, channel);
+                            }
+                            (None, None) => {}
                         }
                     }
                 }
-                _ => {}
             }
         }
     }
@@ -465,29 +498,50 @@ impl AudioBuffers {
     /// Fill the input and output buffers with white noise. The values are distributed between `[-1,
     /// 1]`, and denormals are snapped to zero.
     pub fn randomize(&mut self, prng: &mut Pcg32) {
-        self.fill_f32(|| {
-            let y = prng.gen_range(-1.0..=1.0f32);
-            if y.is_subnormal() {
-                0.0
-            } else {
-                y
-            }
-        });
+        struct Randomizer<'a>(&'a mut Pcg32);
 
-        self.fill_f64(|| {
-            let y = prng.gen_range(-1.0..=1.0f64);
-            if y.is_subnormal() {
-                0.0
-            } else {
-                y
+        impl AudioBufferFill for Randomizer<'_> {
+            fn fill_input_f32(&mut self, _bus: usize, _channel: usize, slice: &mut [f32]) {
+                for sample in slice.iter_mut() {
+                    let y = self.0.gen_range(-1.0..=1.0f32);
+                    *sample = if y.is_subnormal() { 0.0 } else { y };
+                }
             }
-        });
+
+            fn fill_input_f64(&mut self, _bus: usize, _channel: usize, slice: &mut [f64]) {
+                for sample in slice.iter_mut() {
+                    let y = self.0.gen_range(-1.0..=1.0f64);
+                    *sample = if y.is_subnormal() { 0.0 } else { y };
+                }
+            }
+
+            // fill with random NaN values so we can detect if a plugin left the output uninitialized
+            fn fill_output_f32(&mut self, _bus: usize, _channel: usize, slice: &mut [f32]) {
+                for sample in slice.iter_mut() {
+                    let y: u32 = self.0.gen();
+                    let y = f32::from_bits(y | 0x7F800001);
+                    assert!(y.is_nan());
+                    *sample = y;
+                }
+            }
+
+            fn fill_output_f64(&mut self, _bus: usize, _channel: usize, slice: &mut [f64]) {
+                for sample in slice.iter_mut() {
+                    let y: u64 = self.0.gen();
+                    let y = f64::from_bits(y | 0x7FF0000000000001);
+                    assert!(y.is_nan());
+                    *sample = y;
+                }
+            }
+        }
+
+        self.fill(Randomizer(prng));
     }
 }
 
 impl AudioBuffer {
     /// Get the index of the input bus for this buffer.
-    pub fn input(&self) -> Option<u32> {
+    pub fn input(&self) -> Option<usize> {
         match self {
             AudioBuffer::Float32 { input, .. } => *input,
             AudioBuffer::Float64 { input, .. } => *input,
@@ -495,7 +549,7 @@ impl AudioBuffer {
     }
 
     /// Get the index of the output bus for this buffer.
-    pub fn output(&self) -> Option<u32> {
+    pub fn output(&self) -> Option<usize> {
         match self {
             AudioBuffer::Float32 { output, .. } => *output,
             AudioBuffer::Float64 { output, .. } => *output,

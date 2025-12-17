@@ -2,18 +2,18 @@
 
 use anyhow::{Context, Result};
 use clap_sys::ext::params::{
-    clap_param_info, clap_param_info_flags, clap_plugin_params, CLAP_EXT_PARAMS,
-    CLAP_PARAM_IS_AUTOMATABLE, CLAP_PARAM_IS_AUTOMATABLE_PER_CHANNEL,
+    CLAP_EXT_PARAMS, CLAP_PARAM_IS_AUTOMATABLE, CLAP_PARAM_IS_AUTOMATABLE_PER_CHANNEL,
     CLAP_PARAM_IS_AUTOMATABLE_PER_KEY, CLAP_PARAM_IS_AUTOMATABLE_PER_NOTE_ID,
     CLAP_PARAM_IS_AUTOMATABLE_PER_PORT, CLAP_PARAM_IS_BYPASS, CLAP_PARAM_IS_HIDDEN,
     CLAP_PARAM_IS_MODULATABLE, CLAP_PARAM_IS_MODULATABLE_PER_CHANNEL,
     CLAP_PARAM_IS_MODULATABLE_PER_KEY, CLAP_PARAM_IS_MODULATABLE_PER_NOTE_ID,
     CLAP_PARAM_IS_MODULATABLE_PER_PORT, CLAP_PARAM_IS_READONLY, CLAP_PARAM_IS_STEPPED,
+    clap_param_info, clap_param_info_flags, clap_plugin_params,
 };
 use clap_sys::id::clap_id;
 use clap_sys::string_sizes::CLAP_NAME_SIZE;
 use std::collections::BTreeMap;
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_void};
 use std::ops::RangeInclusive;
 use std::pin::Pin;
 use std::ptr::NonNull;

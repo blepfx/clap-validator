@@ -173,7 +173,7 @@ impl<'a> ProcessingTest<'a> {
     }
 }
 
-/// The test for `ProcessingTest::ProcessAudioOutOfPlaceBasic`.
+/// The test for `PluginTestCase::ProcessAudioOutOfPlaceBasic`.
 pub fn test_process_audio_out_of_place_basic(
     library: &PluginLibrary,
     plugin_id: &str,
@@ -196,7 +196,7 @@ pub fn test_process_audio_out_of_place_basic(
                     "The plugin does not implement the '{}' extension.",
                     AudioPorts::EXTENSION_ID.to_str().unwrap(),
                 )),
-            })
+            });
         }
     };
 
@@ -212,7 +212,7 @@ pub fn test_process_audio_out_of_place_basic(
     Ok(TestStatus::Success { details: None })
 }
 
-/// The test for `ProcessingTest::ProcessAudioInPlaceBasic`.
+/// The test for `PluginTestCase::ProcessAudioInPlaceBasic`.
 pub fn test_process_audio_in_place_basic(
     library: &PluginLibrary,
     plugin_id: &str,
@@ -235,7 +235,7 @@ pub fn test_process_audio_in_place_basic(
                     "The plugin does not implement the '{}' extension.",
                     AudioPorts::EXTENSION_ID.to_str().unwrap(),
                 )),
-            })
+            });
         }
     };
 
@@ -251,7 +251,7 @@ pub fn test_process_audio_in_place_basic(
     Ok(TestStatus::Success { details: None })
 }
 
-/// The test for `ProcessingTest::ProcessNoteOutOfPlaceBasic`. This test is very similar to
+/// The test for `PluginTestCase::ProcessNoteOutOfPlaceBasic`. This test is very similar to
 /// `ProcessAudioOutOfPlaceBasic`, but it requires the `note-ports` extension, sends notes and/or
 /// MIDI to the plugin, and doesn't require the `audio-ports` extension.
 pub fn test_process_note_out_of_place_basic(
@@ -283,7 +283,7 @@ pub fn test_process_note_out_of_place_basic(
                     "The plugin does not implement the '{}' extension.",
                     NotePorts::EXTENSION_ID.to_str().unwrap(),
                 )),
-            })
+            });
         }
     };
     if note_ports_config.inputs.is_empty() {
@@ -315,7 +315,7 @@ pub fn test_process_note_out_of_place_basic(
     Ok(TestStatus::Success { details: None })
 }
 
-/// The test for `ProcessingTest::ProcessNoteInconsistent`. This is the same test as
+/// The test for `PluginTestCase::ProcessNoteInconsistent`. This is the same test as
 /// `ProcessAudioOutOfPlaceBasic`, but without requiring matched note on/off pairs and similar
 /// invariants
 pub fn test_process_note_inconsistent(
@@ -346,7 +346,7 @@ pub fn test_process_note_inconsistent(
                     "The plugin does not implement the '{}' extension.",
                     NotePorts::EXTENSION_ID.to_str().unwrap(),
                 )),
-            })
+            });
         }
     };
     if note_port_config.inputs.is_empty() {
@@ -380,7 +380,7 @@ pub fn test_process_note_inconsistent(
     Ok(TestStatus::Success { details: None })
 }
 
-/// The test for `ProcessingTest::ProcessVaryingSampleRates`.
+/// The test for `PluginTestCase::ProcessVaryingSampleRates`.
 pub fn test_process_varying_sample_rates(
     library: &PluginLibrary,
     plugin_id: &str,
@@ -445,13 +445,13 @@ pub fn test_process_varying_sample_rates(
     Ok(TestStatus::Success { details: None })
 }
 
-/// The test for `ProcessingTest::ProcessVaryingBlockSizes`.
+/// The test for `PluginTestCase::ProcessVaryingBlockSizes`.
 pub fn test_process_varying_block_sizes(
     library: &PluginLibrary,
     plugin_id: &str,
 ) -> Result<TestStatus> {
     const BLOCK_SIZES: &[u32] = &[
-        1, 8, 32, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 1536, 10, 1000, 10000, 2027,
+        1, 8, 32, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 1536, 10, 17, 1000, 10000, 2027,
     ];
 
     let mut prng = new_prng();
@@ -509,7 +509,7 @@ pub fn test_process_varying_block_sizes(
     Ok(TestStatus::Success { details: None })
 }
 
-/// The test for `ProcessingTest::ProcessRandomBlockSizes`.
+/// The test for `PluginTestCase::ProcessRandomBlockSizes`.
 pub fn test_process_random_block_sizes(
     library: &PluginLibrary,
     plugin_id: &str,
@@ -586,8 +586,8 @@ fn check_process_call_consistency(
         .iter()
         .zip(original_buffers.buffers())
     {
-        // Input buffers must not be overwritten during out of place processing
-        if buffer.input().is_some() && buffer.output().is_none() {
+        // Input-only buffers must not be overwritten during out of place processing
+        if let (Some(index), None) = (buffer.input(), buffer.output()) {
             let matches = match (buffer, before) {
                 (
                     AudioBuffer::Float32 { data: after, .. },
@@ -604,7 +604,48 @@ fn check_process_call_consistency(
 
             if !matches {
                 anyhow::bail!(
-                    "The plugin has overwritten the input buffers during out-of-place processing."
+                    "The plugin has overwritten an input buffer (index {index}) during \
+                     out-of-place processing."
+                );
+            }
+        }
+
+        // Output-only buffers must not be left "untouched" during out of place processing
+        if let (Some(index), None) = (buffer.output(), buffer.input()) {
+            let matches = match (buffer, before) {
+                (
+                    AudioBuffer::Float32 { data: after, .. },
+                    AudioBuffer::Float32 { data: before, .. },
+                ) => after.iter().zip(before.iter()).all(|(after, before)| {
+                    after
+                        .iter()
+                        .zip(before.iter())
+                        .take(block_size)
+                        .all(|(after, before)| {
+                            after.is_nan() && (after.to_bits() == before.to_bits())
+                        })
+                }),
+
+                (
+                    AudioBuffer::Float64 { data: after, .. },
+                    AudioBuffer::Float64 { data: before, .. },
+                ) => after.iter().zip(before.iter()).all(|(after, before)| {
+                    after
+                        .iter()
+                        .zip(before.iter())
+                        .take(block_size)
+                        .all(|(after, before)| {
+                            after.is_nan() && (after.to_bits() == before.to_bits())
+                        })
+                }),
+
+                _ => unreachable!(),
+            };
+
+            if matches {
+                anyhow::bail!(
+                    "The plugin has left an output buffer (index {index}) untouched during \
+                     out-of-place processing."
                 );
             }
         }

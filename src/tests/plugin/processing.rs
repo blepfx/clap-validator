@@ -680,6 +680,8 @@ pub fn test_process_audio_constant_mask(
         }
     })?;
 
+    drop(plugin);
+
     host.callback_error_check()
         .context("An error occured during a host callback")?;
 

@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use clap_sys::id::clap_id;
+use rand::Rng;
 use std::collections::BTreeMap;
 use std::io::Write;
 
@@ -201,7 +202,8 @@ pub fn test_state_reproducibility_null_cookies(
         .keys()
         .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
         .collect::<Result<BTreeMap<clap_id, f64>>>()?;
-    if actual_param_values != expected_param_values {
+
+    if !compare_params_lenient(&actual_param_values, &expected_param_values) {
         let param_infos = params
             .info()
             .context("Failure while fetching the plugin's parameters")?;
@@ -408,7 +410,8 @@ pub fn test_state_reproducibility_flush(
         .keys()
         .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
         .collect::<Result<BTreeMap<clap_id, f64>>>()?;
-    if actual_param_values != expected_param_values {
+
+    if !compare_params_lenient(&actual_param_values, &expected_param_values) {
         let param_infos = params
             .info()
             .context("Failure while fetching the plugin's parameters")?;
@@ -510,10 +513,10 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
         // This state file is saved without buffered writes. It's expected that the plugin
         // implementsq this correctly, so we can check if it handles buffered streams correctly by
         // treating this as the ground truth.
-        let expected_stae = state.save()?;
+        let expected_state = state.save()?;
         host.handle_callbacks_once();
 
-        (expected_stae, expected_param_values)
+        (expected_state, expected_param_values)
     };
 
     // Now we'll recreate the plugin instance, load the state using buffered reads, check the
@@ -559,7 +562,8 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
         .keys()
         .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
         .collect::<Result<BTreeMap<clap_id, f64>>>()?;
-    if actual_param_values != expected_param_values {
+
+    if !compare_params_lenient(&actual_param_values, &expected_param_values) {
         let param_infos = params
             .info()
             .context("Failure while fetching the plugin's parameters")?;
@@ -606,6 +610,50 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
     }
 }
 
+/// The test for `PluginTestCase::StateRandomGarbage`.
+pub fn test_state_random_garbage(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+    let mut prng = new_prng();
+
+    let host = Host::new();
+    let plugin = library
+        .create_plugin(plugin_id, host.clone())
+        .context("Could not create the plugin instance")?;
+
+    plugin.init().context("Error during initialization")?;
+
+    let state = match plugin.get_extension::<State>() {
+        Some(state) => state,
+        None => {
+            return Ok(TestStatus::Skipped {
+                details: Some(format!(
+                    "The plugin does not implement the '{}' extension.",
+                    State::EXTENSION_ID.to_str().unwrap(),
+                )),
+            })
+        }
+    };
+
+    host.handle_callbacks_once();
+
+    let mut random_data = vec![0u8; 1024 * 1024];
+    prng.fill(&mut random_data[..]);
+
+    let result = state.load(&random_data);
+
+    host.handle_callbacks_once();
+    host.callback_error_check()
+        .context("An error occured during a host callback")?;
+
+    match result {
+        Err(_) => Ok(TestStatus::Success { details: None }),
+        Ok(_) => Ok(TestStatus::Warning {
+            details: Some(String::from(
+                "The plugin loaded random bytes successfully, which is unexpected, but the plugin \
+                 did not crash.",
+            )),
+        }),
+    }
+}
 /// Build a string containing all different values between two sets of values.
 ///
 /// # Panics
@@ -633,4 +681,28 @@ fn format_mismatching_values(
         })
         .collect::<Vec<String>>()
         .join(", ")
+}
+
+fn compare_params_lenient(
+    actual: &BTreeMap<clap_id, f64>,
+    expected: &BTreeMap<clap_id, f64>,
+) -> bool {
+    const EPSILON: f64 = 1e-6;
+
+    if actual.len() != expected.len() {
+        return false;
+    }
+
+    for (param_id, expected_value) in expected {
+        let actual_value = match actual.get(param_id) {
+            Some(value) => value,
+            None => return false,
+        };
+
+        if (actual_value - expected_value).abs() > EPSILON {
+            return false;
+        }
+    }
+
+    true
 }

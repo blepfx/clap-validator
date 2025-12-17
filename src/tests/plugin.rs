@@ -57,6 +57,8 @@ pub enum PluginTestCase {
     StateReproducibilityFlush,
     #[strum(serialize = "state-buffered-streams")]
     StateBufferedStreams,
+    #[strum(serialize = "state-random-garbage")]
+    StateRandomGarbage,
 }
 
 impl<'a> TestCase<'a> for PluginTestCase {
@@ -171,6 +173,10 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  when reloading and resaving the state.",
                 PluginTestCase::StateReproducibilityBasic
             ),
+            PluginTestCase::StateRandomGarbage => String::from(
+                "Loads a megabyte of random bytes via 'clap_plugin_state::load()' and asserts \
+                 that the plugin doesn't crash.",
+            ),
         }
     }
 
@@ -242,6 +248,9 @@ impl<'a> TestCase<'a> for PluginTestCase {
             }
             PluginTestCase::StateBufferedStreams => {
                 state::test_state_buffered_streams(library, plugin_id)
+            }
+            PluginTestCase::StateRandomGarbage => {
+                state::test_state_random_garbage(library, plugin_id)
             }
         };
 

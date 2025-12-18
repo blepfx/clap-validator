@@ -1,10 +1,10 @@
 //! Tests for individual plugin instances.
 
+use super::TestCase;
+use crate::{plugin::library::PluginLibrary, tests::TestStatus};
+use anyhow::Result;
 use clap::ValueEnum;
 use std::process::Command;
-
-use super::{TestCase, TestResult};
-use crate::plugin::library::PluginLibrary;
 
 mod descriptor;
 mod params;
@@ -174,8 +174,8 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 PluginTestCase::StateReproducibilityBasic
             ),
             PluginTestCase::StateRandomGarbage => String::from(
-                "Loads a megabyte of random bytes via 'clap_plugin_state::load()' and asserts \
-                 that the plugin doesn't crash.",
+                "Loads 10 chunks of random bytes via 'clap_plugin_state::load()' and asserts that \
+                 the plugin doesn't crash.",
             ),
         }
     }
@@ -195,8 +195,8 @@ impl<'a> TestCase<'a> for PluginTestCase {
             .arg(test_name);
     }
 
-    fn run_in_process(&self, (library, plugin_id): Self::TestArgs) -> TestResult {
-        let status = match self {
+    fn run_in_process(&self, (library, plugin_id): Self::TestArgs) -> Result<TestStatus> {
+        match self {
             PluginTestCase::MethodsNonNull => descriptor::test_methods_non_null(library, plugin_id),
             PluginTestCase::DescriptorConsistency => {
                 descriptor::test_consistency(library, plugin_id)
@@ -252,8 +252,6 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::StateRandomGarbage => {
                 state::test_state_random_garbage(library, plugin_id)
             }
-        };
-
-        self.create_result(status)
+        }
     }
 }

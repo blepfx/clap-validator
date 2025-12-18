@@ -143,6 +143,14 @@ impl<'a> PluginAudioThread<'a> {
         }
     }
 
+    /// Reset the internal state of the plugin.
+    pub fn reset(&self) {
+        assert_plugin_state_eq!(self, PluginStatus::Activated);
+
+        let plugin = self.as_ptr();
+        unsafe_clap_call! { plugin=>reset(plugin) };
+    }
+
     /// Stop processing audio. See
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.

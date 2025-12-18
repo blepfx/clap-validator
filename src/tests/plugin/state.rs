@@ -636,9 +636,12 @@ pub fn test_state_random_garbage(library: &PluginLibrary, plugin_id: &str) -> Re
     host.handle_callbacks_once();
 
     let mut random_data = vec![0u8; 1024 * 1024];
-    prng.fill(&mut random_data[..]);
+    let mut result = Ok(());
 
-    let result = state.load(&random_data);
+    for _ in 0..10 {
+        prng.fill(&mut random_data[..]);
+        result = result.or(state.load(&random_data));
+    }
 
     host.handle_callbacks_once();
     host.callback_error_check()

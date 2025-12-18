@@ -10,6 +10,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Instant;
 use strum::IntoEnumIterator;
 
 use crate::plugin::library::{PluginLibrary, PluginMetadata};
@@ -371,7 +372,8 @@ pub fn run_single_test(settings: &SingleTestSettings) -> Result<()> {
 
     fs::write(
         &settings.output_file,
-        serde_json::to_string(&result).context("Could not format the result as JSON")?,
+        serde_json::to_string(&TestStatus::from(result))
+            .context("Could not format the result as JSON")?,
     )
     .with_context(|| {
         format!(
@@ -415,11 +417,19 @@ fn run_test<'a, T: TestCase<'a>>(
     settings: &ValidatorSettings,
     args: T::TestArgs,
 ) -> Result<TestResult> {
-    if settings.in_process {
-        Ok(test.run_in_process(args))
+    let start = Instant::now();
+    let status = if settings.in_process {
+        TestStatus::from(test.run_in_process(args))
     } else {
-        test.run_out_of_process(args, verbosity, settings.hide_output)
-    }
+        test.run_out_of_process(args, verbosity, settings.hide_output)?
+    };
+
+    Ok(TestResult {
+        name: test.to_string(),
+        description: test.description(),
+        duration: start.elapsed(),
+        status,
+    })
 }
 
 impl ValidationResult {
@@ -482,6 +492,6 @@ impl ValidationResult {
 impl ValidationTally {
     /// Get the total number of tests run.
     pub fn total(&self) -> u32 {
-        self.num_passed + self.num_failed + self.num_skipped
+        self.num_passed + self.num_failed + self.num_skipped + self.num_warnings
     }
 }

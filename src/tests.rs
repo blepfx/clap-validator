@@ -19,6 +19,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::str::FromStr;
+use std::time::Duration;
 use strum::IntoEnumIterator;
 
 use crate::{util, Verbosity};
@@ -40,6 +41,8 @@ pub struct TestResult {
     pub description: String,
     /// The outcome of the test.
     pub status: TestStatus,
+    /// How much time it took
+    pub duration: Duration,
 }
 
 /// The result of running a test. Skipped and failed test may optionally include an explanation for
@@ -95,7 +98,7 @@ pub trait TestCase<'a>: Display + FromStr + IntoEnumIterator + Sized + 'static {
     ///
     /// In the event that this is called for a plugin ID that does not exist within the plugin
     /// library, then the test will also be marked as failed.
-    fn run_in_process(&self, args: Self::TestArgs) -> TestResult;
+    fn run_in_process(&self, args: Self::TestArgs) -> Result<TestStatus>;
 
     /// Run a test case for a plugin in another process, returning the result. If the test cuases the
     /// plugin to segfault, then the result will have a status of `TestStatus::Crashed`. If
@@ -113,7 +116,7 @@ pub trait TestCase<'a>: Display + FromStr + IntoEnumIterator + Sized + 'static {
         args: Self::TestArgs,
         verbosity: Verbosity,
         hide_output: bool,
-    ) -> Result<TestResult> {
+    ) -> Result<TestStatus> {
         // The idea here is that we'll invoke the same clap-validator binary with a special hidden command
         // that runs a single test. This is the reason why test cases must be convertible to and
         // from strings. If everything goes correctly, then the child process will write the results
@@ -149,13 +152,10 @@ pub trait TestCase<'a>: Display + FromStr + IntoEnumIterator + Sized + 'static {
             // spawn succeeds then this can never fail:
             .wait()
             .context("Error while waiting on clap-validator to finish running the test")?;
+
         if !exit_status.success() {
-            return Ok(TestResult {
-                name: self.to_string(),
-                description: self.description(),
-                status: TestStatus::Crashed {
-                    details: exit_status.to_string(),
-                },
+            return Ok(TestStatus::Crashed {
+                details: exit_status.to_string(),
             });
         }
 
@@ -196,18 +196,13 @@ pub trait TestCase<'a>: Display + FromStr + IntoEnumIterator + Sized + 'static {
 
         Ok((path, file))
     }
+}
 
-    /// Create a [`TestResult`] for this test case. The test status is wrapped in an anyhow
-    /// [`Result`] to make writing test cases more ergonomic using the question mark operator. `Err`
-    /// values are converted to [`TestStatus::Failed`] statuses containing the full error backtrace.
-    fn create_result(&self, status: Result<TestStatus>) -> TestResult {
-        TestResult {
-            name: self.to_string(),
-            description: self.description(),
-            status: status.unwrap_or_else(|err| TestStatus::Failed {
-                details: Some(format!("{err:#}")),
-            }),
-        }
+impl From<Result<TestStatus>> for TestStatus {
+    fn from(status: Result<TestStatus>) -> Self {
+        status.unwrap_or_else(|err| TestStatus::Failed {
+            details: Some(format!("{err:#}")),
+        })
     }
 }
 

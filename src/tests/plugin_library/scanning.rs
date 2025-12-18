@@ -3,11 +3,12 @@
 use anyhow::{Context, Result};
 use clap_sys::version::clap_version_is_compatible;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use super::SCAN_TIME_LIMIT;
 use crate::plugin::library::PluginLibrary;
 use crate::tests::TestStatus;
+
+pub const SCAN_TIME_LIMIT: Duration = Duration::from_millis(100);
 
 /// The test for `PluginLibraryTestCase::ScanTime`.
 pub fn test_scan_time(library_path: &Path) -> Result<TestStatus> {

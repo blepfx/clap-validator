@@ -64,7 +64,13 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Ex
         // refcell or to inline this, so this is probably still better
         macro_rules! print_test {
             ($test:expr) => {
-                println_wrapped!(wrapper, "   - {}: {}", $test.name, $test.description);
+                println_wrapped!(
+                    wrapper,
+                    "   - {} {}: {}",
+                    $test.name,
+                    format!("({}ms)", $test.duration.as_millis()).black().bold(),
+                    $test.description
+                );
 
                 let status_text = match $test.status {
                     TestStatus::Success { .. } => "PASSED".green(),

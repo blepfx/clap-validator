@@ -1,17 +1,15 @@
 //! Tests for entire plugin libraries. These are mostly used to test plugin scanning behavior.
 
+use super::TestCase;
+use crate::tests::TestStatus;
+use anyhow::Result;
 use clap::ValueEnum;
 use std::path::Path;
 use std::process::Command;
-use std::time::Duration;
-
-use super::{TestCase, TestResult};
 
 mod factories;
 mod preset_discovery;
 mod scanning;
-
-const SCAN_TIME_LIMIT: Duration = Duration::from_millis(100);
 
 /// Tests for entire CLAP libraries. These are mostly to ensure good plugin scanning practices. See
 /// the module's heading for more information, and the `description` function below for a
@@ -56,7 +54,7 @@ impl<'a> TestCase<'a> for PluginLibraryTestCase {
             ),
             PluginLibraryTestCase::ScanTime => format!(
                 "Checks whether the plugin can be scanned in under {} milliseconds.",
-                SCAN_TIME_LIMIT.as_millis()
+                scanning::SCAN_TIME_LIMIT.as_millis()
             ),
             PluginLibraryTestCase::ScanRtldNow => String::from(
                 "Checks whether the plugin loads correctly when loaded using 'dlopen(..., \
@@ -91,8 +89,8 @@ impl<'a> TestCase<'a> for PluginLibraryTestCase {
             .arg(test_name);
     }
 
-    fn run_in_process(&self, library_path: Self::TestArgs) -> TestResult {
-        let status = match self {
+    fn run_in_process(&self, library_path: Self::TestArgs) -> Result<TestStatus> {
+        match self {
             PluginLibraryTestCase::PresetDiscoveryCrawl => {
                 preset_discovery::test_crawl(library_path, false)
             }
@@ -110,8 +108,6 @@ impl<'a> TestCase<'a> for PluginLibraryTestCase {
             PluginLibraryTestCase::CreateIdWithTrailingGarbage => {
                 factories::test_create_id_with_trailing_garbage(library_path)
             }
-        };
-
-        self.create_result(status)
+        }
     }
 }

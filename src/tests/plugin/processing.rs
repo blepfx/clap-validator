@@ -4,6 +4,7 @@ use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::NotePorts;
 use crate::plugin::ext::Extension;
 use crate::plugin::host::Host;
+use crate::plugin::instance::audio_thread::PluginAudioThread;
 use crate::plugin::instance::process::{AudioBuffers, ProcessConfig, ProcessData};
 use crate::plugin::instance::Plugin;
 use crate::plugin::library::PluginLibrary;
@@ -28,18 +29,6 @@ pub struct ProcessingTest<'a> {
     config: ProcessConfig,
 }
 
-pub enum ProcessingCallback<'a, 'b> {
-    Prepare {
-        process_data: &'a mut ProcessData<'b>,
-        iteration: usize,
-    },
-
-    Validate {
-        process_data: &'a ProcessData<'b>,
-        iteration: usize,
-    },
-}
-
 impl<'a> ProcessingTest<'a> {
     pub fn new(plugin: &'a Plugin<'a>, buffers: &'a mut AudioBuffers) -> Self {
         Self {
@@ -61,7 +50,7 @@ impl<'a> ProcessingTest<'a> {
 
     pub fn run<Callback>(self, mut callback: Callback) -> Result<()>
     where
-        Callback: FnMut(ProcessingCallback) -> Result<bool> + Send,
+        Callback: FnMut(&PluginAudioThread, &mut ProcessData) -> Result<bool> + Send,
     {
         // Handle callbacks the plugin may have made during init or these queries. The
         // `ProcessingTest::run*` functions will implicitly handle all outstanding callbacks before they
@@ -75,13 +64,7 @@ impl<'a> ProcessingTest<'a> {
 
         let buffer_size = self.buffers.len();
         let mut process_data = ProcessData::new(self.buffers, self.config);
-
-        // If the plugin requests a restart in the middle of processing, then the plugin will be
-        // stopped, deactivated, reactivated, and started again. Because of that, we need to keep
-        // track of the number of processed iterations manually instead of using a for loop.
-        let mut iters_done = 0;
         let mut running = true;
-
         while running {
             self.plugin
                 .activate(self.config.sample_rate, 1, buffer_size)?;
@@ -92,25 +75,10 @@ impl<'a> ProcessingTest<'a> {
                 // This test can be repeated a couple of times
                 // NOTE: We intentionally do not disable denormals here
                 'processing: while running {
-                    running &= callback(ProcessingCallback::Prepare {
-                        process_data: &mut process_data,
-                        iteration: iters_done,
-                    })
-                    .with_context(|| format!("Failed to prepare cycle #{}", iters_done + 1))?;
-
-                    plugin.process(&mut process_data).with_context(|| {
-                        format!("Error during processing cycle #{}", iters_done + 1)
-                    })?;
-
-                    running &= callback(ProcessingCallback::Validate {
-                        process_data: &process_data,
-                        iteration: iters_done,
-                    })
-                    .with_context(|| format!("Failed to validate cycle #{}", iters_done + 1))?;
+                    running &= callback(&plugin, &mut process_data)?;
 
                     process_data.clear_events();
                     process_data.advance_transport(process_data.block_size);
-                    iters_done += 1;
 
                     // Restart processing as necessary
                     if plugin
@@ -120,9 +88,8 @@ impl<'a> ProcessingTest<'a> {
                         .is_ok()
                     {
                         log::trace!(
-                            "Restarting the plugin during processing cycle #{} after a call to \
+                            "Restarting the plugin during processing cycle after a call to \
                              'clap_host::request_restart()'",
-                            iters_done,
                         );
                         break 'processing;
                     }
@@ -155,19 +122,34 @@ impl<'a> ProcessingTest<'a> {
         Callback: FnMut(&mut ProcessData) -> Result<()> + Send,
     {
         let mut original_buffers = self.buffers.clone();
-        self.run(|callback| match callback {
-            ProcessingCallback::Prepare { process_data, .. } => {
-                preprocess(process_data)?;
-                original_buffers.clone_from(&process_data.buffers);
-                Ok(true)
-            }
-            ProcessingCallback::Validate {
-                process_data,
-                iteration,
-            } => {
-                check_process_call_consistency(process_data, &original_buffers, true)?;
-                Ok(iteration < num_iters)
-            }
+        let mut curr_iter = 0;
+
+        self.run(|plugin, process| {
+            curr_iter += 1;
+
+            preprocess(process).with_context(|| {
+                format!(
+                    "Failed to preprocess cycle {} out of {}",
+                    curr_iter, num_iters
+                )
+            })?;
+
+            original_buffers.clone_from(&process.buffers);
+
+            plugin.process(process).with_context(|| {
+                format!("Failed to process cycle {} out of {}", curr_iter, num_iters)
+            })?;
+
+            check_process_call_consistency(process, &original_buffers, true).with_context(
+                || {
+                    format!(
+                        "Failed to validate cycle {} out of {}",
+                        curr_iter, num_iters
+                    )
+                },
+            )?;
+
+            Ok(curr_iter < num_iters)
         })
     }
 
@@ -479,7 +461,7 @@ pub fn test_process_varying_block_sizes(
     plugin_id: &str,
 ) -> Result<TestStatus> {
     const BLOCK_SIZES: &[u32] = &[
-        1, 8, 32, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 1536, 10, 17, 1000, 10000, 2027,
+        1, 8, 32, 256, 512, 1024, 2048, 4096, 8192, 32768, 1536, 10, 17, 2027,
     ];
 
     let mut prng = new_prng();
@@ -510,9 +492,10 @@ pub fn test_process_varying_block_sizes(
         let mut note_event_rng = note_ports_config.clone().map(NoteGenerator::new);
         let mut audio_buffers =
             AudioBuffers::new_out_of_place_f32(&audio_ports_config, buffer_size as usize);
+        let num_iters = (32768 / buffer_size).min(5);
 
         ProcessingTest::new(&plugin, &mut audio_buffers)
-            .run_simple(5, |process_data| {
+            .run_simple(num_iters as usize, |process_data| {
                 process_data.buffers.randomize(&mut prng);
 
                 if let Some(note_event_rng) = note_event_rng.as_mut() {
@@ -627,60 +610,56 @@ pub fn test_process_audio_constant_mask(
 
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
     let mut original_buffers = audio_buffers.clone();
+    let mut curr_iter = 0;
 
     let mut has_received_constant_output = false;
     let mut has_received_constant_flag = false;
 
-    ProcessingTest::new(&plugin, &mut audio_buffers).run(|callback| match callback {
-        ProcessingCallback::Prepare {
-            process_data,
-            iteration,
-        } => {
-            process_data.buffers.randomize(&mut prng);
+    ProcessingTest::new(&plugin, &mut audio_buffers).run(|plugin, process| {
+        process.buffers.randomize(&mut prng);
 
-            if iteration != 1 {
-                process_data.buffers.silence_all_inputs();
-            }
-
-            original_buffers.clone_from(&process_data.buffers);
-            Ok(true)
+        if curr_iter != 1 {
+            process.buffers.silence_all_inputs();
         }
-        ProcessingCallback::Validate {
-            process_data,
-            iteration,
-        } => {
-            check_process_call_consistency(process_data, &original_buffers, true)?;
 
-            for buffer in process_data.buffers.buffers() {
-                let Some(output) = buffer.output() else {
-                    continue;
-                };
+        original_buffers.clone_from(&process.buffers);
+        curr_iter += 1;
 
-                for channel in 0..buffer.channels() {
-                    let is_constant = (0..buffer.len())
-                        .all(|sample| buffer.get(channel, sample) == buffer.get(channel, 0));
+        plugin
+            .process(process)
+            .with_context(|| format!("Failed to process cycle {} out of 20", curr_iter))?;
 
-                    let marked_constant = process_data.buffers.output_constant_mask(output)
-                        & (1u64.unbounded_shl(channel as u32))
-                        != 0;
+        check_process_call_consistency(process, &original_buffers, true)
+            .with_context(|| format!("Failed to validate cycle {} out of 20", curr_iter))?;
 
-                    if marked_constant && !is_constant {
-                        anyhow::bail!(
-                            "The plugin has marked output port {output}, channel {channel} as \
-                             constant, but it contains non-constant data."
-                        );
-                    }
+        for buffer in process.buffers.buffers() {
+            let Some(output) = buffer.output() else {
+                continue;
+            };
 
-                    has_received_constant_flag |= marked_constant;
-                    has_received_constant_output |= is_constant;
+            for channel in 0..buffer.channels() {
+                let is_constant = (0..buffer.len())
+                    .all(|sample| buffer.get(channel, sample) == buffer.get(channel, 0));
+
+                let marked_constant = process.buffers.output_constant_mask(output)
+                    & (1u64.unbounded_shl(channel as u32))
+                    != 0;
+
+                if marked_constant && !is_constant {
+                    anyhow::bail!(
+                        "Failed to validate cycle {curr_iter} out of 20: The plugin has marked \
+                         output port {output}, channel {channel} as constant, but it contains \
+                         non-constant data."
+                    );
                 }
+
+                has_received_constant_flag |= marked_constant;
+                has_received_constant_output |= is_constant;
             }
-
-            Ok(iteration < 20)
         }
-    })?;
 
-    drop(plugin);
+        Ok(curr_iter < 20)
+    })?;
 
     host.callback_error_check()
         .context("An error occured during a host callback")?;

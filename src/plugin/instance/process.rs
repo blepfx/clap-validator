@@ -20,7 +20,7 @@ use rand_pcg::Pcg32;
 use std::ffi::c_void;
 use std::fmt::Debug;
 use std::pin::Pin;
-use std::ptr::null;
+use std::ptr::null_mut;
 
 use crate::plugin::ext::audio_ports::AudioPortConfig;
 use crate::util::check_null_ptr;
@@ -314,15 +314,15 @@ impl AudioBuffers {
 
                 clap_inputs[input as usize] = Some(clap_audio_buffer {
                     data32: if buffer.is_64bit() {
-                        null()
+                        null_mut()
                     } else {
-                        pointer_list.as_ptr() as *const _
+                        pointer_list.as_ptr() as *mut *mut f32
                     },
 
                     data64: if buffer.is_64bit() {
-                        pointer_list.as_ptr() as *const _
+                        pointer_list.as_ptr() as *mut *mut f64
                     } else {
-                        null()
+                        null_mut()
                     },
 
                     channel_count: pointer_list.len() as u32,
@@ -338,15 +338,15 @@ impl AudioBuffers {
 
                 clap_outputs[output as usize] = Some(clap_audio_buffer {
                     data32: if buffer.is_64bit() {
-                        null()
+                        null_mut()
                     } else {
-                        pointer_list.as_ptr() as *const _
+                        pointer_list.as_ptr() as *mut *mut f32
                     },
 
                     data64: if buffer.is_64bit() {
-                        pointer_list.as_ptr() as *const _
+                        pointer_list.as_ptr() as *mut *mut f64
                     } else {
-                        null()
+                        null_mut()
                     },
 
                     channel_count: pointer_list.len() as u32,

@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
-use clap_sys::factory::draft::preset_discovery::{clap_timestamp, CLAP_TIMESTAMP_UNKNOWN};
+use clap_sys::timestamp::{clap_timestamp, CLAP_TIMESTAMP_UNKNOWN};
 use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::path::PathBuf;

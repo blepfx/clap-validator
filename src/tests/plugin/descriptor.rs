@@ -1,22 +1,7 @@
 //! Tests surrounding plugin features.
 
 use anyhow::{Context, Result};
-use clap_sys::ext::audio_ports::{clap_plugin_audio_ports, CLAP_EXT_AUDIO_PORTS};
-use clap_sys::ext::audio_ports_config::{
-    clap_plugin_audio_ports_config, CLAP_EXT_AUDIO_PORTS_CONFIG,
-};
-use clap_sys::ext::gui::{clap_plugin_gui, CLAP_EXT_GUI};
-use clap_sys::ext::latency::{clap_plugin_latency, CLAP_EXT_LATENCY};
-use clap_sys::ext::note_name::{clap_plugin_note_name, CLAP_EXT_NOTE_NAME};
-use clap_sys::ext::note_ports::{clap_plugin_note_ports, CLAP_EXT_NOTE_PORTS};
-use clap_sys::ext::params::{clap_plugin_params, CLAP_EXT_PARAMS};
-use clap_sys::ext::posix_fd_support::{clap_plugin_posix_fd_support, CLAP_EXT_POSIX_FD_SUPPORT};
-use clap_sys::ext::render::{clap_plugin_render, CLAP_EXT_RENDER};
-use clap_sys::ext::state::{clap_plugin_state, CLAP_EXT_STATE};
-use clap_sys::ext::tail::{clap_plugin_tail, CLAP_EXT_TAIL};
-use clap_sys::ext::thread_pool::{clap_plugin_thread_pool, CLAP_EXT_THREAD_POOL};
-use clap_sys::ext::timer_support::{clap_plugin_timer_support, CLAP_EXT_TIMER_SUPPORT};
-use clap_sys::ext::voice_info::{clap_plugin_voice_info, CLAP_EXT_VOICE_INFO};
+use clap_sys::ext::*;
 use clap_sys::plugin_features::{
     CLAP_PLUGIN_FEATURE_ANALYZER, CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, CLAP_PLUGIN_FEATURE_INSTRUMENT,
     CLAP_PLUGIN_FEATURE_NOTE_DETECTOR, CLAP_PLUGIN_FEATURE_NOTE_EFFECT,
@@ -132,20 +117,81 @@ pub fn test_methods_non_null(library: &PluginLibrary, plugin_id: &str) -> Result
 
     // Check known extensions.
     unsafe {
-        check_extension::<clap_plugin_audio_ports>(&plugin, CLAP_EXT_AUDIO_PORTS)?;
-        check_extension::<clap_plugin_audio_ports_config>(&plugin, CLAP_EXT_AUDIO_PORTS_CONFIG)?;
-        check_extension::<clap_plugin_gui>(&plugin, CLAP_EXT_GUI)?;
-        check_extension::<clap_plugin_note_name>(&plugin, CLAP_EXT_NOTE_NAME)?;
-        check_extension::<clap_plugin_note_ports>(&plugin, CLAP_EXT_NOTE_PORTS)?;
-        check_extension::<clap_plugin_params>(&plugin, CLAP_EXT_PARAMS)?;
-        check_extension::<clap_plugin_state>(&plugin, CLAP_EXT_STATE)?;
-        check_extension::<clap_plugin_latency>(&plugin, CLAP_EXT_LATENCY)?;
-        check_extension::<clap_plugin_tail>(&plugin, CLAP_EXT_TAIL)?;
-        check_extension::<clap_plugin_posix_fd_support>(&plugin, CLAP_EXT_POSIX_FD_SUPPORT)?;
-        check_extension::<clap_plugin_timer_support>(&plugin, CLAP_EXT_TIMER_SUPPORT)?;
-        check_extension::<clap_plugin_thread_pool>(&plugin, CLAP_EXT_THREAD_POOL)?;
-        check_extension::<clap_plugin_render>(&plugin, CLAP_EXT_RENDER)?;
-        check_extension::<clap_plugin_voice_info>(&plugin, CLAP_EXT_VOICE_INFO)?;
+        check_extension::<ambisonic::clap_plugin_ambisonic>(
+            &plugin,
+            ambisonic::CLAP_EXT_AMBISONIC,
+        )?;
+        check_extension::<audio_ports::clap_plugin_audio_ports>(
+            &plugin,
+            audio_ports::CLAP_EXT_AUDIO_PORTS,
+        )?;
+        check_extension::<audio_ports_activation::clap_plugin_audio_ports_activation>(
+            &plugin,
+            audio_ports_activation::CLAP_EXT_AUDIO_PORTS_ACTIVATION,
+        )?;
+        check_extension::<audio_ports_config::clap_plugin_audio_ports_config_info>(
+            &plugin,
+            audio_ports_config::CLAP_EXT_AUDIO_PORTS_CONFIG_INFO,
+        )?;
+        check_extension::<audio_ports_config::clap_plugin_audio_ports_config>(
+            &plugin,
+            audio_ports_config::CLAP_EXT_AUDIO_PORTS_CONFIG,
+        )?;
+        check_extension::<configurable_audio_ports::clap_plugin_configurable_audio_ports>(
+            &plugin,
+            configurable_audio_ports::CLAP_EXT_CONFIGURABLE_AUDIO_PORTS,
+        )?;
+        check_extension::<context_menu::clap_plugin_context_menu>(
+            &plugin,
+            context_menu::CLAP_EXT_CONTEXT_MENU,
+        )?;
+        check_extension::<gui::clap_plugin_gui>(&plugin, gui::CLAP_EXT_GUI)?;
+        check_extension::<note_name::clap_plugin_note_name>(
+            &plugin,
+            note_name::CLAP_EXT_NOTE_NAME,
+        )?;
+        check_extension::<note_ports::clap_plugin_note_ports>(
+            &plugin,
+            note_ports::CLAP_EXT_NOTE_PORTS,
+        )?;
+        check_extension::<params::clap_plugin_params>(&plugin, params::CLAP_EXT_PARAMS)?;
+        check_extension::<param_indication::clap_plugin_param_indication>(
+            &plugin,
+            param_indication::CLAP_EXT_PARAM_INDICATION,
+        )?;
+        check_extension::<preset_load::clap_plugin_preset_load>(
+            &plugin,
+            preset_load::CLAP_EXT_PRESET_LOAD,
+        )?;
+        check_extension::<state::clap_plugin_state>(&plugin, state::CLAP_EXT_STATE)?;
+        check_extension::<state_context::clap_plugin_state_context>(
+            &plugin,
+            state_context::CLAP_EXT_STATE_CONTEXT,
+        )?;
+        check_extension::<render::clap_plugin_render>(&plugin, render::CLAP_EXT_RENDER)?;
+        check_extension::<remote_controls::clap_host_remote_controls>(
+            &plugin,
+            remote_controls::CLAP_EXT_REMOTE_CONTROLS,
+        )?;
+        check_extension::<surround::clap_plugin_surround>(&plugin, surround::CLAP_EXT_SURROUND)?;
+        check_extension::<latency::clap_plugin_latency>(&plugin, latency::CLAP_EXT_LATENCY)?;
+        check_extension::<tail::clap_plugin_tail>(&plugin, tail::CLAP_EXT_TAIL)?;
+        check_extension::<posix_fd_support::clap_plugin_posix_fd_support>(
+            &plugin,
+            posix_fd_support::CLAP_EXT_POSIX_FD_SUPPORT,
+        )?;
+        check_extension::<timer_support::clap_plugin_timer_support>(
+            &plugin,
+            timer_support::CLAP_EXT_TIMER_SUPPORT,
+        )?;
+        check_extension::<thread_pool::clap_plugin_thread_pool>(
+            &plugin,
+            thread_pool::CLAP_EXT_THREAD_POOL,
+        )?;
+        check_extension::<voice_info::clap_plugin_voice_info>(
+            &plugin,
+            voice_info::CLAP_EXT_VOICE_INFO,
+        )?;
     }
 
     Ok(TestStatus::Success { details: None })

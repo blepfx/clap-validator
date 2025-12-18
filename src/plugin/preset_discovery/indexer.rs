@@ -11,7 +11,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::thread::ThreadId;
 
-use clap_sys::factory::draft::preset_discovery::{
+use clap_sys::factory::preset_discovery::{
     clap_preset_discovery_filetype, clap_preset_discovery_indexer, clap_preset_discovery_location,
     clap_preset_discovery_location_kind, clap_preset_discovery_soundpack,
     CLAP_PRESET_DISCOVERY_IS_DEMO_CONTENT, CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT,

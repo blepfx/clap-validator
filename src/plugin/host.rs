@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use clap_sys::ext::audio_ports::{clap_host_audio_ports, CLAP_EXT_AUDIO_PORTS};
-use clap_sys::ext::draft::preset_load::{clap_host_preset_load, CLAP_EXT_PRESET_LOAD};
+use clap_sys::ext::latency::{clap_host_latency, CLAP_EXT_LATENCY};
 use clap_sys::ext::note_ports::{
     clap_host_note_ports, clap_note_dialect, CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_CLAP,
     CLAP_NOTE_DIALECT_MIDI, CLAP_NOTE_DIALECT_MIDI_MPE,
@@ -10,9 +10,12 @@ use clap_sys::ext::note_ports::{
 use clap_sys::ext::params::{
     clap_host_params, clap_param_clear_flags, clap_param_rescan_flags, CLAP_EXT_PARAMS,
 };
+use clap_sys::ext::preset_load::{clap_host_preset_load, CLAP_EXT_PRESET_LOAD};
 use clap_sys::ext::state::{clap_host_state, CLAP_EXT_STATE};
+use clap_sys::ext::tail::{clap_host_tail, CLAP_EXT_TAIL};
 use clap_sys::ext::thread_check::{clap_host_thread_check, CLAP_EXT_THREAD_CHECK};
-use clap_sys::factory::draft::preset_discovery::clap_preset_discovery_location_kind;
+use clap_sys::ext::voice_info::{clap_host_voice_info, CLAP_EXT_VOICE_INFO};
+use clap_sys::factory::preset_discovery::clap_preset_discovery_location_kind;
 use clap_sys::host::clap_host;
 use clap_sys::id::clap_id;
 use clap_sys::plugin::clap_plugin;
@@ -78,6 +81,9 @@ pub struct Host {
     clap_host_preset_load: clap_host_preset_load,
     clap_host_state: clap_host_state,
     clap_host_thread_check: clap_host_thread_check,
+    clap_host_latency: clap_host_latency,
+    clap_host_tail: clap_host_tail,
+    clap_host_voice_info: clap_host_voice_info,
 }
 
 /// Runtime information about a plugin instance. This keeps track of pending callbacks and things
@@ -274,6 +280,15 @@ impl Host {
             clap_host_thread_check: clap_host_thread_check {
                 is_main_thread: Some(Self::ext_thread_check_is_main_thread),
                 is_audio_thread: Some(Self::ext_thread_check_is_audio_thread),
+            },
+            clap_host_latency: clap_host_latency {
+                changed: Some(Self::ext_latency_changed),
+            },
+            clap_host_tail: clap_host_tail {
+                changed: Some(Self::ext_tail_changed),
+            },
+            clap_host_voice_info: clap_host_voice_info {
+                changed: Some(Self::ext_voice_info_changed),
             },
         })
     }
@@ -489,6 +504,12 @@ impl Host {
             &this.clap_host_state as *const _ as *const c_void
         } else if extension_id_cstr == CLAP_EXT_THREAD_CHECK {
             &this.clap_host_thread_check as *const _ as *const c_void
+        } else if extension_id_cstr == CLAP_EXT_LATENCY {
+            &this.clap_host_latency as *const _ as *const c_void
+        } else if extension_id_cstr == CLAP_EXT_TAIL {
+            &this.clap_host_tail as *const _ as *const c_void
+        } else if extension_id_cstr == CLAP_EXT_VOICE_INFO {
+            &this.clap_host_voice_info as *const _ as *const c_void
         } else {
             std::ptr::null()
         }
@@ -681,5 +702,35 @@ impl Host {
         let (_, this) = InstanceState::from_clap_host_ptr(host);
 
         this.is_audio_thread(std::thread::current().id())
+    }
+
+    unsafe extern "C" fn ext_latency_changed(host: *const clap_host) {
+        check_null_ptr!(host, (*host).host_data);
+        let (instance, this) = InstanceState::from_clap_host_ptr(host);
+
+        this.assert_main_thread("clap_host_latency::changed()");
+
+        if instance.status.load() != PluginStatus::Activating {
+            this.set_callback_error(
+                "'clap_host_latency::changed()' must only be called within \
+                 'clap_plugin::activate()'",
+            );
+        }
+    }
+
+    unsafe extern "C" fn ext_tail_changed(host: *const clap_host) {
+        check_null_ptr!(host, (*host).host_data);
+        let (_, this) = InstanceState::from_clap_host_ptr(host);
+
+        this.assert_audio_thread("clap_host_tail::changed()");
+        log::debug!("TODO: Handle 'clap_host_tail::changed()'");
+    }
+
+    unsafe extern "C" fn ext_voice_info_changed(host: *const clap_host) {
+        check_null_ptr!(host, (*host).host_data);
+        let (_, this) = InstanceState::from_clap_host_ptr(host);
+
+        this.assert_main_thread("clap_host_voice_info::changed()");
+        log::debug!("TODO: Handle 'clap_host_voice_info::changed()'");
     }
 }

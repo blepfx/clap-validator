@@ -1,7 +1,7 @@
 //! An abstraction for the preset discovery factory.
 
 use anyhow::{Context, Result};
-use clap_sys::factory::draft::preset_discovery::{
+use clap_sys::factory::preset_discovery::{
     clap_preset_discovery_factory, clap_preset_discovery_provider_descriptor,
 };
 use clap_sys::version::{clap_version, clap_version_is_compatible};

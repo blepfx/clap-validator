@@ -1,7 +1,7 @@
 //! Tests involving the preset discovery factory.
 
 use anyhow::{Context, Result};
-use clap_sys::factory::draft::preset_discovery::CLAP_PRESET_DISCOVERY_FACTORY_ID;
+use clap_sys::factory::preset_discovery::CLAP_PRESET_DISCOVERY_FACTORY_ID;
 use std::collections::BTreeMap;
 use std::path::Path;
 

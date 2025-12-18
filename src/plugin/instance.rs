@@ -62,6 +62,7 @@ pub enum PluginStatus {
     #[default]
     Uninitialized,
     Deactivated,
+    Activating,
     Activated,
     Processing,
 }
@@ -88,7 +89,7 @@ impl Drop for Plugin<'_> {
         match self.status() {
             PluginStatus::Uninitialized | PluginStatus::Deactivated => (),
             PluginStatus::Activated => self.deactivate(),
-            status @ PluginStatus::Processing => panic!(
+            status => panic!(
                 "The plugin was in an invalid state '{status:?}' when the instance got dropped, \
                  this is a clap-validator bug"
             ),
@@ -267,6 +268,9 @@ impl<'lib> Plugin<'lib> {
         assert!(min_buffer_size >= 1);
         assert!(max_buffer_size >= min_buffer_size);
 
+        // we need to track the `Activating` state to validate that we call clap_host_latency::changed only within the activation call.
+        self.state.status.store(PluginStatus::Activating);
+
         let plugin = self.as_ptr();
         if unsafe_clap_call! {
             plugin=>activate(plugin, sample_rate, min_buffer_size as u32, max_buffer_size as u32)
@@ -274,6 +278,7 @@ impl<'lib> Plugin<'lib> {
             self.state.status.store(PluginStatus::Activated);
             Ok(())
         } else {
+            self.state.status.store(PluginStatus::Deactivated);
             anyhow::bail!("'clap_plugin::activate()' returned false.")
         }
     }

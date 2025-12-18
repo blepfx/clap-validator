@@ -4,11 +4,13 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use clap_sys::factory::draft::preset_discovery::{
-    clap_plugin_id, clap_preset_discovery_metadata_receiver, clap_timestamp,
-    CLAP_PRESET_DISCOVERY_IS_DEMO_CONTENT, CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT,
-    CLAP_PRESET_DISCOVERY_IS_FAVORITE, CLAP_PRESET_DISCOVERY_IS_USER_CONTENT,
+use clap_sys::factory::preset_discovery::{
+    clap_preset_discovery_metadata_receiver, CLAP_PRESET_DISCOVERY_IS_DEMO_CONTENT,
+    CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT, CLAP_PRESET_DISCOVERY_IS_FAVORITE,
+    CLAP_PRESET_DISCOVERY_IS_USER_CONTENT,
 };
+use clap_sys::timestamp::clap_timestamp;
+use clap_sys::universal_plugin_id::clap_universal_plugin_id;
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::cell::RefCell;
@@ -507,7 +509,7 @@ impl<'a> MetadataReceiver<'a> {
 
     unsafe extern "C" fn add_plugin_id(
         receiver: *const clap_preset_discovery_metadata_receiver,
-        plugin_id: *const clap_plugin_id,
+        plugin_id: *const clap_universal_plugin_id,
     ) {
         check_null_ptr!(receiver, (*receiver).receiver_data, plugin_id);
         let this = &*((*receiver).receiver_data as *const Self);

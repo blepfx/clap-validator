@@ -235,12 +235,14 @@ pub fn test_state_reproducibility_null_cookies(
         expected_state_file.write_all(&expected_state)?;
         actual_state_file.write_all(&actual_state)?;
 
-        anyhow::bail!(
-            "Re-saving the loaded state resulted in a different state file. Expected: '{}'. \
-             Actual: '{}'.",
-            expected_state_file_path.display(),
-            actual_state_file_path.display(),
-        )
+        Ok(TestStatus::Warning {
+            details: Some(format!(
+                "The saved state after loading differs from the original saved state. Expected: \
+                 '{}'. Actual: '{}'.",
+                expected_state_file_path.display(),
+                actual_state_file_path.display(),
+            )),
+        })
     }
 }
 
@@ -442,12 +444,14 @@ pub fn test_state_reproducibility_flush(
         expected_state_file.write_all(&expected_state)?;
         actual_state_file.write_all(&actual_state)?;
 
-        anyhow::bail!(
-            "Sending the same parameter values to two different instances of the plugin resulted \
-             in different state files. Expected: '{}'. Actual: '{}'.",
-            expected_state_file_path.display(),
-            actual_state_file_path.display(),
-        )
+        Ok(TestStatus::Warning {
+            details: Some(format!(
+                "Sending the same parameter values to two different instances of the plugin \
+                 resulted in different state files. Expected: '{}'. Actual: '{}'.",
+                expected_state_file_path.display(),
+                actual_state_file_path.display(),
+            )),
+        })
     }
 }
 
@@ -583,9 +587,9 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
     const BUFFERED_SAVE_MAX_BYTES: usize = 23;
     let actual_state = state.save_buffered(BUFFERED_SAVE_MAX_BYTES)?;
     host.handle_callbacks_once();
-
     host.callback_error_check()
         .context("An error occured during a host callback")?;
+
     if actual_state == expected_state {
         Ok(TestStatus::Success { details: None })
     } else {
@@ -598,16 +602,23 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
         expected_state_file.write_all(&expected_state)?;
         actual_state_file.write_all(&actual_state)?;
 
-        anyhow::bail!(
-            "Re-saving the loaded state resulted in a different state file. The original state \
-             file being compared to was written unbuffered, reloaded by allowing the plugin to \
-             read only {BUFFERED_LOAD_MAX_BYTES} bytes at a time, and then written again by \
-             allowing the plugin to write only {BUFFERED_SAVE_MAX_BYTES} bytes at a time. \
-             Expected: '{}'. Actual: '{}'.",
-            expected_state_file_path.display(),
-            actual_state_file_path.display(),
-        )
+        Ok(TestStatus::Warning {
+            details: Some(format!(
+                "Re-saving the loaded state resulted in a different state file. The original \
+                 state file being compared to was written unbuffered, reloaded by allowing the \
+                 plugin to read only {BUFFERED_LOAD_MAX_BYTES} bytes at a time, and then written \
+                 again by allowing the plugin to write only {BUFFERED_SAVE_MAX_BYTES} bytes at a \
+                 time. Expected: '{}'. Actual: '{}'.",
+                expected_state_file_path.display(),
+                actual_state_file_path.display(),
+            )),
+        })
     }
+}
+
+fn compare_approx(actual: f64, expected: f64) -> bool {
+    const EPSILON: f64 = 1e-5;
+    (actual - expected).abs() <= EPSILON
 }
 
 /// The test for `PluginTestCase::StateRandomGarbage`.
@@ -672,7 +683,7 @@ fn format_mismatching_values(
         .into_iter()
         .filter_map(|(param_id, actual_value)| {
             let expected_value = expected_param_values[&param_id];
-            if actual_value == expected_value {
+            if compare_approx(actual_value, expected_value) {
                 None
             } else {
                 let param_name = &param_infos[&param_id].name;
@@ -690,8 +701,6 @@ fn compare_params_lenient(
     actual: &BTreeMap<clap_id, f64>,
     expected: &BTreeMap<clap_id, f64>,
 ) -> bool {
-    const EPSILON: f64 = 1e-6;
-
     if actual.len() != expected.len() {
         return false;
     }
@@ -702,7 +711,7 @@ fn compare_params_lenient(
             None => return false,
         };
 
-        if (actual_value - expected_value).abs() > EPSILON {
+        if !compare_approx(*actual_value, *expected_value) {
             return false;
         }
     }

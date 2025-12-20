@@ -250,7 +250,9 @@ impl<'a> ProcessData<'a> {
 
     /// Advance the transport by a certain number of samples. Make sure to also call
     /// [`clear_events()`][Self::clear_events()].
-    pub fn advance_transport(&mut self, samples: u32) {
+    pub fn advance_next(&mut self, samples: u32) {
+        self.input_events.events.lock().clear();
+        self.output_events.events.lock().clear();
         self.sample_pos += samples;
 
         self.transport_info.song_pos_beats =
@@ -260,13 +262,6 @@ impl<'a> ProcessData<'a> {
         self.transport_info.song_pos_seconds = ((self.sample_pos as f64 / self.config.sample_rate)
             * CLAP_SECTIME_FACTOR as f64)
             .round() as i64;
-    }
-
-    /// Clear the event queues. Make sure to also call
-    /// [`advance_transport()`][Self::advance_transport()].
-    pub fn clear_events(&mut self) {
-        self.input_events.events.lock().clear();
-        self.output_events.events.lock().clear();
     }
 }
 
@@ -493,6 +488,14 @@ impl AudioBuffers {
                     }
                 }
             }
+        }
+
+        for input in &mut self.clap_inputs {
+            input.constant_mask = 0;
+        }
+
+        for output in &mut self.clap_outputs {
+            output.constant_mask = 0;
         }
     }
 

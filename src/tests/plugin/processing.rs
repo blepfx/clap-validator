@@ -76,9 +76,7 @@ impl<'a> ProcessingTest<'a> {
                 // NOTE: We intentionally do not disable denormals here
                 'processing: while running {
                     running &= callback(&plugin, &mut process_data)?;
-
-                    process_data.clear_events();
-                    process_data.advance_transport(process_data.block_size);
+                    process_data.advance_next(process_data.block_size);
 
                     // Restart processing as necessary
                     if plugin
@@ -641,7 +639,7 @@ pub fn test_process_audio_constant_mask(
                 let is_constant = (0..buffer.len())
                     .all(|sample| buffer.get(channel, sample) == buffer.get(channel, 0));
 
-                let marked_constant = process.buffers.output_constant_mask(output)
+                let marked_constant = dbg!(process.buffers.output_constant_mask(output))
                     & (1u64.unbounded_shl(channel as u32))
                     != 0;
 

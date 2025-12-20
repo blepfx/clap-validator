@@ -180,7 +180,6 @@ impl InstanceState {
         // We need to get the pointer to the pinned `InstanceState` into the `clap_host::host_data`
         // field
         instance.clap_host.lock().host_data = &*instance as *const Self as *mut c_void;
-
         instance
     }
 
@@ -709,7 +708,6 @@ impl Host {
         let (instance, this) = InstanceState::from_clap_host_ptr(host);
 
         this.assert_main_thread("clap_host_latency::changed()");
-
         if instance.status.load() != PluginStatus::Activating {
             this.set_callback_error(
                 "'clap_host_latency::changed()' must only be called within \

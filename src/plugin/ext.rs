@@ -6,6 +6,7 @@ use std::ffi::CStr;
 use std::ptr::NonNull;
 
 pub mod audio_ports;
+pub mod latency;
 pub mod note_ports;
 pub mod params;
 pub mod preset_load;

@@ -52,9 +52,7 @@ impl<'a> ProcessingTest<'a> {
     where
         Callback: FnMut(&PluginAudioThread, &mut ProcessData) -> Result<bool> + Send,
     {
-        // Handle callbacks the plugin may have made during init or these queries. The
-        // `ProcessingTest::run*` functions will implicitly handle all outstanding callbacks before they
-        // return.
+        // Handle callbacks the plugin may have made during init or these queries.
         self.plugin.host().handle_callbacks_once();
 
         self.plugin
@@ -639,7 +637,7 @@ pub fn test_process_audio_constant_mask(
                 let is_constant = (0..buffer.len())
                     .all(|sample| buffer.get(channel, sample) == buffer.get(channel, 0));
 
-                let marked_constant = dbg!(process.buffers.output_constant_mask(output))
+                let marked_constant = process.buffers.output_constant_mask(output)
                     & (1u64.unbounded_shl(channel as u32))
                     != 0;
 

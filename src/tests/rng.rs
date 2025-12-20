@@ -515,6 +515,13 @@ impl NoteGenerator {
              validator"
         );
     }
+
+    pub fn reset(&mut self) {
+        self.next_note_id = 0;
+        for active_notes in &mut self.active_notes {
+            active_notes.clear();
+        }
+    }
 }
 
 impl NoteEventType {

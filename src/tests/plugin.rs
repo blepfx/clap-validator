@@ -140,7 +140,7 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 params::FUZZ_RUNS_PER_PERMUTATION
             ),
             PluginTestCase::ParamSetWrongNamespace => String::from(
-                "Sends events to the plugin with the 'CLAP_EVENT_PARAM_VALUE' event tyep but with \
+                "Sends events to the plugin with the 'CLAP_EVENT_PARAM_VALUE' event type but with \
                  a mismatching namespace ID. Asserts that the plugin's parameter values don't \
                  change.",
             ),

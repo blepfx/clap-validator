@@ -343,10 +343,10 @@ pub fn test_process_varying_sample_rates(
             "Error while processing with {:.2}hz sample rate",
             sample_rate
         ))?;
-
-        host.callback_error_check()
-            .context("An error occured during a host callback")?;
     }
+
+    host.callback_error_check()
+        .context("An error occured during a host callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -413,10 +413,10 @@ pub fn test_process_varying_block_sizes(
             "Error while processing with buffer size of {}",
             buffer_size
         ))?;
-
-        host.callback_error_check()
-            .context("An error occured during a host callback")?;
     }
+
+    host.callback_error_check()
+        .context("An error occured during a host callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -663,6 +663,9 @@ pub fn test_process_reset_determinism(
     if !audio_output[1].is_same(&audio_output[2]) {
         anyhow::bail!("Plugin output differs after reset");
     }
+
+    host.callback_error_check()
+        .context("An error occured during a host callback")?;
 
     Ok(TestStatus::Success { details: None })
 }

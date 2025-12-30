@@ -227,10 +227,11 @@ impl InstanceState {
 impl Drop for Host {
     fn drop(&mut self) {
         if let Some(error) = self.callback_error.borrow_mut().take() {
-            log::error!(
+            // not an error because this can happen on a failing test
+            log::trace!(
                 "The validator's host has detected a callback error but this error has not been \
-                 used as part of the test result. This is a clap-validator bug. The error message \
-                 is: {error}"
+                 used as part of the test result. This could be a clap-validator bug. The error \
+                 message is: {error}"
             )
         }
     }

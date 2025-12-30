@@ -10,8 +10,8 @@ pub mod preset_discovery;
 /// if this is not the case. This is used to ensure the validator's correctness.
 ///
 /// Requires a `.status()` method to exist on `$self`.
-macro_rules! assert_plugin_state_eq {
-    ($self:expr, $expected:expr) => {
+macro_rules! assert_plugin_state {
+    ($self:expr, state == $expected:expr) => {
         let status = $self.status();
         if status != $expected {
             panic!(
@@ -21,42 +21,39 @@ macro_rules! assert_plugin_state_eq {
             )
         }
     };
-}
 
-/// Used for asserting that the plugin is a lower state then the specified one before calling a
-/// function. Hard panics if this is not the case. This is used to ensure the validator's
-/// correctness.
-///
-/// Requires a `.status()` method to exist on `$self`.
-macro_rules! assert_plugin_state_lt {
-    ($self:expr, $other:expr) => {
+    ($self:expr, state != $expected:expr) => {
         let status = $self.status();
-        if status >= $other {
+        if status == $expected {
+            panic!(
+                "Invalid plugin function call while the plugin is in an incorrect state ({:?} != \
+                 {:?}). This is a bug in the validator.",
+                status, $expected
+            )
+        }
+    };
+
+    ($self:expr, state < $expected:expr) => {
+        let status = $self.status();
+        if status >= $expected {
             panic!(
                 "Invalid plugin function call while the plugin is in an incorrect state ({:?} >= \
                  {:?}). This is a bug in the validator.",
-                status, $other
+                status, $expected
             )
         }
     };
-}
 
-/// Used for asserting that the plugin has been initialized. Hard panics if this is not the case.
-/// This is used to ensure the validator's correctness.
-///
-/// Requires a `.status()` method to exist on `$self`.
-macro_rules! assert_plugin_state_initialized {
-    ($self:expr) => {
+    ($self:expr, state >= $expected:expr) => {
         let status = $self.status();
-        if status == PluginStatus::Uninitialized {
+        if status < $expected {
             panic!(
-                "Invalid plugin function call while the plugin has not yet been initialized. This \
-                 is a bug in the validator."
+                "Invalid plugin function call while the plugin is in an incorrect state ({:?} <= \
+                 {:?}). This is a bug in the validator.",
+                status, $expected
             )
         }
     };
 }
 
-pub(crate) use assert_plugin_state_eq;
-pub(crate) use assert_plugin_state_initialized;
-pub(crate) use assert_plugin_state_lt;
+pub(crate) use assert_plugin_state;

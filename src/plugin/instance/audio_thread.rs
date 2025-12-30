@@ -11,13 +11,12 @@ use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
-use crate::plugin::host::InstanceState;
-use crate::util::unsafe_clap_call;
-
+use super::assert_plugin_state;
 use super::process::ProcessData;
-use super::{assert_plugin_state_eq, assert_plugin_state_initialized};
 use super::{Plugin, PluginStatus};
 use crate::plugin::ext::Extension;
+use crate::plugin::host::InstanceState;
+use crate::util::unsafe_clap_call;
 
 /// An audio thread equivalent to [`Plugin`]. This version only allows audio thread functions to be
 /// called. It can be constructed using [`Plugin::on_audio_thread()`].
@@ -85,7 +84,7 @@ impl<'a> PluginAudioThread<'a> {
     // TODO: Remove this unused attribute once we implement audio thread extensions
     #[allow(unused)]
     pub fn get_extension<T: Extension<&'a Self>>(&'a self) -> Option<T> {
-        assert_plugin_state_initialized!(self);
+        assert_plugin_state!(self, state != PluginStatus::Uninitialized);
 
         let plugin = self.as_ptr();
         let extension_ptr =
@@ -105,7 +104,7 @@ impl<'a> PluginAudioThread<'a> {
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
     pub fn start_processing(&self) -> Result<()> {
-        assert_plugin_state_eq!(self, PluginStatus::Activated);
+        assert_plugin_state!(self, state == PluginStatus::Activated);
 
         let plugin = self.as_ptr();
         if unsafe_clap_call! { plugin=>start_processing(plugin) } {
@@ -121,7 +120,7 @@ impl<'a> PluginAudioThread<'a> {
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
     pub fn process(&self, process_data: &mut ProcessData) -> Result<ProcessStatus> {
-        assert_plugin_state_eq!(self, PluginStatus::Processing);
+        assert_plugin_state!(self, state == PluginStatus::Processing);
 
         let plugin = self.as_ptr();
         let result = process_data.with_clap_process_data(|clap_process_data| {
@@ -145,7 +144,7 @@ impl<'a> PluginAudioThread<'a> {
 
     /// Reset the internal state of the plugin.
     pub fn reset(&self) {
-        assert_plugin_state_eq!(self, PluginStatus::Processing);
+        assert_plugin_state!(self, state >= PluginStatus::Activated);
 
         let plugin = self.as_ptr();
         unsafe_clap_call! { plugin=>reset(plugin) };
@@ -155,7 +154,7 @@ impl<'a> PluginAudioThread<'a> {
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
     pub fn stop_processing(&self) {
-        assert_plugin_state_eq!(self, PluginStatus::Processing);
+        assert_plugin_state!(self, state == PluginStatus::Processing);
 
         let plugin = self.as_ptr();
         unsafe_clap_call! { plugin=>stop_processing(plugin) };

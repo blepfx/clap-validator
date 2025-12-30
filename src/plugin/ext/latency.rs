@@ -1,5 +1,6 @@
 use crate::{
     plugin::{
+        assert_plugin_state,
         ext::Extension,
         instance::{Plugin, PluginStatus},
     },
@@ -28,11 +29,7 @@ impl<'a> Extension<&'a Plugin<'a>> for Latency<'a> {
 
 impl<'a> Latency<'a> {
     pub fn get(&self) -> u32 {
-        assert!(
-            self.plugin.status() >= PluginStatus::Activating,
-            "The 'latency' extension's 'get' function can only be called while the plugin is \
-             activating or active. This is a bug in the validator."
-        );
+        assert_plugin_state!(self.plugin, state == PluginStatus::Activating);
 
         let latency = self.latency.as_ptr();
         let plugin = self.plugin.as_ptr();

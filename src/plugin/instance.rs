@@ -11,9 +11,9 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use super::assert_plugin_state;
 use super::ext::Extension;
 use super::library::{PluginLibrary, PluginMetadata};
-use super::{assert_plugin_state_eq, assert_plugin_state_initialized};
 use crate::plugin::host::{CallbackTask, Host, InstanceState};
 use crate::util::unsafe_clap_call;
 use audio_thread::PluginAudioThread;
@@ -175,7 +175,7 @@ impl<'lib> Plugin<'lib> {
     /// this extension. Returns `None` if it does not. The plugin needs to be initialized using
     /// [`init()`][Self::init()] before this may be called.
     pub fn get_extension<'a, T: Extension<&'a Self>>(&'a self) -> Option<T> {
-        assert_plugin_state_initialized!(self);
+        assert_plugin_state!(self, state != PluginStatus::Uninitialized);
 
         let plugin = self.as_ptr();
         let extension_ptr = unsafe_clap_call! {
@@ -202,7 +202,7 @@ impl<'lib> Plugin<'lib> {
         &'a self,
         f: F,
     ) -> T {
-        assert_plugin_state_eq!(self, PluginStatus::Activated);
+        assert_plugin_state!(self, state == PluginStatus::Activated);
 
         crossbeam::scope(|s| {
             let unsafe_self_wrapper = PluginSendWrapper(self);
@@ -242,7 +242,7 @@ impl<'lib> Plugin<'lib> {
 
     /// Initialize the plugin. This needs to be called before doing anything else.
     pub fn init(&self) -> Result<()> {
-        assert_plugin_state_eq!(self, PluginStatus::Uninitialized);
+        assert_plugin_state!(self, state == PluginStatus::Uninitialized);
 
         let plugin = self.as_ptr();
         if unsafe_clap_call! { plugin=>init(plugin) } {
@@ -262,7 +262,7 @@ impl<'lib> Plugin<'lib> {
         min_buffer_size: usize,
         max_buffer_size: usize,
     ) -> Result<()> {
-        assert_plugin_state_eq!(self, PluginStatus::Deactivated);
+        assert_plugin_state!(self, state == PluginStatus::Deactivated);
 
         // Apparently 0 is invalid here
         assert!(min_buffer_size >= 1);
@@ -287,7 +287,7 @@ impl<'lib> Plugin<'lib> {
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
     pub fn deactivate(&self) {
-        assert_plugin_state_eq!(self, PluginStatus::Activated);
+        assert_plugin_state!(self, state == PluginStatus::Activated);
 
         let plugin = self.as_ptr();
         unsafe_clap_call! { plugin=>deactivate(plugin) };

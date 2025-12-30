@@ -2,24 +2,24 @@
 
 use anyhow::{Context, Result};
 use clap_sys::ext::params::{
-    CLAP_EXT_PARAMS, CLAP_PARAM_IS_AUTOMATABLE, CLAP_PARAM_IS_AUTOMATABLE_PER_CHANNEL,
+    clap_param_info, clap_param_info_flags, clap_plugin_params, CLAP_EXT_PARAMS,
+    CLAP_PARAM_IS_AUTOMATABLE, CLAP_PARAM_IS_AUTOMATABLE_PER_CHANNEL,
     CLAP_PARAM_IS_AUTOMATABLE_PER_KEY, CLAP_PARAM_IS_AUTOMATABLE_PER_NOTE_ID,
     CLAP_PARAM_IS_AUTOMATABLE_PER_PORT, CLAP_PARAM_IS_BYPASS, CLAP_PARAM_IS_HIDDEN,
     CLAP_PARAM_IS_MODULATABLE, CLAP_PARAM_IS_MODULATABLE_PER_CHANNEL,
     CLAP_PARAM_IS_MODULATABLE_PER_KEY, CLAP_PARAM_IS_MODULATABLE_PER_NOTE_ID,
     CLAP_PARAM_IS_MODULATABLE_PER_PORT, CLAP_PARAM_IS_READONLY, CLAP_PARAM_IS_STEPPED,
-    clap_param_info, clap_param_info_flags, clap_plugin_params,
 };
 use clap_sys::id::clap_id;
 use clap_sys::string_sizes::CLAP_NAME_SIZE;
 use std::collections::BTreeMap;
-use std::ffi::{CStr, CString, c_void};
+use std::ffi::{c_void, CStr, CString};
 use std::ops::RangeInclusive;
 use std::pin::Pin;
 use std::ptr::NonNull;
 
 use super::Extension;
-use crate::plugin::assert_plugin_state_lt;
+use crate::plugin::assert_plugin_state;
 use crate::plugin::instance::process::EventQueue;
 use crate::plugin::instance::{Plugin, PluginStatus};
 use crate::util::{self, c_char_slice_to_string, unsafe_clap_call};
@@ -329,7 +329,7 @@ impl Params<'_> {
     pub fn flush(&self, input_events: &Pin<Box<EventQueue>>, output_events: &Pin<Box<EventQueue>>) {
         // This may only be called on the audio thread when the plugin is active. This object is the
         // main thread interface for the parameters extension.
-        assert_plugin_state_lt!(self, PluginStatus::Activated);
+        assert_plugin_state!(self, state < PluginStatus::Activated);
 
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();

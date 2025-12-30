@@ -13,9 +13,9 @@ use crate::plugin::ext::note_ports::NotePorts;
 use crate::plugin::ext::params::Params;
 use crate::plugin::ext::Extension;
 use crate::plugin::host::Host;
-use crate::plugin::instance::process::{AudioBuffers, Event};
+use crate::plugin::instance::process::{AudioBuffers, Event, ProcessData};
 use crate::plugin::library::PluginLibrary;
-use crate::tests::plugin::ProcessingTest;
+use crate::tests::plugin::processing::run_simple;
 use crate::tests::rng::{new_prng, NoteGenerator, ParamFuzzer};
 use crate::tests::{TestCase, TestStatus};
 
@@ -238,16 +238,21 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str) -> Result
     let mut current_events: Option<Vec<Event>>;
     let mut previous_events: Option<Vec<Event>> = None;
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
+    let mut process_data = ProcessData::new(&mut audio_buffers, Default::default());
 
     for permutation_no in 1..=FUZZ_NUM_PERMUTATIONS {
         current_events = Some(param_fuzzer.randomize_params_at(&mut prng, 0).collect());
 
         let mut have_set_parameters = false;
-        let run_result = ProcessingTest::new(&plugin, &mut audio_buffers).run_simple(
+        let run_result = run_simple(
+            &plugin,
+            &mut process_data,
             FUZZ_RUNS_PER_PERMUTATION,
             |process_data| {
                 if !have_set_parameters {
-                    *process_data.input_events.events.lock() = current_events.clone().unwrap();
+                    process_data
+                        .input_events
+                        .add_events(current_events.clone().unwrap());
                     have_set_parameters = true;
                 }
 
@@ -378,9 +383,15 @@ pub fn test_param_set_wrong_namespace(
     }
 
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
-    ProcessingTest::new(&plugin, &mut audio_buffers).run_once(|process_data| {
+    let mut process_data = ProcessData::new(&mut audio_buffers, Default::default());
+
+    process_data.run_once(&plugin, move |plugin, process_data| {
         process_data.buffers.randomize(&mut prng);
-        *process_data.input_events.events.lock() = random_param_set_events;
+        process_data
+            .input_events
+            .add_events(random_param_set_events);
+        plugin.process(process_data)?;
+
         Ok(())
     })?;
 

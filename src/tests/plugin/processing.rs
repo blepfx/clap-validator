@@ -4,167 +4,57 @@ use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::NotePorts;
 use crate::plugin::ext::Extension;
 use crate::plugin::host::Host;
-use crate::plugin::instance::audio_thread::PluginAudioThread;
-use crate::plugin::instance::process::{AudioBuffers, ProcessConfig, ProcessData};
+use crate::plugin::instance::process::{
+    AudioBuffers, ProcessConfig, ProcessControlFlow, ProcessData,
+};
 use crate::plugin::instance::Plugin;
 use crate::plugin::library::PluginLibrary;
 use crate::tests::rng::{new_prng, NoteGenerator};
 use crate::tests::TestStatus;
 use anyhow::{Context, Result};
 use rand::Rng;
-use std::sync::atomic::Ordering;
 
-/// A helper to handle the boilerplate that comes with testing a plugin's audio processing behavior.
-/// Run the standard audio processing test for a still **deactivated** plugin. This calls the
-/// process function `num_iters` times, and checks the output for consistency each time.
-///
-/// The `Preprocess` closure is called before each processing cycle to allow the process data to be
-/// modified for the next process cycle.
-///
-/// Main-thread callbacks that were made to the plugin while the audio thread was active are
-/// handled implicitly.
-pub struct ProcessingTest<'a> {
-    plugin: &'a Plugin<'a>,
-    buffers: &'a mut AudioBuffers,
-    config: ProcessConfig,
-}
+pub fn run_simple<Callback>(
+    plugin: &Plugin,
+    data: &mut ProcessData,
+    num_iters: usize,
+    mut preprocess: Callback,
+) -> Result<()>
+where
+    Callback: FnMut(&mut ProcessData) -> Result<()> + Send,
+{
+    let mut original_buffers = data.buffers.clone();
+    let mut curr_iter = 0;
 
-impl<'a> ProcessingTest<'a> {
-    pub fn new(plugin: &'a Plugin<'a>, buffers: &'a mut AudioBuffers) -> Self {
-        Self {
-            plugin,
-            buffers,
-            config: ProcessConfig::default(),
+    data.run(plugin, |plugin, process| {
+        curr_iter += 1;
+
+        preprocess(process).with_context(|| {
+            format!(
+                "Failed to preprocess cycle {} out of {}",
+                curr_iter, num_iters
+            )
+        })?;
+
+        original_buffers.clone_from(&process.buffers);
+
+        plugin.process(process).with_context(|| {
+            format!("Failed to process cycle {} out of {}", curr_iter, num_iters)
+        })?;
+
+        check_process_call_consistency(process, &original_buffers, true).with_context(|| {
+            format!(
+                "Failed to validate cycle {} out of {}",
+                curr_iter, num_iters
+            )
+        })?;
+
+        if curr_iter < num_iters {
+            Ok(ProcessControlFlow::Continue)
+        } else {
+            Ok(ProcessControlFlow::Exit)
         }
-    }
-
-    pub fn with_sample_rate(self, sample_rate: f64) -> Self {
-        Self {
-            config: ProcessConfig {
-                sample_rate,
-                ..self.config
-            },
-            ..self
-        }
-    }
-
-    pub fn run<Callback>(self, mut callback: Callback) -> Result<()>
-    where
-        Callback: FnMut(&PluginAudioThread, &mut ProcessData) -> Result<bool> + Send,
-    {
-        // Handle callbacks the plugin may have made during init or these queries.
-        self.plugin.host().handle_callbacks_once();
-
-        self.plugin
-            .state
-            .requested_restart
-            .store(false, Ordering::SeqCst);
-
-        let buffer_size = self.buffers.len();
-        let mut process_data = ProcessData::new(self.buffers, self.config);
-        let mut running = true;
-        while running {
-            self.plugin
-                .activate(self.config.sample_rate, 1, buffer_size)?;
-
-            self.plugin.on_audio_thread(|plugin| -> Result<()> {
-                plugin.start_processing()?;
-
-                // This test can be repeated a couple of times
-                // NOTE: We intentionally do not disable denormals here
-                'processing: while running {
-                    running &= callback(&plugin, &mut process_data)?;
-                    process_data.advance_next(process_data.block_size);
-
-                    // Restart processing as necessary
-                    if plugin
-                        .state()
-                        .requested_restart
-                        .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
-                        .is_ok()
-                    {
-                        log::trace!(
-                            "Restarting the plugin during processing cycle after a call to \
-                             'clap_host::request_restart()'",
-                        );
-                        break 'processing;
-                    }
-                }
-
-                plugin.stop_processing();
-
-                Ok(())
-            })?;
-
-            self.plugin.deactivate();
-        }
-
-        // Handle callbacks the plugin may have made during deactivate
-        self.plugin.host().handle_callbacks_once();
-
-        Ok(())
-    }
-
-    /// Run the standard audio processing test for a still **deactivated** plugin. This calls the
-    /// process function `num_iters` times, and checks the output for consistency each time.
-    ///
-    /// The `Preprocess` closure is called before each processing cycle to allow the process data to be
-    /// modified for the next process cycle.
-    ///
-    /// Main-thread callbacks that were made to the plugin while the audio thread was active are
-    /// handled implicitly.
-    pub fn run_simple<Callback>(self, num_iters: usize, mut preprocess: Callback) -> Result<()>
-    where
-        Callback: FnMut(&mut ProcessData) -> Result<()> + Send,
-    {
-        let mut original_buffers = self.buffers.clone();
-        let mut curr_iter = 0;
-
-        self.run(|plugin, process| {
-            curr_iter += 1;
-
-            preprocess(process).with_context(|| {
-                format!(
-                    "Failed to preprocess cycle {} out of {}",
-                    curr_iter, num_iters
-                )
-            })?;
-
-            original_buffers.clone_from(&process.buffers);
-
-            plugin.process(process).with_context(|| {
-                format!("Failed to process cycle {} out of {}", curr_iter, num_iters)
-            })?;
-
-            check_process_call_consistency(process, &original_buffers, true).with_context(
-                || {
-                    format!(
-                        "Failed to validate cycle {} out of {}",
-                        curr_iter, num_iters
-                    )
-                },
-            )?;
-
-            Ok(curr_iter < num_iters)
-        })
-    }
-
-    /// Run the standard audio processing test for a still **deactivated** plugin. This is identical
-    /// to the [`run()`][Self::run()] function, except that it does exactly one processing cycle and
-    /// thus non-copy values can be moved into the closure.
-    ///
-    /// Main-thread callbacks that were made to the plugin while the audio thread was active are
-    /// handled implicitly.
-    pub fn run_once<Preprocess>(self, preprocess: Preprocess) -> Result<()>
-    where
-        Preprocess: FnOnce(&mut ProcessData) -> Result<()> + Send,
-    {
-        let mut preprocess = Some(preprocess);
-        self.run_simple(1, |data| match preprocess.take() {
-            Some(preprocess) => preprocess(data),
-            None => Ok(()),
-        })
-    }
+    })
 }
 
 /// The test for `PluginTestCase::ProcessAudioOutOfPlaceBasic`.
@@ -195,7 +85,8 @@ pub fn test_process_audio_out_of_place_basic(
     };
 
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
-    ProcessingTest::new(&plugin, &mut audio_buffers).run_simple(5, |process_data| {
+    let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
+    run_simple(&plugin, &mut process_data, 5, |process_data| {
         process_data.buffers.randomize(&mut prng);
         Ok(())
     })?;
@@ -246,7 +137,8 @@ pub fn test_process_audio_in_place_basic(
     }
 
     let mut audio_buffers = AudioBuffers::new_in_place_f32(&audio_ports_config, 512);
-    ProcessingTest::new(&plugin, &mut audio_buffers).run_simple(5, |process_data| {
+    let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
+    run_simple(&plugin, &mut process_data, 5, |process_data| {
         process_data.buffers.randomize(&mut prng);
         Ok(())
     })?;
@@ -306,7 +198,9 @@ pub fn test_process_note_out_of_place_basic(
     // events depending on what's supported by the plugin supports
     let mut note_event_rng = NoteGenerator::new(note_ports_config);
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
-    ProcessingTest::new(&plugin, &mut audio_buffers).run_simple(5, |process_data| {
+    let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
+
+    run_simple(&plugin, &mut process_data, 5, |process_data| {
         process_data.buffers.randomize(&mut prng);
         note_event_rng.fill_event_queue(
             &mut prng,
@@ -369,9 +263,10 @@ pub fn test_process_note_inconsistent(
     // This RNG (Random Note Generator) allows generates mismatching events
     let mut note_event_rng = NoteGenerator::new(note_port_config).with_inconsistent_events();
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
+    let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
 
     // TODO: Use in-place processing for this test
-    ProcessingTest::new(&plugin, &mut audio_buffers).run_simple(5, |process_data| {
+    run_simple(&plugin, &mut process_data, 5, |process_data| {
         process_data.buffers.randomize(&mut prng);
         note_event_rng.fill_event_queue(
             &mut prng,
@@ -423,26 +318,31 @@ pub fn test_process_varying_sample_rates(
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
     for &sample_rate in SAMPLE_RATES {
         let mut note_event_rng = note_ports_config.clone().map(NoteGenerator::new);
+        let mut process_data = ProcessData::new(
+            &mut audio_buffers,
+            ProcessConfig {
+                sample_rate,
+                ..Default::default()
+            },
+        );
 
-        ProcessingTest::new(&plugin, &mut audio_buffers)
-            .with_sample_rate(sample_rate)
-            .run_simple(5, |process_data| {
-                process_data.buffers.randomize(&mut prng);
+        run_simple(&plugin, &mut process_data, 5, |process_data| {
+            process_data.buffers.randomize(&mut prng);
 
-                if let Some(note_event_rng) = note_event_rng.as_mut() {
-                    note_event_rng.fill_event_queue(
-                        &mut prng,
-                        &process_data.input_events,
-                        process_data.block_size,
-                    )?;
-                }
+            if let Some(note_event_rng) = note_event_rng.as_mut() {
+                note_event_rng.fill_event_queue(
+                    &mut prng,
+                    &process_data.input_events,
+                    process_data.block_size,
+                )?;
+            }
 
-                Ok(())
-            })
-            .context(format!(
-                "Error while processing with {:.2}hz sample rate",
-                sample_rate
-            ))?;
+            Ok(())
+        })
+        .context(format!(
+            "Error while processing with {:.2}hz sample rate",
+            sample_rate
+        ))?;
 
         host.callback_error_check()
             .context("An error occured during a host callback")?;
@@ -488,10 +388,14 @@ pub fn test_process_varying_block_sizes(
         let mut note_event_rng = note_ports_config.clone().map(NoteGenerator::new);
         let mut audio_buffers =
             AudioBuffers::new_out_of_place_f32(&audio_ports_config, buffer_size as usize);
+        let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
         let num_iters = (32768 / buffer_size).min(5);
 
-        ProcessingTest::new(&plugin, &mut audio_buffers)
-            .run_simple(num_iters as usize, |process_data| {
+        run_simple(
+            &plugin,
+            &mut process_data,
+            num_iters as usize,
+            |process_data| {
                 process_data.buffers.randomize(&mut prng);
 
                 if let Some(note_event_rng) = note_event_rng.as_mut() {
@@ -503,11 +407,12 @@ pub fn test_process_varying_block_sizes(
                 }
 
                 Ok(())
-            })
-            .context(format!(
-                "Error while processing with buffer size of {}",
-                buffer_size
-            ))?;
+            },
+        )
+        .context(format!(
+            "Error while processing with buffer size of {}",
+            buffer_size
+        ))?;
 
         host.callback_error_check()
             .context("An error occured during a host callback")?;
@@ -550,8 +455,9 @@ pub fn test_process_random_block_sizes(
     let mut note_event_rng = note_ports_config.map(NoteGenerator::new);
     let mut audio_buffers =
         AudioBuffers::new_out_of_place_f32(&audio_ports_config, MAX_BUFFER_SIZE as usize);
+    let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
 
-    ProcessingTest::new(&plugin, &mut audio_buffers).run_simple(20, |process_data| {
+    run_simple(&plugin, &mut process_data, 20, |process_data| {
         process_data.block_size = if prng.gen_bool(0.8) {
             prng.gen_range(2..=MAX_BUFFER_SIZE)
         } else {
@@ -606,12 +512,14 @@ pub fn test_process_audio_constant_mask(
 
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
     let mut original_buffers = audio_buffers.clone();
+    let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
+
     let mut curr_iter = 0;
 
     let mut has_received_constant_output = false;
     let mut has_received_constant_flag = false;
 
-    ProcessingTest::new(&plugin, &mut audio_buffers).run(|plugin, process| {
+    process_data.run(&plugin, |plugin, process| {
         process.buffers.randomize(&mut prng);
 
         if curr_iter != 1 {
@@ -654,7 +562,11 @@ pub fn test_process_audio_constant_mask(
             }
         }
 
-        Ok(curr_iter < 20)
+        if curr_iter < 20 {
+            Ok(ProcessControlFlow::Continue)
+        } else {
+            Ok(ProcessControlFlow::Exit)
+        }
     })?;
 
     host.callback_error_check()
@@ -666,6 +578,90 @@ pub fn test_process_audio_constant_mask(
                 "The plugin does not seem to set the constant mask during processing.",
             )),
         });
+    }
+
+    Ok(TestStatus::Success { details: None })
+}
+
+/// The test for `PluginTestCase::ProcessResetDeterminism`.
+pub fn test_process_reset_determinism(
+    library: &PluginLibrary,
+    plugin_id: &str,
+) -> Result<TestStatus> {
+    let host = Host::new();
+    let plugin = library
+        .create_plugin(plugin_id, host.clone())
+        .context("Could not create the plugin instance")?;
+    plugin.init().context("Error during initialization")?;
+
+    let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
+        Some(audio_ports) => audio_ports
+            .config()
+            .context("Error while querying 'audio-ports' IO configuration")?,
+        None => AudioPortConfig::default(),
+    };
+
+    let note_ports_config = match plugin.get_extension::<NotePorts>() {
+        Some(note_ports) => Some(
+            note_ports
+                .config()
+                .context("Error while querying 'note-ports' IO configuration")?,
+        ),
+        None => None,
+    };
+
+    let mut note_event_rng = note_ports_config.map(NoteGenerator::new);
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(
+        &audio_ports_config,
+        4096, /* we do it in one block to simplify the test */
+    );
+    let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
+    let mut curr_iter = 0;
+    let mut audio_output = vec![];
+
+    process_data.run(&plugin, |plugin, process_data| {
+        let mut rng = new_prng();
+
+        process_data.buffers.randomize(&mut rng);
+        if let Some(note_event_rng) = note_event_rng.as_mut() {
+            note_event_rng.fill_event_queue(
+                &mut new_prng(),
+                &process_data.input_events,
+                process_data.block_size,
+            )?;
+        }
+
+        let result = match curr_iter {
+            0 => ProcessControlFlow::Reset,
+            1 => ProcessControlFlow::Continue,
+            _ => {
+                plugin.reset();
+                process_data.reset();
+                if let Some(note_event_rng) = note_event_rng.as_mut() {
+                    note_event_rng.reset();
+                }
+
+                ProcessControlFlow::Exit
+            }
+        };
+
+        plugin.process(process_data)?;
+        audio_output.push(process_data.buffers.clone());
+        curr_iter += 1;
+
+        Ok(result)
+    })?;
+
+    if !audio_output[0].is_same(&audio_output[1]) {
+        return Ok(TestStatus::Warning {
+            details: Some(format!(
+                "Plugin output does not seem to be deterministic after reactivation"
+            )),
+        });
+    }
+
+    if !audio_output[1].is_same(&audio_output[2]) {
+        anyhow::bail!("Plugin output differs after reset");
     }
 
     Ok(TestStatus::Success { details: None })
@@ -759,7 +755,7 @@ fn check_process_call_consistency(
 
     // If the plugin output any events, then they should be in a monotonically increasing order
     let mut last_event_time = 0;
-    for event in process_data.output_events.events.lock().iter() {
+    for event in process_data.output_events.read() {
         let event_time = event.header().time;
         if event_time < last_event_time {
             anyhow::bail!(

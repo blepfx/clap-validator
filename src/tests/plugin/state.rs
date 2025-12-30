@@ -12,9 +12,10 @@ use crate::plugin::ext::params::{ParamInfo, Params};
 use crate::plugin::ext::state::State;
 use crate::plugin::ext::Extension;
 use crate::plugin::host::Host;
-use crate::plugin::instance::process::{AudioBuffers, Event, EventQueue};
+use crate::plugin::instance::process::{
+    AudioBuffers, Event, EventQueue, ProcessConfig, ProcessData,
+};
 use crate::plugin::library::PluginLibrary;
-use crate::tests::plugin::ProcessingTest;
 use crate::tests::rng::{new_prng, ParamFuzzer};
 use crate::tests::{TestCase, TestStatus};
 
@@ -138,8 +139,13 @@ pub fn test_state_reproducibility_null_cookies(
         }
 
         let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
-        ProcessingTest::new(&plugin, &mut audio_buffers).run_once(move |process_data| {
-            *process_data.input_events.events.lock() = random_param_set_events;
+        let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
+
+        process_data.run_once(&plugin, move |plugin, process_data| {
+            process_data
+                .input_events
+                .add_events(random_param_set_events);
+            plugin.process(process_data)?;
             Ok(())
         })?;
 
@@ -308,7 +314,8 @@ pub fn test_state_reproducibility_flush(
 
         let input_events = EventQueue::new();
         let output_events = EventQueue::new();
-        *input_events.events.lock() = random_param_set_events.clone();
+
+        input_events.add_events(random_param_set_events.clone());
         params.flush(&input_events, &output_events);
         host.handle_callbacks_once();
 
@@ -321,7 +328,7 @@ pub fn test_state_reproducibility_flush(
         host.handle_callbacks_once();
 
         // Plugins with no parameters at all should of course not trigger this error
-        if expected_param_values == initial_param_values && !param_infos.is_empty() {
+        if expected_param_values == initial_param_values && !random_param_set_events.is_empty() {
             anyhow::bail!(
                 "'clap_plugin_params::flush()' has been called with random parameter values, but \
                  the plugin's reported parameter values have not changed."
@@ -403,8 +410,13 @@ pub fn test_state_reproducibility_flush(
 
     // In the previous pass we used flush, and here we use the process funciton
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
-    ProcessingTest::new(&plugin, &mut audio_buffers).run_once(move |process_data| {
-        *process_data.input_events.events.lock() = new_random_param_set_events;
+    let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
+
+    process_data.run_once(&plugin, move |plugin, process_data| {
+        process_data
+            .input_events
+            .add_events(new_random_param_set_events);
+        plugin.process(process_data)?;
         Ok(())
     })?;
 
@@ -504,8 +516,12 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
             param_fuzzer.randomize_params_at(&mut prng, 0).collect();
 
         let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
-        ProcessingTest::new(&plugin, &mut audio_buffers).run_once(move |process_data| {
-            *process_data.input_events.events.lock() = random_param_set_events;
+        let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
+        process_data.run_once(&plugin, move |plugin, process_data| {
+            process_data
+                .input_events
+                .add_events(random_param_set_events);
+            plugin.process(process_data)?;
             Ok(())
         })?;
 
@@ -616,11 +632,6 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
     }
 }
 
-fn compare_approx(actual: f64, expected: f64) -> bool {
-    const EPSILON: f64 = 1e-5;
-    (actual - expected).abs() <= EPSILON
-}
-
 /// The test for `PluginTestCase::StateRandomGarbage`.
 pub fn test_state_random_garbage(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
@@ -668,6 +679,12 @@ pub fn test_state_random_garbage(library: &PluginLibrary, plugin_id: &str) -> Re
         }),
     }
 }
+
+fn compare_approx(actual: f64, expected: f64) -> bool {
+    const EPSILON: f64 = 1e-5;
+    (actual - expected).abs() <= EPSILON
+}
+
 /// Build a string containing all different values between two sets of values.
 ///
 /// # Panics

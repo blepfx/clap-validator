@@ -9,10 +9,9 @@ use crate::plugin::ext::audio_ports::AudioPorts;
 use crate::plugin::ext::preset_load::PresetLoad;
 use crate::plugin::ext::Extension;
 use crate::plugin::host::Host;
-use crate::plugin::instance::process::AudioBuffers;
+use crate::plugin::instance::process::{AudioBuffers, ProcessConfig, ProcessData};
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::preset_discovery::{LocationValue, PluginAbi, Preset, PresetFile};
-use crate::tests::plugin::ProcessingTest;
 use crate::tests::TestStatus;
 
 // TODO: Test for duplicate locations and soundpacks in declared data across all providers
@@ -178,8 +177,11 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
 
                 // We'll process a single buffer of silent audio just to make sure everything's
                 // settled in
-                ProcessingTest::new(&plugin, &mut audio_buffers)
-                    .run_once(move |_| Ok(()))
+                ProcessData::new(&mut audio_buffers, ProcessConfig::default())
+                    .run_once(&plugin, move |plugin, data| {
+                        plugin.process(data)?;
+                        Ok(())
+                    })
                     .with_context(|| {
                         format!(
                             "Error while processing an audio buffer after loading a preset for \

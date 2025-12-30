@@ -21,8 +21,11 @@ use std::ffi::c_void;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::ptr::null_mut;
+use std::sync::atomic::Ordering;
 
 use crate::plugin::ext::audio_ports::AudioPortConfig;
+use crate::plugin::instance::audio_thread::PluginAudioThread;
+use crate::plugin::instance::Plugin;
 use crate::util::check_null_ptr;
 
 /// The input and output data for a call to `clap_plugin::process()`.
@@ -44,6 +47,14 @@ pub struct ProcessData<'a> {
     /// The current sample position. This is used to recompute values in `transport_info`.
     sample_pos: u32,
     // TODO: Maybe do something with `steady_time`
+}
+
+/// Control flow for the processing loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessControlFlow {
+    Continue,
+    Reset,
+    Exit,
 }
 
 /// The general context information for a process call.
@@ -128,7 +139,7 @@ pub struct EventQueue {
     vtable_output: clap_output_events,
     /// The actual event queue. Since we're going for correctness over performance, this uses a very
     /// suboptimal memory layout by just using an `enum` instead of doing fancy bit packing.
-    pub events: Mutex<Vec<Event>>,
+    events: Mutex<Vec<Event>>,
 }
 
 /// An event sent to or from the plugin. This uses an enum to make the implementation simple and
@@ -248,13 +259,12 @@ impl<'a> ProcessData<'a> {
         self.transport_info
     }
 
-    /// Advance the transport by a certain number of samples. Make sure to also call
-    /// [`clear_events()`][Self::clear_events()].
-    pub fn advance_next(&mut self, samples: u32) {
-        self.input_events.events.lock().clear();
-        self.output_events.events.lock().clear();
-        self.sample_pos += samples;
+    /// Advance the transport by a certain number of samples.
+    pub fn advance_next(&mut self) {
+        self.input_events.clear();
+        self.output_events.clear();
 
+        self.sample_pos += self.block_size;
         self.transport_info.song_pos_beats =
             ((self.sample_pos as f64 / self.config.sample_rate / 60.0 * self.transport_info.tempo)
                 * CLAP_BEATTIME_FACTOR as f64)
@@ -262,6 +272,81 @@ impl<'a> ProcessData<'a> {
         self.transport_info.song_pos_seconds = ((self.sample_pos as f64 / self.config.sample_rate)
             * CLAP_SECTIME_FACTOR as f64)
             .round() as i64;
+    }
+
+    pub fn reset(&mut self) {
+        self.sample_pos = 0;
+        self.transport_info.song_pos_beats = 0;
+        self.transport_info.song_pos_seconds = 0;
+        self.input_events.clear();
+        self.output_events.clear();
+    }
+
+    pub fn run<Process>(&mut self, plugin: &Plugin, mut process: Process) -> Result<()>
+    where
+        Process: FnMut(&PluginAudioThread, &mut Self) -> Result<ProcessControlFlow> + Send,
+    {
+        let mut running = true;
+        while running {
+            plugin.activate(self.config.sample_rate, 1, self.buffers.len())?;
+            plugin.host().handle_callbacks_once();
+            self.reset();
+
+            plugin.on_audio_thread(|plugin| -> Result<()> {
+                plugin.start_processing()?;
+
+                // This test can be repeated a couple of times
+                // NOTE: We intentionally do not disable denormals here
+                'processing: while running {
+                    let flow = process(&plugin, self)?;
+                    running &= flow != ProcessControlFlow::Exit;
+                    self.advance_next();
+
+                    // Restart processing as necessary
+                    if plugin
+                        .state()
+                        .requested_restart
+                        .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+                    {
+                        log::trace!(
+                            "Restarting the plugin during processing cycle after a call to \
+                             'clap_host::request_restart()'",
+                        );
+                        break 'processing;
+                    }
+
+                    if flow == ProcessControlFlow::Reset {
+                        break 'processing;
+                    }
+                }
+
+                plugin.stop_processing();
+
+                Ok(())
+            })?;
+
+            plugin.deactivate();
+        }
+
+        // Handle callbacks the plugin may have made during deactivate
+        plugin.host().handle_callbacks_once();
+
+        Ok(())
+    }
+
+    pub fn run_once<Process>(&mut self, plugin: &Plugin, process: Process) -> Result<()>
+    where
+        Process: FnOnce(&PluginAudioThread, &mut Self) -> Result<()> + Send,
+    {
+        let mut process = Some(process);
+        self.run(plugin, |plugin, instance| {
+            if let Some(process) = process.take() {
+                process(plugin, instance)?;
+            }
+
+            Ok(ProcessControlFlow::Exit)
+        })
     }
 }
 
@@ -441,6 +526,21 @@ impl AudioBuffers {
     /// Pointers to the internal audio buffers
     pub fn buffers(&self) -> &[AudioBuffer] {
         &self.buffers
+    }
+
+    /// Check whether the audio buffers are identical to another set of audio buffers.
+    pub fn is_same(&self, other: &Self) -> bool {
+        if self.buffers.len() != other.buffers.len() {
+            return false;
+        }
+
+        for (this, other) in self.buffers.iter().zip(other.buffers.iter()) {
+            if !this.is_same(other) {
+                return false;
+            }
+        }
+
+        true
     }
 
     /// Fill the input and output buffers with arbitrary values.
@@ -689,6 +789,23 @@ impl EventQueue {
         queue.vtable_input.ctx = &*queue as *const Self as *mut c_void;
         queue.vtable_output.ctx = &*queue as *const Self as *mut c_void;
         queue
+    }
+
+    pub fn clear(&self) {
+        self.events.lock().clear();
+    }
+
+    pub fn add_events(&self, extend: impl IntoIterator<Item = Event>) {
+        let mut events = self.events.lock();
+        let should_sort = !events.is_empty();
+        events.extend(extend);
+        if should_sort {
+            events.sort_by_key(|event| event.header().time);
+        }
+    }
+
+    pub fn read(&self) -> Vec<Event> {
+        self.events.lock().clone()
     }
 
     /// Get the vtable pointer for input events.

@@ -8,10 +8,8 @@ use std::process::Command;
 
 mod descriptor;
 mod params;
-mod processing;
+pub mod processing;
 mod state;
-
-pub use processing::ProcessingTest;
 
 /// The tests for individual CLAP plugins. See the module's heading for more information, and the
 /// `description` function below for a description of each test case.
@@ -41,6 +39,8 @@ pub enum PluginTestCase {
     ProcessVaryingBlockSizes,
     #[strum(serialize = "process-random-block-sizes")]
     ProcessRandomBlockSizes,
+    #[strum(serialize = "process-reset-determinism")]
+    ProcessResetDeterminism,
     #[strum(serialize = "param-conversions")]
     ParamConversions,
     #[strum(serialize = "param-fuzz-basic")]
@@ -126,6 +126,11 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  block size of 2048 while randomizing block sizes for each process call, and \
                  tests whether the output does not contain any non-finite or subnormal values. \
                  Uses out-of-place audio processing.",
+            ),
+            PluginTestCase::ProcessResetDeterminism => String::from(
+                "Asserts that resetting the plugin via 'clap_plugin::reset()' and via \
+                 re-activation results in deterministic output when processing the same audio and \
+                 events again.",
             ),
             PluginTestCase::ParamConversions => String::from(
                 "Asserts that value to string and string to value conversions are supported for \
@@ -230,6 +235,9 @@ impl<'a> TestCase<'a> for PluginTestCase {
             }
             PluginTestCase::ProcessRandomBlockSizes => {
                 processing::test_process_random_block_sizes(library, plugin_id)
+            }
+            PluginTestCase::ProcessResetDeterminism => {
+                processing::test_process_reset_determinism(library, plugin_id)
             }
             PluginTestCase::ParamConversions => params::test_param_conversions(library, plugin_id),
             PluginTestCase::ParamFuzzBasic => params::test_param_fuzz_basic(library, plugin_id),

@@ -16,6 +16,7 @@ use crate::plugin::instance::process::{
     AudioBuffers, Event, EventQueue, ProcessConfig, ProcessData,
 };
 use crate::plugin::library::PluginLibrary;
+use crate::tests::plugin::params::param_compare_approx;
 use crate::tests::rng::{new_prng, ParamFuzzer};
 use crate::tests::{TestCase, TestStatus};
 
@@ -680,11 +681,6 @@ pub fn test_state_random_garbage(library: &PluginLibrary, plugin_id: &str) -> Re
     }
 }
 
-fn compare_approx(actual: f64, expected: f64) -> bool {
-    const EPSILON: f64 = 1e-5;
-    (actual - expected).abs() <= EPSILON
-}
-
 /// Build a string containing all different values between two sets of values.
 ///
 /// # Panics
@@ -700,7 +696,7 @@ fn format_mismatching_values(
         .into_iter()
         .filter_map(|(param_id, actual_value)| {
             let expected_value = expected_param_values[&param_id];
-            if compare_approx(actual_value, expected_value) {
+            if param_compare_approx(actual_value, expected_value) {
                 None
             } else {
                 let param_name = &param_infos[&param_id].name;
@@ -728,7 +724,7 @@ fn compare_params_lenient(
             None => return false,
         };
 
-        if !compare_approx(*actual_value, *expected_value) {
+        if !param_compare_approx(*actual_value, *expected_value) {
             return false;
         }
     }

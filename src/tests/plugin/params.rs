@@ -418,3 +418,54 @@ pub fn test_param_set_wrong_namespace(
         })
     }
 }
+
+pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+    let host = Host::new();
+    let plugin = library
+        .create_plugin(plugin_id, host.clone())
+        .context("Could not create the plugin instance")?;
+    plugin.init().context("Error during initialization")?;
+
+    let params = match plugin.get_extension::<Params>() {
+        Some(params) => params,
+        None => {
+            return Ok(TestStatus::Skipped {
+                details: Some(format!(
+                    "The plugin does not implement the '{}' extension.",
+                    Params::EXTENSION_ID.to_str().unwrap(),
+                )),
+            })
+        }
+    };
+    host.handle_callbacks_once();
+
+    let param_infos = params
+        .info()
+        .context("Failure while fetching the plugin's parameters")?;
+
+    for (param_id, param_info) in param_infos {
+        let default_value = params
+            .get(param_id)
+            .with_context(|| format!("Could not get value for parameter {param_id}"))?;
+
+        if !param_compare_approx(default_value, param_info.default) {
+            anyhow::bail!(
+                "The default value for parameter {param_id} ('{}') is {}, but the actual \
+                 parameter value after initialization is {}.",
+                param_info.name,
+                param_info.default,
+                default_value
+            );
+        }
+    }
+
+    host.callback_error_check()
+        .context("An error occured during a host callback")?;
+
+    Ok(TestStatus::Success { details: None })
+}
+
+pub fn param_compare_approx(actual: f64, expected: f64) -> bool {
+    const EPSILON: f64 = 1e-5;
+    (actual - expected).abs() <= EPSILON
+}

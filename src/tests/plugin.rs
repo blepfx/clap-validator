@@ -47,6 +47,8 @@ pub enum PluginTestCase {
     ParamFuzzBasic,
     #[strum(serialize = "param-set-wrong-namespace")]
     ParamSetWrongNamespace,
+    #[strum(serialize = "param-default-values")]
+    ParamDefaultValues,
     #[strum(serialize = "state-invalid")]
     StateInvalid,
     #[strum(serialize = "state-reproducibility-basic")]
@@ -149,6 +151,10 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  a mismatching namespace ID. Asserts that the plugin's parameter values don't \
                  change.",
             ),
+            PluginTestCase::ParamDefaultValues => String::from(
+                "Asserts that the values for all parameters are set correctly to their default \
+                 values when the plugin is initialized.",
+            ),
             PluginTestCase::StateInvalid => String::from(
                 "The plugin should return false when 'clap_plugin_state::load()' is called with \
                  an empty state.",
@@ -243,6 +249,9 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::ParamFuzzBasic => params::test_param_fuzz_basic(library, plugin_id),
             PluginTestCase::ParamSetWrongNamespace => {
                 params::test_param_set_wrong_namespace(library, plugin_id)
+            }
+            PluginTestCase::ParamDefaultValues => {
+                params::test_param_default_values(library, plugin_id)
             }
             PluginTestCase::StateInvalid => state::test_state_invalid(library, plugin_id),
             PluginTestCase::StateReproducibilityBasic => {

@@ -1,6 +1,7 @@
 //! Contains most of the boilerplate around testing audio processing.
 
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
+use crate::plugin::ext::audio_ports_config::{AudioPortsConfig, AudioPortsConfigInfo};
 use crate::plugin::ext::note_ports::NotePorts;
 use crate::plugin::ext::Extension;
 use crate::plugin::host::Host;
@@ -13,6 +14,8 @@ use crate::tests::rng::{new_prng, NoteGenerator};
 use crate::tests::TestStatus;
 use anyhow::{Context, Result};
 use rand::Rng;
+
+const BUFFER_SIZE: usize = 512;
 
 pub fn run_simple<Callback>(
     plugin: &Plugin,
@@ -57,10 +60,11 @@ where
     })
 }
 
-/// The test for `PluginTestCase::ProcessAudioOutOfPlaceBasic`.
-pub fn test_process_audio_out_of_place_basic(
+/// The test for `PluginTestCase::ProcessAudioOutOfPlaceBasic` and `PluginTestCase::ProcessAudioInPlaceBasic`.
+pub fn test_process_audio_basic(
     library: &PluginLibrary,
     plugin_id: &str,
+    in_place: bool,
 ) -> Result<TestStatus> {
     let mut prng = new_prng();
 
@@ -84,59 +88,12 @@ pub fn test_process_audio_out_of_place_basic(
         }
     };
 
-    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
-    let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
-    run_simple(&plugin, &mut process_data, 5, |process_data| {
-        process_data.buffers.randomize(&mut prng);
-        Ok(())
-    })?;
-
-    // The `Host` contains built-in thread safety checks
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
-    Ok(TestStatus::Success { details: None })
-}
-
-/// The test for `PluginTestCase::ProcessAudioInPlaceBasic`.
-pub fn test_process_audio_in_place_basic(
-    library: &PluginLibrary,
-    plugin_id: &str,
-) -> Result<TestStatus> {
-    let mut prng = new_prng();
-
-    let host = Host::new();
-    let plugin = library
-        .create_plugin(plugin_id, host.clone())
-        .context("Could not create the plugin instance")?;
-    plugin.init().context("Error during initialization")?;
-
-    let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
-        Some(audio_ports) => audio_ports
-            .config()
-            .context("Error while querying 'audio-ports' IO configuration")?,
-        None => {
-            return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    AudioPorts::EXTENSION_ID.to_str().unwrap(),
-                )),
-            });
-        }
+    let mut audio_buffers = if in_place {
+        AudioBuffers::new_in_place_f32(&audio_ports_config, BUFFER_SIZE)
+    } else {
+        AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE)
     };
 
-    if audio_ports_config
-        .inputs
-        .iter()
-        .all(|x| x.in_place_pair_idx.is_none())
-    {
-        return Ok(TestStatus::Skipped {
-            details: Some(format!(
-                "The plugin does not have any in-place audio port pairs.",
-            )),
-        });
-    }
-
-    let mut audio_buffers = AudioBuffers::new_in_place_f32(&audio_ports_config, 512);
     let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
     run_simple(&plugin, &mut process_data, 5, |process_data| {
         process_data.buffers.randomize(&mut prng);
@@ -149,12 +106,13 @@ pub fn test_process_audio_in_place_basic(
     Ok(TestStatus::Success { details: None })
 }
 
-/// The test for `PluginTestCase::ProcessNoteOutOfPlaceBasic`. This test is very similar to
+/// The test for `PluginTestCase::ProcessNoteOutOfPlaceBasic` and `PluginTestCase::ProcessNoteInconsistent`. This test is very similar to
 /// `ProcessAudioOutOfPlaceBasic`, but it requires the `note-ports` extension, sends notes and/or
 /// MIDI to the plugin, and doesn't require the `audio-ports` extension.
-pub fn test_process_note_out_of_place_basic(
+pub fn test_process_note_out_of_place(
     library: &PluginLibrary,
     plugin_id: &str,
+    consistent: bool,
 ) -> Result<TestStatus> {
     let mut prng = new_prng();
 
@@ -171,6 +129,7 @@ pub fn test_process_note_out_of_place_basic(
             .context("Error while querying 'audio-ports' IO configuration")?,
         None => AudioPortConfig::default(),
     };
+
     let note_ports_config = match plugin.get_extension::<NotePorts>() {
         Some(note_ports) => note_ports
             .config()
@@ -184,6 +143,7 @@ pub fn test_process_note_out_of_place_basic(
             });
         }
     };
+
     if note_ports_config.inputs.is_empty() {
         return Ok(TestStatus::Skipped {
             details: Some(format!(
@@ -197,75 +157,13 @@ pub fn test_process_note_out_of_place_basic(
     // We'll fill the input event queue with (consistent) random CLAP note and/or MIDI
     // events depending on what's supported by the plugin supports
     let mut note_event_rng = NoteGenerator::new(note_ports_config);
-    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
     let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
 
-    run_simple(&plugin, &mut process_data, 5, |process_data| {
-        process_data.buffers.randomize(&mut prng);
-        note_event_rng.fill_event_queue(
-            &mut prng,
-            &process_data.input_events,
-            process_data.block_size,
-        )?;
-        Ok(())
-    })?;
-
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
-    Ok(TestStatus::Success { details: None })
-}
-
-/// The test for `PluginTestCase::ProcessNoteInconsistent`. This is the same test as
-/// `ProcessAudioOutOfPlaceBasic`, but without requiring matched note on/off pairs and similar
-/// invariants
-pub fn test_process_note_inconsistent(
-    library: &PluginLibrary,
-    plugin_id: &str,
-) -> Result<TestStatus> {
-    let mut prng = new_prng();
-
-    let host = Host::new();
-    let plugin = library
-        .create_plugin(plugin_id, host.clone())
-        .context("Could not create the plugin instance")?;
-    plugin.init().context("Error during initialization")?;
-
-    let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
-        Some(audio_ports) => audio_ports
-            .config()
-            .context("Error while querying 'audio-ports' IO configuration")?,
-        None => AudioPortConfig::default(),
-    };
-    let note_port_config = match plugin.get_extension::<NotePorts>() {
-        Some(note_ports) => note_ports
-            .config()
-            .context("Error while querying 'note-ports' IO configuration")?,
-        None => {
-            return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    NotePorts::EXTENSION_ID.to_str().unwrap(),
-                )),
-            });
-        }
-    };
-    if note_port_config.inputs.is_empty() {
-        return Ok(TestStatus::Skipped {
-            details: Some(format!(
-                "The plugin implements the '{}' extension but it does not have any input note \
-                 ports.",
-                NotePorts::EXTENSION_ID.to_str().unwrap()
-            )),
-        });
+    if !consistent {
+        note_event_rng = note_event_rng.with_inconsistent_events();
     }
-    host.handle_callbacks_once();
 
-    // This RNG (Random Note Generator) allows generates mismatching events
-    let mut note_event_rng = NoteGenerator::new(note_port_config).with_inconsistent_events();
-    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
-    let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
-
-    // TODO: Use in-place processing for this test
     run_simple(&plugin, &mut process_data, 5, |process_data| {
         process_data.buffers.randomize(&mut prng);
         note_event_rng.fill_event_queue(
@@ -510,7 +408,7 @@ pub fn test_process_audio_constant_mask(
         }
     };
 
-    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
     let mut original_buffers = audio_buffers.clone();
     let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
 
@@ -584,7 +482,7 @@ pub fn test_process_audio_constant_mask(
 }
 
 /// The test for `PluginTestCase::ProcessResetDeterminism`.
-pub fn test_process_reset_determinism(
+pub fn test_process_audio_reset_determinism(
     library: &PluginLibrary,
     plugin_id: &str,
 ) -> Result<TestStatus> {
@@ -613,7 +511,7 @@ pub fn test_process_reset_determinism(
     let mut note_event_rng = note_ports_config.map(NoteGenerator::new);
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(
         &audio_ports_config,
-        4096, /* we do it in one block to simplify the test */
+        BUFFER_SIZE * 8, /* we do it in one block to simplify the test */
     );
     let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
     let mut curr_iter = 0;
@@ -667,6 +565,210 @@ pub fn test_process_reset_determinism(
     host.callback_error_check()
         .context("An error occured during a host callback")?;
 
+    Ok(TestStatus::Success { details: None })
+}
+
+/// The test for `PluginTestCase::ProcessAudioOutOfPlaceConfig` and `PluginTestCase::ProcessAudioInPlaceConfig`.
+pub fn test_process_audio_config(
+    library: &PluginLibrary,
+    plugin_id: &str,
+    in_place: bool,
+) -> Result<TestStatus> {
+    let mut prng = new_prng();
+
+    let host = Host::new();
+    let plugin = library
+        .create_plugin(plugin_id, host.clone())
+        .context("Could not create the plugin instance")?;
+    plugin.init().context("Error during initialization")?;
+
+    let audio_ports = match plugin.get_extension::<AudioPorts>() {
+        Some(audio_ports) => audio_ports,
+        None => {
+            return Ok(TestStatus::Skipped {
+                details: Some(format!(
+                    "The plugin does not implement the '{}' extension.",
+                    AudioPorts::EXTENSION_ID.to_str().unwrap(),
+                )),
+            });
+        }
+    };
+
+    let audio_ports_config_info = plugin.get_extension::<AudioPortsConfigInfo>();
+    let audio_ports_config = match plugin.get_extension::<AudioPortsConfig>() {
+        Some(audio_ports_config) => audio_ports_config,
+        None => {
+            return Ok(TestStatus::Skipped {
+                details: Some(format!(
+                    "The plugin does not implement the '{}' extension.",
+                    AudioPortsConfig::EXTENSION_ID.to_str().unwrap(),
+                )),
+            });
+        }
+    };
+
+    let note_ports_config = match plugin.get_extension::<NotePorts>() {
+        Some(note_ports) => Some(
+            note_ports
+                .config()
+                .context("Error while querying 'note-ports' IO configuration")?,
+        ),
+        None => None,
+    };
+
+    for config_audio_ports_config in audio_ports_config
+        .enumerate()
+        .context("Could not enumerate audio port configurations")?
+    {
+        audio_ports_config
+            .select(config_audio_ports_config.id)
+            .with_context(|| {
+                format!(
+                    "Could not select audio port configuration '{}' ({})",
+                    config_audio_ports_config.name, config_audio_ports_config.id,
+                )
+            })?;
+
+        let config_audio_ports = audio_ports
+            .config()
+            .context("Error while querying 'audio-ports' IO configuration")?;
+
+        // Check that the audio-ports-config info matches the actual audio-ports config
+        {
+            let main_input_channels = config_audio_ports
+                .inputs
+                .iter()
+                .next()
+                .filter(|x| x.is_main)
+                .map(|x| x.num_channels);
+
+            let main_output_channels = config_audio_ports
+                .outputs
+                .iter()
+                .next()
+                .filter(|x| x.is_main)
+                .map(|x| x.num_channels);
+
+            anyhow::ensure!(
+                config_audio_ports.inputs.len() as u32
+                    == config_audio_ports_config.input_port_count,
+                "The number of input audio ports for configuration '{}' ({}) does not match the \
+                 number reported by 'audio-ports' ({})",
+                config_audio_ports_config.name,
+                config_audio_ports_config.input_port_count,
+                config_audio_ports.inputs.len() as u32,
+            );
+
+            anyhow::ensure!(
+                config_audio_ports.outputs.len() as u32
+                    == config_audio_ports_config.output_port_count,
+                "The number of output audio ports for configuration '{}' ({}) does not match the \
+                 number reported by 'audio-ports' ({})",
+                config_audio_ports_config.name,
+                config_audio_ports_config.output_port_count,
+                config_audio_ports.outputs.len() as u32,
+            );
+
+            match (
+                main_input_channels,
+                config_audio_ports_config.main_input_channel_count,
+            ) {
+                (None, None) => {}
+                (Some(a), Some(b)) => anyhow::ensure!(
+                    a == b,
+                    "The number of channels in the main input port for the '{}' configuration \
+                     info ({}) does not match the number reported by 'audio-ports' ({})",
+                    config_audio_ports_config.name,
+                    b,
+                    a,
+                ),
+                (None, Some(_)) => {
+                    anyhow::bail!(
+                        "The configuration '{}' reports that a main input port exists, but \
+                         'audio-ports' does not.",
+                        config_audio_ports_config.name,
+                    )
+                }
+                (Some(_), None) => anyhow::bail!(
+                    "The configuration '{}' reports that main input port does not exist, but \
+                     according to 'audio-ports' it does.",
+                    config_audio_ports_config.name,
+                ),
+            }
+
+            match (
+                main_output_channels,
+                config_audio_ports_config.main_output_channel_count,
+            ) {
+                (None, None) => {}
+                (Some(a), Some(b)) => anyhow::ensure!(
+                    a == b,
+                    "The number of channels in the main output port for the '{}' configuration \
+                     info ({}) does not match the number reported by 'audio-ports' ({})",
+                    config_audio_ports_config.name,
+                    b,
+                    a,
+                ),
+                (None, Some(_)) => {
+                    anyhow::bail!(
+                        "The configuration '{}' reports that a main output port exists, but \
+                         'audio-ports' does not.",
+                        config_audio_ports_config.name,
+                    )
+                }
+                (Some(_), None) => anyhow::bail!(
+                    "The configuration '{}' reports that main output port does not exist, but \
+                     according to 'audio-ports' it does.",
+                    config_audio_ports_config.name,
+                ),
+            }
+        }
+
+        // Check that the audio-ports-config-info matches the current config
+        if let Some(audio_ports_config_info) = &audio_ports_config_info {
+            anyhow::ensure!(
+                audio_ports_config_info.current() == config_audio_ports_config.id,
+                "The current configuration ID reported by 'audio-ports-config-info' ({}) does not \
+                 match the last selected configuration ID ({})",
+                audio_ports_config_info.current(),
+                config_audio_ports_config.id,
+            );
+
+            // TODO: check info
+        }
+
+        let mut note_event_rng = note_ports_config.clone().map(NoteGenerator::new);
+        let mut audio_buffers = if in_place {
+            AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE)
+        } else {
+            AudioBuffers::new_out_of_place_f32(&config_audio_ports, BUFFER_SIZE)
+        };
+
+        let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
+        run_simple(&plugin, &mut process_data, 5, |process_data| {
+            process_data.buffers.randomize(&mut prng);
+
+            if let Some(note_event_rng) = note_event_rng.as_mut() {
+                note_event_rng.fill_event_queue(
+                    &mut prng,
+                    &process_data.input_events,
+                    process_data.block_size,
+                )?;
+            }
+
+            Ok(())
+        })
+        .with_context(|| {
+            format!(
+                "Error while processing audio with IO configuration '{}' ({})",
+                config_audio_ports_config.name, config_audio_ports_config.id,
+            )
+        })?;
+    }
+
+    // The `Host` contains built-in thread safety checks
+    host.callback_error_check()
+        .context("An error occured during a host callback")?;
     Ok(TestStatus::Success { details: None })
 }
 

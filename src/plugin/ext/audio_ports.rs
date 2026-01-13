@@ -3,8 +3,8 @@
 use anyhow::{Context, Result};
 use clap_sys::ext::ambisonic::CLAP_PORT_AMBISONIC;
 use clap_sys::ext::audio_ports::{
-    clap_audio_port_info, clap_plugin_audio_ports, CLAP_EXT_AUDIO_PORTS, CLAP_PORT_MONO,
-    CLAP_PORT_STEREO,
+    clap_audio_port_info, clap_plugin_audio_ports, CLAP_AUDIO_PORT_IS_MAIN, CLAP_EXT_AUDIO_PORTS,
+    CLAP_PORT_MONO, CLAP_PORT_STEREO,
 };
 use clap_sys::ext::surround::CLAP_PORT_SURROUND;
 use clap_sys::id::CLAP_INVALID_ID;
@@ -36,6 +36,9 @@ pub struct AudioPortConfig {
 /// The configuration for a single audio port.
 #[derive(Debug)]
 pub struct AudioPort {
+    /// Whether this is the main audio port.
+    pub is_main: bool,
+
     /// The number of channels for an audio port.
     pub num_channels: u32,
     /// The index if the output/input port this input/output port should be connected to. This is
@@ -97,13 +100,24 @@ impl AudioPorts<'_> {
             // We'll convert these stable IDs to vector indices later
             if input_stable_index_pairs.contains_key(&info.id) {
                 anyhow::bail!(
-                    "The stable ID of input audio port {i} ({}) is a duplicate.",
+                    "The stable ID of input audio port {i} (id={}) is a duplicate.",
                     info.id
                 );
             }
             input_stable_index_pairs.insert(info.id, (i as usize, info.in_place_pair));
 
+            // Check is main
+            let is_main = (info.flags & CLAP_AUDIO_PORT_IS_MAIN) != 0;
+            if is_main && i != 0 {
+                anyhow::bail!(
+                    "Input audio port {i} (id={}) is marked as main, but it is not the first port \
+                     in the list.",
+                    info.id
+                );
+            }
+
             config.inputs.push(AudioPort {
+                is_main,
                 num_channels: info.channel_count,
                 // These are reconstructed from `input_stable_index_pairs` and
                 // `output_stable_index_pairs` later
@@ -130,13 +144,23 @@ impl AudioPorts<'_> {
 
             if output_stable_index_pairs.contains_key(&info.id) {
                 anyhow::bail!(
-                    "The stable ID of output audio port {i} ({}) is a duplicate.",
+                    "The stable ID of output audio port {i} (id={}) is a duplicate.",
                     info.id
                 );
             }
             output_stable_index_pairs.insert(info.id, (i as usize, info.in_place_pair));
 
+            let is_main = (info.flags & CLAP_AUDIO_PORT_IS_MAIN) != 0;
+            if is_main && i != 0 {
+                anyhow::bail!(
+                    "Output audio port {i} (id={}) is marked as main, but it is not the first \
+                     port in the list.",
+                    info.id
+                );
+            }
+
             config.outputs.push(AudioPort {
+                is_main,
                 num_channels: info.channel_count,
                 in_place_pair_idx: None,
             });

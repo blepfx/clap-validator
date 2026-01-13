@@ -1,7 +1,13 @@
 //! Tests for individual plugin instances.
 
 use super::TestCase;
-use crate::{plugin::library::PluginLibrary, tests::TestStatus};
+use crate::{
+    plugin::{
+        ext::{audio_ports_config::AudioPortsConfig, Extension},
+        library::PluginLibrary,
+    },
+    tests::TestStatus,
+};
 use anyhow::Result;
 use clap::ValueEnum;
 use std::process::Command;
@@ -27,8 +33,14 @@ pub enum PluginTestCase {
     ProcessAudioOutOfPlaceBasic,
     #[strum(serialize = "process-audio-in-place-basic")]
     ProcessAudioInPlaceBasic,
+    #[strum(serialize = "process-audio-out-of-place-layouts")]
+    ProcessAudioOutOfPlaceConfig,
+    #[strum(serialize = "process-audio-in-place-layouts")]
+    ProcessAudioInPlaceConfig,
     #[strum(serialize = "process-audio-constant-mask")]
     ProcessAudioConstantMask,
+    #[strum(serialize = "process-audio-reset-determinism")]
+    ProcessAudioResetDeterminism,
     #[strum(serialize = "process-note-out-of-place-basic")]
     ProcessNoteOutOfPlaceBasic,
     #[strum(serialize = "process-note-inconsistent")]
@@ -39,8 +51,6 @@ pub enum PluginTestCase {
     ProcessVaryingBlockSizes,
     #[strum(serialize = "process-random-block-sizes")]
     ProcessRandomBlockSizes,
-    #[strum(serialize = "process-reset-determinism")]
-    ProcessResetDeterminism,
     #[strum(serialize = "param-conversions")]
     ParamConversions,
     #[strum(serialize = "param-fuzz-basic")]
@@ -55,6 +65,8 @@ pub enum PluginTestCase {
     ParamDefaultValues,
     #[strum(serialize = "state-invalid")]
     StateInvalid,
+    #[strum(serialize = "state-random-garbage")]
+    StateRandomGarbage,
     #[strum(serialize = "state-reproducibility-basic")]
     StateReproducibilityBasic,
     #[strum(serialize = "state-reproducibility-null-cookies")]
@@ -63,8 +75,6 @@ pub enum PluginTestCase {
     StateReproducibilityFlush,
     #[strum(serialize = "state-buffered-streams")]
     StateBufferedStreams,
-    #[strum(serialize = "state-random-garbage")]
-    StateRandomGarbage,
 }
 
 impl<'a> TestCase<'a> for PluginTestCase {
@@ -97,6 +107,18 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 "Processes random audio through the plugin with its default parameter values and \
                  tests whether the output does not contain any non-finite or subnormal values. \
                  Uses in-place audio processing for buses that support it.",
+            ),
+            PluginTestCase::ProcessAudioOutOfPlaceConfig => format!(
+                "Performs the same test as {}, but this time it tries all available port \
+                 configurations exposed via the '{}' extension.",
+                PluginTestCase::ProcessAudioOutOfPlaceBasic,
+                AudioPortsConfig::EXTENSION_ID.to_str().unwrap()
+            ),
+            PluginTestCase::ProcessAudioInPlaceConfig => format!(
+                "Performs the same test as {}, but this time it tries all available port \
+                 configurations exposed via the '{}' extension.",
+                PluginTestCase::ProcessAudioInPlaceBasic,
+                AudioPortsConfig::EXTENSION_ID.to_str().unwrap()
             ),
             PluginTestCase::ProcessAudioConstantMask => String::from(
                 "Processes random audio through the plugin with its default parameter values \
@@ -133,7 +155,7 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  tests whether the output does not contain any non-finite or subnormal values. \
                  Uses out-of-place audio processing.",
             ),
-            PluginTestCase::ProcessResetDeterminism => String::from(
+            PluginTestCase::ProcessAudioResetDeterminism => String::from(
                 "Asserts that resetting the plugin via 'clap_plugin::reset()' and via \
                  re-activation results in deterministic output when processing the same audio and \
                  events again.",
@@ -156,10 +178,9 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 PluginTestCase::ParamFuzzBasic
             ),
             PluginTestCase::ParamFuzzSampleAccurate => String::from(
-                "Generates and sets parameter values in a sample-accurate fashion while \
-                 processing audio, generating them at fixed intervals (1, 100, 1000 samples). The \
-                 plugin passes the test if it doesn't produce any infinite or NaN values, and \
-                 doesn't crash.",
+                "Sets parameter values in a sample-accurate fashion while processing audio, \
+                 generating them at fixed intervals (1, 100, 1000 samples). The plugin passes the \
+                 test if it doesn't produce any infinite or NaN values, and doesn't crash.",
             ),
             PluginTestCase::ParamSetWrongNamespace => String::from(
                 "Sends events to the plugin with the 'CLAP_EVENT_PARAM_VALUE' event type but with \
@@ -200,8 +221,8 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 PluginTestCase::StateReproducibilityBasic
             ),
             PluginTestCase::StateRandomGarbage => String::from(
-                "Loads 10 chunks of random bytes via 'clap_plugin_state::load()' and asserts that \
-                 the plugin doesn't crash.",
+                "Loads 10x1MB chunks of random bytes via 'clap_plugin_state::load()' and asserts \
+                 that the plugin doesn't crash.",
             ),
         }
     }
@@ -234,19 +255,28 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 descriptor::test_features_duplicates(library, plugin_id)
             }
             PluginTestCase::ProcessAudioOutOfPlaceBasic => {
-                processing::test_process_audio_out_of_place_basic(library, plugin_id)
+                processing::test_process_audio_basic(library, plugin_id, false)
             }
             PluginTestCase::ProcessAudioInPlaceBasic => {
-                processing::test_process_audio_in_place_basic(library, plugin_id)
+                processing::test_process_audio_basic(library, plugin_id, true)
+            }
+            PluginTestCase::ProcessAudioOutOfPlaceConfig => {
+                processing::test_process_audio_config(library, plugin_id, false)
+            }
+            PluginTestCase::ProcessAudioInPlaceConfig => {
+                processing::test_process_audio_config(library, plugin_id, true)
             }
             PluginTestCase::ProcessAudioConstantMask => {
                 processing::test_process_audio_constant_mask(library, plugin_id)
             }
+            PluginTestCase::ProcessAudioResetDeterminism => {
+                processing::test_process_audio_reset_determinism(library, plugin_id)
+            }
             PluginTestCase::ProcessNoteOutOfPlaceBasic => {
-                processing::test_process_note_out_of_place_basic(library, plugin_id)
+                processing::test_process_note_out_of_place(library, plugin_id, true)
             }
             PluginTestCase::ProcessNoteInconsistent => {
-                processing::test_process_note_inconsistent(library, plugin_id)
+                processing::test_process_note_out_of_place(library, plugin_id, false)
             }
             PluginTestCase::ProcessVaryingSampleRates => {
                 processing::test_process_varying_sample_rates(library, plugin_id)
@@ -256,9 +286,6 @@ impl<'a> TestCase<'a> for PluginTestCase {
             }
             PluginTestCase::ProcessRandomBlockSizes => {
                 processing::test_process_random_block_sizes(library, plugin_id)
-            }
-            PluginTestCase::ProcessResetDeterminism => {
-                processing::test_process_reset_determinism(library, plugin_id)
             }
             PluginTestCase::ParamConversions => params::test_param_conversions(library, plugin_id),
             PluginTestCase::ParamFuzzBasic => params::test_param_fuzz_basic(library, plugin_id),
@@ -273,6 +300,9 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 params::test_param_default_values(library, plugin_id)
             }
             PluginTestCase::StateInvalid => state::test_state_invalid(library, plugin_id),
+            PluginTestCase::StateRandomGarbage => {
+                state::test_state_random_garbage(library, plugin_id)
+            }
             PluginTestCase::StateReproducibilityBasic => {
                 state::test_state_reproducibility_null_cookies(library, plugin_id, false)
             }
@@ -284,9 +314,6 @@ impl<'a> TestCase<'a> for PluginTestCase {
             }
             PluginTestCase::StateBufferedStreams => {
                 state::test_state_buffered_streams(library, plugin_id)
-            }
-            PluginTestCase::StateRandomGarbage => {
-                state::test_state_random_garbage(library, plugin_id)
             }
         }
     }

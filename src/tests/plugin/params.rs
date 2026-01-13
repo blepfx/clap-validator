@@ -104,10 +104,10 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
         let values: [f64; VALUES_PER_PARAM] = [
             *param_info.range.start(),
             *param_info.range.end(),
-            prng.gen_range(param_info.range.clone()),
-            prng.gen_range(param_info.range.clone()),
-            prng.gen_range(param_info.range.clone()),
-            prng.gen_range(param_info.range),
+            prng.random_range(param_info.range.clone()),
+            prng.random_range(param_info.range.clone()),
+            prng.random_range(param_info.range.clone()),
+            prng.random_range(param_info.range),
         ];
         'value_loop: for starting_value in values {
             // If the plugin rounds string representations then `value` may very

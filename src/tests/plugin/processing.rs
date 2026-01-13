@@ -356,8 +356,8 @@ pub fn test_process_random_block_sizes(
     let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
 
     run_simple(&plugin, &mut process_data, 20, |process_data| {
-        process_data.block_size = if prng.gen_bool(0.8) {
-            prng.gen_range(2..=MAX_BUFFER_SIZE)
+        process_data.block_size = if prng.random_bool(0.8) {
+            prng.random_range(2..=MAX_BUFFER_SIZE)
         } else {
             1
         };

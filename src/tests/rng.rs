@@ -124,10 +124,10 @@ impl NoteGenerator {
         const SAMPLE_OFFSET_RANGE: RangeInclusive<i32> = -6..=5;
 
         let mut events = vec![];
-        let mut sample = prng.gen_range(SAMPLE_OFFSET_RANGE).max(0) as u32;
+        let mut sample = prng.random_range(SAMPLE_OFFSET_RANGE).max(0) as u32;
         while sample < num_samples {
             events.push(self.generate(prng, sample)?);
-            sample += prng.gen_range(SAMPLE_OFFSET_RANGE).max(0) as u32;
+            sample += prng.random_range(SAMPLE_OFFSET_RANGE).max(0) as u32;
         }
 
         queue.add_events(events);
@@ -145,7 +145,7 @@ impl NoteGenerator {
 
         // We'll ignore the prefered note dialect and pick from all of the supported note dialects.
         // The plugin may get a CLAP note on and a MIDI note off if it supports both of those things
-        let note_port_idx = prng.gen_range(0..self.config.inputs.len());
+        let note_port_idx = prng.random_range(0..self.config.inputs.len());
         let supports_clap_note_events = self.config.inputs[note_port_idx]
             .supported_dialects
             .contains(&CLAP_NOTE_DIALECT_CLAP);
@@ -167,13 +167,14 @@ impl NoteGenerator {
 
         // We could do this in a smarter way to avoid generating impossible event types (like a note
         // off when there are no active notes), but this should work fine.
+
         for _ in 0..1024 {
-            let event_type = prng.sample(rand::distributions::Slice::new(possible_events).unwrap());
+            let event_type = prng.sample(rand::distr::slice::Choose::new(possible_events).unwrap());
             match event_type {
                 NoteEventType::ClapNoteOn => {
                     let note = if self.only_consistent_events {
-                        let key = prng.gen_range(0..128);
-                        let channel = prng.gen_range(0..16);
+                        let key = prng.random_range(0..128);
+                        let channel = prng.random_range(0..16);
                         let note_id = self.next_note_id;
                         let note = Note {
                             key,
@@ -190,14 +191,14 @@ impl NoteGenerator {
                         note
                     } else {
                         Note {
-                            key: prng.gen_range(0..128),
-                            channel: prng.gen_range(0..16),
-                            note_id: prng.gen_range(0..100),
+                            key: prng.random_range(0..128),
+                            channel: prng.random_range(0..16),
+                            note_id: prng.random_range(0..100),
                             choked: false,
                         }
                     };
 
-                    let velocity = prng.gen_range(0.0..=1.0);
+                    let velocity = prng.random_range(0.0..=1.0);
                     return Ok(Event::Note(clap_event_note {
                         header: clap_event_header {
                             size: std::mem::size_of::<clap_event_note>() as u32,
@@ -220,18 +221,18 @@ impl NoteGenerator {
                             continue;
                         }
 
-                        let note_idx = prng.gen_range(0..self.active_notes[note_port_idx].len());
+                        let note_idx = prng.random_range(0..self.active_notes[note_port_idx].len());
                         self.active_notes[note_port_idx].remove(note_idx)
                     } else {
                         Note {
-                            key: prng.gen_range(0..128),
-                            channel: prng.gen_range(0..16),
-                            note_id: prng.gen_range(0..100),
+                            key: prng.random_range(0..128),
+                            channel: prng.random_range(0..16),
+                            note_id: prng.random_range(0..100),
                             choked: false,
                         }
                     };
 
-                    let velocity = prng.gen_range(0.0..=1.0);
+                    let velocity = prng.random_range(0.0..=1.0);
                     return Ok(Event::Note(clap_event_note {
                         header: clap_event_header {
                             size: std::mem::size_of::<clap_event_note>() as u32,
@@ -254,7 +255,7 @@ impl NoteGenerator {
                         }
 
                         // A note can only be choked once
-                        let note_idx = prng.gen_range(0..self.active_notes[note_port_idx].len());
+                        let note_idx = prng.random_range(0..self.active_notes[note_port_idx].len());
                         let note = &mut self.active_notes[note_port_idx][note_idx];
                         if note.choked {
                             continue;
@@ -264,15 +265,15 @@ impl NoteGenerator {
                         *note
                     } else {
                         Note {
-                            key: prng.gen_range(0..128),
-                            channel: prng.gen_range(0..16),
-                            note_id: prng.gen_range(0..100),
+                            key: prng.random_range(0..128),
+                            channel: prng.random_range(0..16),
+                            note_id: prng.random_range(0..100),
                             choked: false,
                         }
                     };
 
                     // Does a velocity make any sense here? Probably not.
-                    let velocity = prng.gen_range(0.0..=1.0);
+                    let velocity = prng.random_range(0.0..=1.0);
                     return Ok(Event::Note(clap_event_note {
                         header: clap_event_header {
                             size: std::mem::size_of::<clap_event_note>() as u32,
@@ -294,25 +295,25 @@ impl NoteGenerator {
                             continue;
                         }
 
-                        let note_idx = prng.gen_range(0..self.active_notes[note_port_idx].len());
+                        let note_idx = prng.random_range(0..self.active_notes[note_port_idx].len());
                         self.active_notes[note_port_idx][note_idx]
                     } else {
                         Note {
-                            key: prng.gen_range(0..128),
-                            channel: prng.gen_range(0..16),
-                            note_id: prng.gen_range(0..100),
+                            key: prng.random_range(0..128),
+                            channel: prng.random_range(0..16),
+                            note_id: prng.random_range(0..100),
                             choked: false,
                         }
                     };
 
-                    let expression_id =
-                        prng.gen_range(CLAP_NOTE_EXPRESSION_VOLUME..=CLAP_NOTE_EXPRESSION_PRESSURE);
+                    let expression_id = prng
+                        .random_range(CLAP_NOTE_EXPRESSION_VOLUME..=CLAP_NOTE_EXPRESSION_PRESSURE);
                     let value_range = match expression_id {
                         CLAP_NOTE_EXPRESSION_VOLUME => 0.0..=4.0,
                         CLAP_NOTE_EXPRESSION_TUNING => -128.0..=128.0,
                         _ => 0.0..=1.0,
                     };
-                    let value = prng.gen_range(value_range);
+                    let value = prng.random_range(value_range);
 
                     return Ok(Event::NoteExpression(clap_event_note_expression {
                         header: clap_event_header {
@@ -332,8 +333,8 @@ impl NoteGenerator {
                 }
                 NoteEventType::MidiNoteOn => {
                     let note = if self.only_consistent_events {
-                        let key = prng.gen_range(0..128);
-                        let channel = prng.gen_range(0..16);
+                        let key = prng.random_range(0..128);
+                        let channel = prng.random_range(0..16);
                         let note_id = self.next_note_id;
                         let note = Note {
                             key,
@@ -350,14 +351,14 @@ impl NoteGenerator {
                         note
                     } else {
                         Note {
-                            key: prng.gen_range(0..128),
-                            channel: prng.gen_range(0..16),
-                            note_id: prng.gen_range(0..100),
+                            key: prng.random_range(0..128),
+                            channel: prng.random_range(0..16),
+                            note_id: prng.random_range(0..100),
                             choked: false,
                         }
                     };
 
-                    let velocity = prng.gen_range(0.0..=1.0);
+                    let velocity = prng.random_range(0.0..=1.0);
                     return Ok(Event::Midi(clap_event_midi {
                         header: clap_event_header {
                             size: std::mem::size_of::<clap_event_midi>() as u32,
@@ -380,18 +381,18 @@ impl NoteGenerator {
                             continue;
                         }
 
-                        let note_idx = prng.gen_range(0..self.active_notes[note_port_idx].len());
+                        let note_idx = prng.random_range(0..self.active_notes[note_port_idx].len());
                         self.active_notes[note_port_idx].remove(note_idx)
                     } else {
                         Note {
-                            key: prng.gen_range(0..128),
-                            channel: prng.gen_range(0..16),
-                            note_id: prng.gen_range(0..100),
+                            key: prng.random_range(0..128),
+                            channel: prng.random_range(0..16),
+                            note_id: prng.random_range(0..100),
                             choked: false,
                         }
                     };
 
-                    let velocity = prng.gen_range(0.0..=1.0);
+                    let velocity = prng.random_range(0.0..=1.0);
                     return Ok(Event::Midi(clap_event_midi {
                         header: clap_event_header {
                             size: std::mem::size_of::<clap_event_midi>() as u32,
@@ -409,8 +410,8 @@ impl NoteGenerator {
                     }));
                 }
                 NoteEventType::MidiChannelPressure => {
-                    let channel = prng.gen_range(0..16);
-                    let pressure = prng.gen_range(0..128);
+                    let channel = prng.random_range(0..16);
+                    let pressure = prng.random_range(0..128);
                     return Ok(Event::Midi(clap_event_midi {
                         header: clap_event_header {
                             size: std::mem::size_of::<clap_event_midi>() as u32,
@@ -429,18 +430,18 @@ impl NoteGenerator {
                             continue;
                         }
 
-                        let note_idx = prng.gen_range(0..self.active_notes[note_port_idx].len());
+                        let note_idx = prng.random_range(0..self.active_notes[note_port_idx].len());
                         self.active_notes[note_port_idx][note_idx]
                     } else {
                         Note {
-                            key: prng.gen_range(0..128),
-                            channel: prng.gen_range(0..16),
-                            note_id: prng.gen_range(0..100),
+                            key: prng.random_range(0..128),
+                            channel: prng.random_range(0..16),
+                            note_id: prng.random_range(0..100),
                             choked: false,
                         }
                     };
 
-                    let pressure = prng.gen_range(0..128);
+                    let pressure = prng.random_range(0..128);
                     return Ok(Event::Midi(clap_event_midi {
                         header: clap_event_header {
                             size: std::mem::size_of::<clap_event_midi>() as u32,
@@ -459,9 +460,9 @@ impl NoteGenerator {
                 }
                 NoteEventType::MidiPitchBend => {
                     // May as well just generate the two bytes directly instead of doing fancy things
-                    let channel = prng.gen_range(0..16);
-                    let byte1 = prng.gen_range(0..128);
-                    let byte2 = prng.gen_range(0..128);
+                    let channel = prng.random_range(0..16);
+                    let byte1 = prng.random_range(0..128);
+                    let byte2 = prng.random_range(0..128);
                     return Ok(Event::Midi(clap_event_midi {
                         header: clap_event_header {
                             size: std::mem::size_of::<clap_event_midi>() as u32,
@@ -475,9 +476,9 @@ impl NoteGenerator {
                     }));
                 }
                 NoteEventType::MidiCc => {
-                    let channel = prng.gen_range(0..16);
-                    let cc = prng.gen_range(0..128);
-                    let value = prng.gen_range(0..128);
+                    let channel = prng.random_range(0..16);
+                    let cc = prng.random_range(0..128);
+                    let value = prng.random_range(0..128);
                     return Ok(Event::Midi(clap_event_midi {
                         header: clap_event_header {
                             size: std::mem::size_of::<clap_event_midi>() as u32,
@@ -491,8 +492,8 @@ impl NoteGenerator {
                     }));
                 }
                 NoteEventType::MidiProgramChange => {
-                    let channel = prng.gen_range(0..16);
-                    let program_number = prng.gen_range(0..128);
+                    let channel = prng.random_range(0..16);
+                    let program_number = prng.random_range(0..128);
                     return Ok(Event::Midi(clap_event_midi {
                         header: clap_event_header {
                             size: std::mem::size_of::<clap_event_midi>() as u32,
@@ -611,7 +612,7 @@ impl<'a> ParamFuzzer<'a> {
                 }
 
                 let value = if self.snap_to_bounds {
-                    if prng.gen_bool(0.5) {
+                    if prng.random_bool(0.5) {
                         *param_info.range.start()
                     } else {
                         *param_info.range.end()
@@ -620,9 +621,9 @@ impl<'a> ParamFuzzer<'a> {
                     if param_info.stepped() {
                         // We already confirmed that the range starts and ends in an integer when
                         // constructing the parameter info
-                        prng.gen_range(param_info.range.clone()).round()
+                        prng.random_range(param_info.range.clone()).round()
                     } else {
-                        prng.gen_range(param_info.range.clone())
+                        prng.random_range(param_info.range.clone())
                     }
                 };
 

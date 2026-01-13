@@ -23,8 +23,6 @@ mod state;
 pub enum PluginTestCase {
     #[strum(serialize = "descriptor-consistency")]
     DescriptorConsistency,
-    #[strum(serialize = "methods-non-null")]
-    MethodsNonNull,
     #[strum(serialize = "features-categories")]
     FeaturesCategories,
     #[strum(serialize = "features-duplicates")]
@@ -84,10 +82,6 @@ impl<'a> TestCase<'a> for PluginTestCase {
 
     fn description(&self) -> String {
         match self {
-            PluginTestCase::MethodsNonNull => String::from(
-                "Asserts that all methods of the 'clap_plugin' object and some known extension \
-                 are non-null.",
-            ),
             PluginTestCase::DescriptorConsistency => String::from(
                 "The plugin descriptor returned from the plugin factory and the plugin descriptor \
                  stored on the 'clap_plugin object should be equivalent.",
@@ -244,7 +238,6 @@ impl<'a> TestCase<'a> for PluginTestCase {
 
     fn run_in_process(&self, (library, plugin_id): Self::TestArgs) -> Result<TestStatus> {
         match self {
-            PluginTestCase::MethodsNonNull => descriptor::test_methods_non_null(library, plugin_id),
             PluginTestCase::DescriptorConsistency => {
                 descriptor::test_consistency(library, plugin_id)
             }

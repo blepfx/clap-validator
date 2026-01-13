@@ -92,8 +92,7 @@ pub struct ProviderPresets {
     // All presets declared by the plugin, indexed by their location. Represented by a tuple list
     // because JSON object keys must be strings, and with the change from URIs to a location
     // kind+value that's not longer the case.
-    #[serde(with = "serde_with::rust::btreemap_as_tuple_list")]
-    pub presets: BTreeMap<LocationValue, PresetFile>,
+    pub presets: Vec<(LocationValue, PresetFile)>,
 }
 
 /// Index the presets for one or more plugins. [`index()`] can be used to build a list of all
@@ -155,7 +154,7 @@ where
                     provider_name: provider_metadata.name,
                     provider_vendor: provider_metadata.vendor,
                     soundpacks: declared_data.soundpacks.clone(),
-                    presets,
+                    presets: presets.into_iter().collect(),
                 });
             }
 

@@ -607,14 +607,14 @@ impl AudioBuffers {
         impl AudioBufferFill for Randomize<'_> {
             fn fill_input_f32(&mut self, _bus: usize, _channel: usize, slice: &mut [f32]) {
                 for sample in slice.iter_mut() {
-                    let y = self.0.gen_range(-1.0..=1.0f32);
+                    let y = self.0.random_range(-1.0..=1.0f32);
                     *sample = if y.is_subnormal() { 0.0 } else { y };
                 }
             }
 
             fn fill_input_f64(&mut self, _bus: usize, _channel: usize, slice: &mut [f64]) {
                 for sample in slice.iter_mut() {
-                    let y = self.0.gen_range(-1.0..=1.0f64);
+                    let y = self.0.random_range(-1.0..=1.0f64);
                     *sample = if y.is_subnormal() { 0.0 } else { y };
                 }
             }
@@ -622,7 +622,7 @@ impl AudioBuffers {
             // fill with random NaN values so we can detect if a plugin left the output uninitialized
             fn fill_output_f32(&mut self, _bus: usize, _channel: usize, slice: &mut [f32]) {
                 for sample in slice.iter_mut() {
-                    let y: u32 = self.0.gen();
+                    let y: u32 = self.0.random();
                     let y = f32::from_bits(y | 0x7F800001);
                     assert!(y.is_nan());
                     *sample = y;
@@ -631,7 +631,7 @@ impl AudioBuffers {
 
             fn fill_output_f64(&mut self, _bus: usize, _channel: usize, slice: &mut [f64]) {
                 for sample in slice.iter_mut() {
-                    let y: u64 = self.0.gen();
+                    let y: u64 = self.0.random();
                     let y = f64::from_bits(y | 0x7FF0000000000001);
                     assert!(y.is_nan());
                     *sample = y;
@@ -821,7 +821,6 @@ impl EventQueue {
     unsafe extern "C" fn size(list: *const clap_input_events) -> u32 {
         check_null_ptr!(list, (*list).ctx);
         let this = &*((*list).ctx as *const Self);
-
         this.events.lock().len() as u32
     }
 

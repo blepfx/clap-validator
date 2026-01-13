@@ -246,6 +246,12 @@ impl<'lib> Plugin<'lib> {
 
         let plugin = self.as_ptr();
         if unsafe_clap_call! { plugin=>init(plugin) } {
+            // If the plugin never calls `request_callback`, the validator won't catch this
+            anyhow::ensure!(
+                unsafe { (*plugin).on_main_thread.is_some() },
+                "clap_plugin::on_main_thread is null"
+            );
+
             self.state.status.store(PluginStatus::Deactivated);
             Ok(())
         } else {

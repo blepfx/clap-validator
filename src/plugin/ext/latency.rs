@@ -9,6 +9,7 @@ use crate::{
 use clap_sys::ext::latency::{clap_plugin_latency, CLAP_EXT_LATENCY};
 use std::{ffi::CStr, ptr::NonNull};
 
+#[allow(unused)]
 pub struct Latency<'a> {
     plugin: &'a Plugin<'a>,
     latency: NonNull<clap_plugin_latency>,
@@ -28,6 +29,7 @@ impl<'a> Extension<&'a Plugin<'a>> for Latency<'a> {
 }
 
 impl<'a> Latency<'a> {
+    #[allow(unused)]
     pub fn get(&self) -> u32 {
         assert_plugin_state!(self.plugin, state == PluginStatus::Activating);
 

@@ -61,6 +61,9 @@ pub struct Param {
     pub flags: clap_param_info_flags,
 }
 
+unsafe impl Send for Param {}
+unsafe impl Sync for Param {}
+
 impl Params<'_> {
     /// Used by the status assertion macros.
     fn status(&self) -> PluginStatus {
@@ -357,5 +360,10 @@ impl Param {
     /// Whether this parameter is stepped.
     pub fn stepped(&self) -> bool {
         (self.flags & CLAP_PARAM_IS_STEPPED) != 0
+    }
+
+    /// Whether this parameter is automatable.
+    pub fn automatable(&self) -> bool {
+        (self.flags & CLAP_PARAM_IS_AUTOMATABLE) != 0
     }
 }

@@ -3,9 +3,10 @@
 use anyhow::{Context, Result};
 use clap_sys::events::{
     clap_event_header, clap_event_midi, clap_event_note, clap_event_note_expression,
-    clap_event_param_value, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, CLAP_EVENT_NOTE_CHOKE,
-    CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_VALUE,
-    CLAP_NOTE_EXPRESSION_PRESSURE, CLAP_NOTE_EXPRESSION_TUNING, CLAP_NOTE_EXPRESSION_VOLUME,
+    clap_event_param_value, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_IS_LIVE, CLAP_EVENT_MIDI,
+    CLAP_EVENT_NOTE_CHOKE, CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON,
+    CLAP_EVENT_PARAM_VALUE, CLAP_NOTE_EXPRESSION_PRESSURE, CLAP_NOTE_EXPRESSION_TUNING,
+    CLAP_NOTE_EXPRESSION_VOLUME,
 };
 use clap_sys::ext::note_ports::{
     CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI, CLAP_NOTE_DIALECT_MIDI_MPE,
@@ -47,7 +48,9 @@ pub struct NoteGenerator {
 /// A helper to generate random parameter automation and modulation events in a couple different
 /// ways to stress test a plugin's parameter handling.
 pub struct ParamFuzzer<'a> {
-    config: &'a ParamInfo,
+    params: &'a ParamInfo,
+    notes: NotePortConfig,
+    snap_to_bounds: bool,
 }
 
 /// The description of an active note in the [`NoteGenerator`].
@@ -569,22 +572,35 @@ impl NoteEventType {
 
 impl<'a> ParamFuzzer<'a> {
     /// Create a new parameter fuzzer. This ignores parameters that are readonly or hidden.
-    pub fn new(config: &'a ParamInfo) -> Self {
-        ParamFuzzer { config }
+    pub fn new(params: &'a ParamInfo) -> Self {
+        ParamFuzzer {
+            params,
+            notes: NotePortConfig::default(),
+            snap_to_bounds: false,
+        }
+    }
+
+    pub fn with_note_config(mut self, notes: NotePortConfig) -> Self {
+        self.notes = notes;
+        self
+    }
+
+    pub fn with_snap_to_bounds(mut self) -> Self {
+        self.snap_to_bounds = true;
+        self
     }
 
     // TODO: Modulation and per-{key,channel,port,note_id} modulation
     // TODO: Variants similar to `fill_event_queue` from `NoteGenerator`
-    // TODO: A variant that snaps to the minimum or maximum value
 
-    /// Randomize all parameters at a certain sample index using **automation**, returning an
+    /// Randomize _all_ parameters at a certain sample index using **automation**, returning an
     /// iterator yielding automation events for all parameters.
     pub fn randomize_params_at(
         &'a self,
         prng: &'a mut Pcg32,
         time_offset: u32,
     ) -> impl Iterator<Item = Event> + 'a {
-        self.config
+        self.params
             .iter()
             .filter_map(move |(param_id, param_info)| {
                 // We can send parameter changes for parameters that are not automatable:
@@ -594,12 +610,20 @@ impl<'a> ParamFuzzer<'a> {
                     return None;
                 }
 
-                let value = if param_info.stepped() {
-                    // We already confirmed that the range starts and ends in an integer when
-                    // constructing the parameter info
-                    prng.gen_range(param_info.range.clone()).round()
+                let value = if self.snap_to_bounds {
+                    if prng.gen_bool(0.5) {
+                        *param_info.range.start()
+                    } else {
+                        *param_info.range.end()
+                    }
                 } else {
-                    prng.gen_range(param_info.range.clone())
+                    if param_info.stepped() {
+                        // We already confirmed that the range starts and ends in an integer when
+                        // constructing the parameter info
+                        prng.gen_range(param_info.range.clone()).round()
+                    } else {
+                        prng.gen_range(param_info.range.clone())
+                    }
                 };
 
                 Some(Event::ParamValue(clap_event_param_value {
@@ -608,7 +632,11 @@ impl<'a> ParamFuzzer<'a> {
                         time: time_offset,
                         space_id: CLAP_CORE_EVENT_SPACE_ID,
                         type_: CLAP_EVENT_PARAM_VALUE,
-                        flags: 0,
+                        flags: if param_info.automatable() {
+                            0
+                        } else {
+                            CLAP_EVENT_IS_LIVE
+                        },
                     },
                     param_id: *param_id,
                     cookie: param_info.cookie,

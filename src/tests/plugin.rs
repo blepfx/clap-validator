@@ -45,6 +45,10 @@ pub enum PluginTestCase {
     ParamConversions,
     #[strum(serialize = "param-fuzz-basic")]
     ParamFuzzBasic,
+    #[strum(serialize = "param-fuzz-bounds")]
+    ParamFuzzBounds,
+    #[strum(serialize = "param-fuzz-sample-accurate")]
+    ParamFuzzSampleAccurate,
     #[strum(serialize = "param-set-wrong-namespace")]
     ParamSetWrongNamespace,
     #[strum(serialize = "param-default-values")]
@@ -145,6 +149,17 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  the test if it doesn't produce any infinite or NaN values, and doesn't crash.",
                 params::FUZZ_NUM_PERMUTATIONS,
                 params::FUZZ_RUNS_PER_PERMUTATION
+            ),
+            PluginTestCase::ParamFuzzBounds => format!(
+                "The exact same test as {}, but this time the parameter values are snapped to the \
+                 minimum and maximum values.",
+                PluginTestCase::ParamFuzzBasic
+            ),
+            PluginTestCase::ParamFuzzSampleAccurate => String::from(
+                "Generates and sets parameter values in a sample-accurate fashion while \
+                 processing audio, generating them at fixed intervals (1, 100, 1000 samples). The \
+                 plugin passes the test if it doesn't produce any infinite or NaN values, and \
+                 doesn't crash.",
             ),
             PluginTestCase::ParamSetWrongNamespace => String::from(
                 "Sends events to the plugin with the 'CLAP_EVENT_PARAM_VALUE' event type but with \
@@ -247,6 +262,10 @@ impl<'a> TestCase<'a> for PluginTestCase {
             }
             PluginTestCase::ParamConversions => params::test_param_conversions(library, plugin_id),
             PluginTestCase::ParamFuzzBasic => params::test_param_fuzz_basic(library, plugin_id),
+            PluginTestCase::ParamFuzzBounds => params::test_param_fuzz_bounds(library, plugin_id),
+            PluginTestCase::ParamFuzzSampleAccurate => {
+                params::test_param_fuzz_sample_accurate(library, plugin_id)
+            }
             PluginTestCase::ParamSetWrongNamespace => {
                 params::test_param_set_wrong_namespace(library, plugin_id)
             }

@@ -50,6 +50,8 @@ pub fn test_consistency(library: &PluginLibrary, plugin_id: &str) -> Result<Test
 
 /// Check that all of the required methods on `clap_plugin` are non-null.
 pub fn test_methods_non_null(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+    /// SAFETY:
+    /// Assumes that extension 'T' is a repr(C) struct with function pointers only.
     unsafe fn check_extension<T: Copy>(plugin: &Plugin<'_>, extension: &CStr) -> Result<()> {
         let extension_ptr = unsafe_clap_call! { plugin.as_ptr()=>get_extension(plugin.as_ptr(), extension.as_ptr()) };
         if extension_ptr.is_null() {

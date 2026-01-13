@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use super::PluginTestCase;
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::NotePorts;
-use crate::plugin::ext::params::Params;
+use crate::plugin::ext::params::{ParamInfo, Params};
 use crate::plugin::ext::Extension;
 use crate::plugin::host::Host;
 use crate::plugin::instance::process::{AudioBuffers, Event, ProcessData};
@@ -39,6 +39,23 @@ struct ParamValue<'a> {
     id: clap_id,
     name: &'a str,
     value: f64,
+}
+
+impl<'a> ParamValue<'a> {
+    fn from_events(events: Option<Vec<Event>>, param_infos: &'a ParamInfo) -> Vec<Self> {
+        events
+            .into_iter()
+            .flatten()
+            .map(|event| match event {
+                Event::ParamValue(event) => ParamValue {
+                    id: event.param_id,
+                    name: &param_infos[&event.param_id].name,
+                    value: event.value,
+                },
+                _ => panic!("Unexpected event type. This is a clap-validator bug."),
+            })
+            .collect()
+    }
 }
 
 /// The test for `ProcessingTest::ParamConversions`.
@@ -281,25 +298,14 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str) -> Result
                 PluginTestCase::ParamFuzzBasic
                     .temporary_file(plugin_id, CURRENT_PARAM_VALUES_FILE_NAME)?;
 
-            let create_param_values_vec = |events: Option<Vec<Event>>| match events {
-                Some(events) => events
-                    .into_iter()
-                    .map(|event| match event {
-                        Event::ParamValue(event) => ParamValue {
-                            id: event.param_id,
-                            name: &param_infos[&event.param_id].name,
-                            value: event.value,
-                        },
-                        _ => panic!("Unexpected event type. This is a clap-validator bug."),
-                    })
-                    .collect(),
-                None => Vec::new(),
-            };
-            let previous_param_values: Vec<ParamValue> = create_param_values_vec(previous_events);
-            let current_param_values: Vec<ParamValue> = create_param_values_vec(current_events);
-
-            serde_json::to_writer_pretty(previous_param_values_file, &previous_param_values)?;
-            serde_json::to_writer_pretty(current_param_values_file, &current_param_values)?;
+            serde_json::to_writer_pretty(
+                previous_param_values_file,
+                &ParamValue::from_events(previous_events, &param_infos),
+            )?;
+            serde_json::to_writer_pretty(
+                current_param_values_file,
+                &ParamValue::from_events(current_events, &param_infos),
+            )?;
 
             // This is a bit weird and there may be a better way to do this, but we only want to
             // write the parameter values if we know the run has failed, and we only know the
@@ -319,6 +325,257 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str) -> Result
         }
 
         std::mem::swap(&mut previous_events, &mut current_events);
+    }
+
+    // `ProcessingTest::run()` already handled callbacks for us
+    host.callback_error_check()
+        .context("An error occured during a host callback")?;
+
+    Ok(TestStatus::Success { details: None })
+}
+
+/// The test for `ProcessingTest::ParamFuzzBounds`.
+pub fn test_param_fuzz_bounds(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+    let mut prng = new_prng();
+
+    let host = Host::new();
+    let plugin = library
+        .create_plugin(plugin_id, host.clone())
+        .context("Could not create the plugin instance")?;
+    plugin.init().context("Error during initialization")?;
+
+    // Both audio and note ports are optional
+    let audio_ports = plugin.get_extension::<AudioPorts>();
+    let note_ports = plugin.get_extension::<NotePorts>();
+    let params = match plugin.get_extension::<Params>() {
+        Some(params) => params,
+        None => {
+            return Ok(TestStatus::Skipped {
+                details: Some(format!(
+                    "The plugin does not implement the '{}' extension.",
+                    Params::EXTENSION_ID.to_str().unwrap(),
+                )),
+            })
+        }
+    };
+    host.handle_callbacks_once();
+
+    let audio_ports_config = audio_ports
+        .map(|ports| ports.config())
+        .transpose()
+        .context("Could not fetch the plugin's audio port config")?
+        .unwrap_or_default();
+    let note_ports_config = note_ports
+        .map(|ports| ports.config())
+        .transpose()
+        .context("Could not fetch the plugin's note port config")?
+        // Don't try to generate notes if the plugin supports the note ports extension but doesn't
+        // actually have any note ports. JUCE does this.
+        .filter(|config| !config.inputs.is_empty());
+    let param_infos = params
+        .info()
+        .context("Could not fetch the plugin's parameters")?;
+
+    // For each set of runs we'll generate new parameter values, and if the plugin supports notes
+    // we'll also generate note events.
+    let param_fuzzer = ParamFuzzer::new(&param_infos).with_snap_to_bounds();
+    let mut note_event_rng = note_ports_config.map(NoteGenerator::new);
+
+    // We'll keep track of the current and the previous set of parameter value so we can write them
+    // to a file if the test fails
+    let mut current_events: Option<Vec<Event>>;
+    let mut previous_events: Option<Vec<Event>> = None;
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
+    let mut process_data = ProcessData::new(&mut audio_buffers, Default::default());
+
+    for permutation_no in 1..=FUZZ_NUM_PERMUTATIONS {
+        current_events = Some(param_fuzzer.randomize_params_at(&mut prng, 0).collect());
+
+        let mut have_set_parameters = false;
+        let run_result = run_simple(
+            &plugin,
+            &mut process_data,
+            FUZZ_RUNS_PER_PERMUTATION,
+            |process_data| {
+                if !have_set_parameters {
+                    process_data
+                        .input_events
+                        .add_events(current_events.clone().unwrap());
+                    have_set_parameters = true;
+                }
+
+                // Audio and MIDI/note events are randomized in accordance to what the plugin
+                // supports
+                if let Some(note_event_rng) = note_event_rng.as_mut() {
+                    // This includes a sort if `random_param_set_events` also contained a queue
+                    note_event_rng.fill_event_queue(
+                        &mut prng,
+                        &process_data.input_events,
+                        BUFFER_SIZE as u32,
+                    )?;
+                }
+                process_data.buffers.randomize(&mut prng);
+
+                Ok(())
+            },
+        );
+
+        // If the run failed we'll want to write the parameter values to a file first
+        if run_result.is_err() {
+            let (previous_param_values_file_path, previous_param_values_file) =
+                PluginTestCase::ParamFuzzBounds
+                    .temporary_file(plugin_id, PREVIOUS_PARAM_VALUES_FILE_NAME)?;
+            let (current_param_values_file_path, current_param_values_file) =
+                PluginTestCase::ParamFuzzBounds
+                    .temporary_file(plugin_id, CURRENT_PARAM_VALUES_FILE_NAME)?;
+
+            serde_json::to_writer_pretty(
+                previous_param_values_file,
+                &ParamValue::from_events(previous_events, &param_infos),
+            )?;
+
+            serde_json::to_writer_pretty(
+                current_param_values_file,
+                &ParamValue::from_events(current_events, &param_infos),
+            )?;
+
+            // This is a bit weird and there may be a better way to do this, but we only want to
+            // write the parameter values if we know the run has failed, and we only know the
+            // filename after writing those values to a file
+            return Err(run_result
+                .with_context(|| {
+                    format!(
+                        "Invalid output detected in parameter value permutation {} of {} ('{}' \
+                         and '{}' contain the current and previous parameter values)",
+                        permutation_no,
+                        FUZZ_NUM_PERMUTATIONS,
+                        current_param_values_file_path.display(),
+                        previous_param_values_file_path.display(),
+                    )
+                })
+                .unwrap_err());
+        }
+
+        std::mem::swap(&mut previous_events, &mut current_events);
+    }
+
+    // `ProcessingTest::run()` already handled callbacks for us
+    host.callback_error_check()
+        .context("An error occured during a host callback")?;
+
+    Ok(TestStatus::Success { details: None })
+}
+
+/// The test for `ProcessingTest::ParamFuzzSampleAccurate`.
+pub fn test_param_fuzz_sample_accurate(
+    library: &PluginLibrary,
+    plugin_id: &str,
+) -> Result<TestStatus> {
+    const INTERVALS: &[u32] = &[1000, 100, 1];
+
+    let mut prng = new_prng();
+
+    let host = Host::new();
+    let plugin = library
+        .create_plugin(plugin_id, host.clone())
+        .context("Could not create the plugin instance")?;
+    plugin.init().context("Error during initialization")?;
+
+    // Both audio and note ports are optional
+    let audio_ports = plugin.get_extension::<AudioPorts>();
+    let note_ports = plugin.get_extension::<NotePorts>();
+    let params = match plugin.get_extension::<Params>() {
+        Some(params) => params,
+        None => {
+            return Ok(TestStatus::Skipped {
+                details: Some(format!(
+                    "The plugin does not implement the '{}' extension.",
+                    Params::EXTENSION_ID.to_str().unwrap(),
+                )),
+            })
+        }
+    };
+    host.handle_callbacks_once();
+
+    let audio_ports_config = audio_ports
+        .map(|ports| ports.config())
+        .transpose()
+        .context("Could not fetch the plugin's audio port config")?
+        .unwrap_or_default();
+    let note_ports_config = note_ports
+        .map(|ports| ports.config())
+        .transpose()
+        .context("Could not fetch the plugin's note port config")?
+        // Don't try to generate notes if the plugin supports the note ports extension but doesn't
+        // actually have any note ports. JUCE does this.
+        .filter(|config| !config.inputs.is_empty());
+    let param_infos = params
+        .info()
+        .context("Could not fetch the plugin's parameters")?;
+
+    // For each set of runs we'll generate new parameter values, and if the plugin supports notes
+    // we'll also generate note events.
+    let param_fuzzer = ParamFuzzer::new(&param_infos);
+    let mut note_event_rng = note_ports_config.map(NoteGenerator::new);
+    let mut current_events: Option<Vec<Event>> = None;
+
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
+    let mut process_data = ProcessData::new(&mut audio_buffers, Default::default());
+
+    for &interval in INTERVALS {
+        let mut current_sample = 0;
+        let run_result = run_simple(&plugin, &mut process_data, 5, |process_data| {
+            while current_sample < BUFFER_SIZE as u32 {
+                let events: Vec<Event> = param_fuzzer
+                    .randomize_params_at(&mut prng, current_sample)
+                    .collect();
+
+                process_data.input_events.add_events(events.clone());
+                current_events = Some(events);
+                current_sample += interval;
+            }
+
+            // Audio and MIDI/note events are randomized in accordance to what the plugin
+            // supports
+            if let Some(note_event_rng) = note_event_rng.as_mut() {
+                note_event_rng.fill_event_queue(
+                    &mut prng,
+                    &process_data.input_events,
+                    BUFFER_SIZE as u32,
+                )?;
+            }
+
+            process_data.buffers.randomize(&mut prng);
+            current_sample -= BUFFER_SIZE as u32;
+
+            Ok(())
+        });
+
+        // If the run failed we'll want to write the parameter values to a file first
+        if run_result.is_err() {
+            let (current_param_values_file_path, current_param_values_file) =
+                PluginTestCase::ParamFuzzSampleAccurate
+                    .temporary_file(plugin_id, CURRENT_PARAM_VALUES_FILE_NAME)?;
+
+            serde_json::to_writer_pretty(
+                current_param_values_file,
+                &ParamValue::from_events(current_events, &param_infos),
+            )?;
+
+            // This is a bit weird and there may be a better way to do this, but we only want to
+            // write the parameter values if we know the run has failed, and we only know the
+            // filename after writing those values to a file
+            return Err(run_result
+                .with_context(|| {
+                    format!(
+                        "Invalid output detected when automating parameters with interval of {} \
+                         samples ('{}' contains the current parameter values)",
+                        interval,
+                        current_param_values_file_path.display(),
+                    )
+                })
+                .unwrap_err());
+        }
     }
 
     // `ProcessingTest::run()` already handled callbacks for us
@@ -419,6 +676,7 @@ pub fn test_param_set_wrong_namespace(
     }
 }
 
+/// The test for `ProcessingTest::ParamDefaultValues`.
 pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let host = Host::new();
     let plugin = library

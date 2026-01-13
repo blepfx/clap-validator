@@ -1,18 +1,16 @@
 //! Abstractions for interacting with the `note-ports` extension.
 
+use super::Extension;
+use crate::plugin::instance::Plugin;
+use crate::util::unsafe_clap_call;
 use anyhow::Result;
 use clap_sys::ext::note_ports::{
-    CLAP_EXT_NOTE_PORTS, clap_note_dialect, clap_note_port_info, clap_plugin_note_ports,
+    clap_note_dialect, clap_note_port_info, clap_plugin_note_ports, CLAP_EXT_NOTE_PORTS,
 };
 use std::collections::HashSet;
 use std::ffi::CStr;
 use std::mem;
 use std::ptr::NonNull;
-
-use crate::plugin::instance::Plugin;
-use crate::util::unsafe_clap_call;
-
-use super::Extension;
 
 /// Abstraction for the `note-ports` extension covering the main thread functionality.
 #[derive(Debug)]

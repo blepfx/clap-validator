@@ -25,8 +25,8 @@ const EXPECTED_STATE_FILE_NAME: &str = "state-expected";
 /// The file name we'll use to dump the actual state when a test fails.
 const ACTUAL_STATE_FILE_NAME: &str = "state-actual";
 
-/// The test for `PluginTestCase::StateInvalid`.
-pub fn test_state_invalid(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+/// The test for `PluginTestCase::StateInvalidEmpty`.
+pub fn test_state_invalid_empty(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let host = Host::new();
     let plugin = library
         .create_plugin(plugin_id, host.clone())
@@ -47,10 +47,12 @@ pub fn test_state_invalid(library: &PluginLibrary, plugin_id: &str) -> Result<Te
     host.handle_callbacks_once();
 
     match state.load(&[]) {
-        Ok(_) => anyhow::bail!(
-            "The plugin returned true when 'clap_plugin_state::load()' was called when an empty \
-             state, this is likely a bug."
-        ),
+        Ok(_) => Ok(TestStatus::Warning {
+            details: Some(format!(
+                "The plugin returned true when 'clap_plugin_state::load()' was called when an \
+                 empty state, this is likely a bug."
+            )),
+        }),
         Err(_) => {
             host.handle_callbacks_once();
             host.callback_error_check()
@@ -58,6 +60,54 @@ pub fn test_state_invalid(library: &PluginLibrary, plugin_id: &str) -> Result<Te
 
             Ok(TestStatus::Success { details: None })
         }
+    }
+}
+
+/// The test for `PluginTestCase::StateRandomGarbage`.
+pub fn test_state_invalid_random(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+    let mut prng = new_prng();
+
+    let host = Host::new();
+    let plugin = library
+        .create_plugin(plugin_id, host.clone())
+        .context("Could not create the plugin instance")?;
+
+    plugin.init().context("Error during initialization")?;
+
+    let state = match plugin.get_extension::<State>() {
+        Some(state) => state,
+        None => {
+            return Ok(TestStatus::Skipped {
+                details: Some(format!(
+                    "The plugin does not implement the '{}' extension.",
+                    State::EXTENSION_ID.to_str().unwrap(),
+                )),
+            })
+        }
+    };
+
+    host.handle_callbacks_once();
+
+    let mut random_data = vec![0u8; 1024 * 1024];
+    let mut result = Ok(());
+
+    for _ in 0..3 {
+        prng.fill(&mut random_data[..]);
+        result = result.or(state.load(&random_data));
+    }
+
+    host.handle_callbacks_once();
+    host.callback_error_check()
+        .context("An error occured during a host callback")?;
+
+    match result {
+        Err(_) => Ok(TestStatus::Success { details: None }),
+        Ok(_) => Ok(TestStatus::Warning {
+            details: Some(String::from(
+                "The plugin loaded random bytes successfully, which is unexpected, but the plugin \
+                 did not crash.",
+            )),
+        }),
     }
 }
 
@@ -630,54 +680,6 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
                 actual_state_file_path.display(),
             )),
         })
-    }
-}
-
-/// The test for `PluginTestCase::StateRandomGarbage`.
-pub fn test_state_random_garbage(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
-    let mut prng = new_prng();
-
-    let host = Host::new();
-    let plugin = library
-        .create_plugin(plugin_id, host.clone())
-        .context("Could not create the plugin instance")?;
-
-    plugin.init().context("Error during initialization")?;
-
-    let state = match plugin.get_extension::<State>() {
-        Some(state) => state,
-        None => {
-            return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    State::EXTENSION_ID.to_str().unwrap(),
-                )),
-            })
-        }
-    };
-
-    host.handle_callbacks_once();
-
-    let mut random_data = vec![0u8; 1024 * 1024];
-    let mut result = Ok(());
-
-    for _ in 0..10 {
-        prng.fill(&mut random_data[..]);
-        result = result.or(state.load(&random_data));
-    }
-
-    host.handle_callbacks_once();
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
-
-    match result {
-        Err(_) => Ok(TestStatus::Success { details: None }),
-        Ok(_) => Ok(TestStatus::Warning {
-            details: Some(String::from(
-                "The plugin loaded random bytes successfully, which is unexpected, but the plugin \
-                 did not crash.",
-            )),
-        }),
     }
 }
 

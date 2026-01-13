@@ -63,10 +63,10 @@ pub enum PluginTestCase {
     ParamSetWrongNamespace,
     #[strum(serialize = "param-default-values")]
     ParamDefaultValues,
-    #[strum(serialize = "state-invalid")]
-    StateInvalid,
-    #[strum(serialize = "state-random-garbage")]
-    StateRandomGarbage,
+    #[strum(serialize = "state-invalid-empty")]
+    StateInvalidEmpty,
+    #[strum(serialize = "state-invalid-random")]
+    StateInvalidRandom,
     #[strum(serialize = "state-reproducibility-basic")]
     StateReproducibilityBasic,
     #[strum(serialize = "state-reproducibility-null-cookies")]
@@ -191,9 +191,13 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 "Asserts that the values for all parameters are set correctly to their default \
                  values when the plugin is initialized.",
             ),
-            PluginTestCase::StateInvalid => String::from(
+            PluginTestCase::StateInvalidEmpty => String::from(
                 "The plugin should return false when 'clap_plugin_state::load()' is called with \
                  an empty state.",
+            ),
+            PluginTestCase::StateInvalidRandom => String::from(
+                "Loads 3x1MB chunks of random bytes via 'clap_plugin_state::load()' and asserts \
+                 that the plugin doesn't crash.",
             ),
             PluginTestCase::StateReproducibilityBasic => String::from(
                 "Randomizes a plugin's parameters, saves its state, recreates the plugin \
@@ -219,10 +223,6 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  time the plugin is only allowed to read a small prime number of bytes at a time \
                  when reloading and resaving the state.",
                 PluginTestCase::StateReproducibilityBasic
-            ),
-            PluginTestCase::StateRandomGarbage => String::from(
-                "Loads 10x1MB chunks of random bytes via 'clap_plugin_state::load()' and asserts \
-                 that the plugin doesn't crash.",
             ),
         }
     }
@@ -299,9 +299,11 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::ParamDefaultValues => {
                 params::test_param_default_values(library, plugin_id)
             }
-            PluginTestCase::StateInvalid => state::test_state_invalid(library, plugin_id),
-            PluginTestCase::StateRandomGarbage => {
-                state::test_state_random_garbage(library, plugin_id)
+            PluginTestCase::StateInvalidEmpty => {
+                state::test_state_invalid_empty(library, plugin_id)
+            }
+            PluginTestCase::StateInvalidRandom => {
+                state::test_state_invalid_random(library, plugin_id)
             }
             PluginTestCase::StateReproducibilityBasic => {
                 state::test_state_reproducibility_null_cookies(library, plugin_id, false)

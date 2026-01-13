@@ -83,39 +83,37 @@ pub fn test_methods_non_null(library: &PluginLibrary, plugin_id: &str) -> Result
     // Check `clap_plugin` methods.
     // SAFETY: `plugin.as_ptr()` is guaranteed to be a valid pointer as long as `plugin` is alive.
     unsafe {
-        let plugin = plugin.as_ptr();
+        let ptr = plugin.as_ptr();
 
-        anyhow::ensure!((*plugin).init.is_some(), "clap_plugin::init is null");
-        anyhow::ensure!((*plugin).destroy.is_some(), "clap_plugin::destroy is null");
-        anyhow::ensure!((*plugin).process.is_some(), "clap_plugin::process is null");
-        anyhow::ensure!((*plugin).reset.is_some(), "clap_plugin::reset is null");
+        anyhow::ensure!((*ptr).init.is_some(), "clap_plugin::init is null");
+
+        plugin.init().context("Error during initialization")?;
+
+        anyhow::ensure!((*ptr).destroy.is_some(), "clap_plugin::destroy is null");
+        anyhow::ensure!((*ptr).process.is_some(), "clap_plugin::process is null");
+        anyhow::ensure!((*ptr).reset.is_some(), "clap_plugin::reset is null");
         anyhow::ensure!(
-            (*plugin).get_extension.is_some(),
+            (*ptr).get_extension.is_some(),
             "clap_plugin::get_extension is null"
         );
         anyhow::ensure!(
-            (*plugin).on_main_thread.is_some(),
+            (*ptr).on_main_thread.is_some(),
             "clap_plugin::on_main_thread is null"
         );
+        anyhow::ensure!((*ptr).activate.is_some(), "clap_plugin::activate is null");
         anyhow::ensure!(
-            (*plugin).activate.is_some(),
-            "clap_plugin::activate is null"
-        );
-        anyhow::ensure!(
-            (*plugin).deactivate.is_some(),
+            (*ptr).deactivate.is_some(),
             "clap_plugin::deactivate is null"
         );
         anyhow::ensure!(
-            (*plugin).start_processing.is_some(),
+            (*ptr).start_processing.is_some(),
             "clap_plugin::start_processing is null"
         );
         anyhow::ensure!(
-            (*plugin).stop_processing.is_some(),
+            (*ptr).stop_processing.is_some(),
             "clap_plugin::stop_processing is null"
         );
     }
-
-    plugin.init().context("Error during initialization")?;
 
     // Check known extensions.
     unsafe {

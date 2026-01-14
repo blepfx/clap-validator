@@ -3,7 +3,6 @@
 use anyhow::{Context, Result};
 use clap_sys::events::CLAP_EVENT_PARAM_VALUE;
 use clap_sys::id::clap_id;
-use rand::Rng;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -60,8 +59,6 @@ impl<'a> ParamValue<'a> {
 
 /// The test for `ProcessingTest::ParamConversions`.
 pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
-    let mut prng = new_prng();
-
     let host = Host::new();
     let plugin = library
         .create_plugin(plugin_id, host.clone())
@@ -98,18 +95,10 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
     'param_loop: for (param_id, param_info) in param_infos {
         let param_name = &param_info.name;
 
-        // For each parameter we'll test this for the minimum and maximum values
-        // (in case these values have special meanings), and four other random
-        // values
-        let values: [f64; VALUES_PER_PARAM] = [
-            *param_info.range.start(),
-            *param_info.range.end(),
-            prng.random_range(param_info.range.clone()),
-            prng.random_range(param_info.range.clone()),
-            prng.random_range(param_info.range.clone()),
-            prng.random_range(param_info.range),
-        ];
-        'value_loop: for starting_value in values {
+        'value_loop: for i in 0..=100 {
+            let starting_value = param_info.range.start()
+                + (param_info.range.end() - param_info.range.start()) * (i as f64 / 100.0);
+
             // If the plugin rounds string representations then `value` may very
             // will not roundtrip correctly, so we'll start at the string
             // representation

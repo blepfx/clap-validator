@@ -181,7 +181,7 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::ParamFuzzModulation => String::from(
                 "Sends parameter change events, including monophonic modulation and polyphonic \
                  automation/modulation events at random irregular unsynchronized intervals, and \
-                 has the plugin process them. The plugin passes the test if it doesn't produce \
+                 have the plugin process them. The plugin passes the test if it doesn't produce \
                  any infinite or NaN values, and doesn't crash.",
             ),
             PluginTestCase::ParamSetWrongNamespace => String::from(

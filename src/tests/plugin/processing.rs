@@ -197,25 +197,23 @@ pub fn test_process_varying_sample_rates(
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
-    let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
-        Some(audio_ports) => audio_ports
-            .config()
-            .context("Error while querying 'audio-ports' IO configuration")?,
-        None => AudioPortConfig::default(),
-    };
+    let audio_ports_config = plugin
+        .get_extension::<AudioPorts>()
+        .map(|x| x.config())
+        .transpose()
+        .context("Error while querying 'audio-ports' IO configuration")?
+        .unwrap_or_default();
 
-    let note_ports_config = match plugin.get_extension::<NotePorts>() {
-        Some(note_ports) => Some(
-            note_ports
-                .config()
-                .context("Error while querying 'note-ports' IO configuration")?,
-        ),
-        None => None,
-    };
+    let note_ports_config = plugin
+        .get_extension::<NotePorts>()
+        .map(|x| x.config())
+        .transpose()
+        .context("Error while querying 'note-ports' IO configuration")?
+        .unwrap_or_default();
 
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
     for &sample_rate in SAMPLE_RATES {
-        let mut note_event_rng = note_ports_config.as_ref().map(NoteGenerator::new);
+        let mut note_event_rng = NoteGenerator::new(&note_ports_config);
         let mut process_data = ProcessData::new(
             &mut audio_buffers,
             ProcessConfig {
@@ -226,14 +224,11 @@ pub fn test_process_varying_sample_rates(
 
         run_simple(&plugin, &mut process_data, 5, |process_data| {
             process_data.buffers.randomize(&mut prng);
-
-            if let Some(note_event_rng) = note_event_rng.as_mut() {
-                note_event_rng.fill_event_queue(
-                    &mut prng,
-                    &process_data.input_events,
-                    process_data.block_size,
-                );
-            }
+            note_event_rng.fill_event_queue(
+                &mut prng,
+                &process_data.input_events,
+                process_data.block_size,
+            );
 
             Ok(())
         })
@@ -266,24 +261,22 @@ pub fn test_process_varying_block_sizes(
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
-    let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
-        Some(audio_ports) => audio_ports
-            .config()
-            .context("Error while querying 'audio-ports' IO configuration")?,
-        None => AudioPortConfig::default(),
-    };
+    let audio_ports_config = plugin
+        .get_extension::<AudioPorts>()
+        .map(|x| x.config())
+        .transpose()
+        .context("Error while querying 'audio-ports' IO configuration")?
+        .unwrap_or_default();
 
-    let note_ports_config = match plugin.get_extension::<NotePorts>() {
-        Some(note_ports) => Some(
-            note_ports
-                .config()
-                .context("Error while querying 'note-ports' IO configuration")?,
-        ),
-        None => None,
-    };
+    let note_ports_config = plugin
+        .get_extension::<NotePorts>()
+        .map(|x| x.config())
+        .transpose()
+        .context("Error while querying 'note-ports' IO configuration")?
+        .unwrap_or_default();
 
     for &buffer_size in BLOCK_SIZES {
-        let mut note_event_rng = note_ports_config.as_ref().map(NoteGenerator::new);
+        let mut note_event_rng = NoteGenerator::new(&note_ports_config);
         let mut audio_buffers =
             AudioBuffers::new_out_of_place_f32(&audio_ports_config, buffer_size as usize);
         let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
@@ -295,14 +288,11 @@ pub fn test_process_varying_block_sizes(
             num_iters as usize,
             |process_data| {
                 process_data.buffers.randomize(&mut prng);
-
-                if let Some(note_event_rng) = note_event_rng.as_mut() {
-                    note_event_rng.fill_event_queue(
-                        &mut prng,
-                        &process_data.input_events,
-                        process_data.block_size,
-                    );
-                }
+                note_event_rng.fill_event_queue(
+                    &mut prng,
+                    &process_data.input_events,
+                    process_data.block_size,
+                );
 
                 Ok(())
             },
@@ -334,23 +324,21 @@ pub fn test_process_random_block_sizes(
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
-    let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
-        Some(audio_ports) => audio_ports
-            .config()
-            .context("Error while querying 'audio-ports' IO configuration")?,
-        None => AudioPortConfig::default(),
-    };
+    let audio_ports_config = plugin
+        .get_extension::<AudioPorts>()
+        .map(|x| x.config())
+        .transpose()
+        .context("Error while querying 'audio-ports' IO configuration")?
+        .unwrap_or_default();
 
-    let note_ports_config = match plugin.get_extension::<NotePorts>() {
-        Some(note_ports) => Some(
-            note_ports
-                .config()
-                .context("Error while querying 'note-ports' IO configuration")?,
-        ),
-        None => None,
-    };
+    let note_ports_config = plugin
+        .get_extension::<NotePorts>()
+        .map(|x| x.config())
+        .transpose()
+        .context("Error while querying 'note-ports' IO configuration")?
+        .unwrap_or_default();
 
-    let mut note_event_rng = note_ports_config.as_ref().map(NoteGenerator::new);
+    let mut note_event_rng = NoteGenerator::new(&note_ports_config);
     let mut audio_buffers =
         AudioBuffers::new_out_of_place_f32(&audio_ports_config, MAX_BUFFER_SIZE as usize);
     let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
@@ -363,14 +351,11 @@ pub fn test_process_random_block_sizes(
         };
 
         process_data.buffers.randomize(&mut prng);
-
-        if let Some(note_event_rng) = note_event_rng.as_mut() {
-            note_event_rng.fill_event_queue(
-                &mut prng,
-                &process_data.input_events,
-                process_data.block_size,
-            );
-        }
+        note_event_rng.fill_event_queue(
+            &mut prng,
+            &process_data.input_events,
+            process_data.block_size,
+        );
 
         Ok(())
     })?;
@@ -492,23 +477,21 @@ pub fn test_process_audio_reset_determinism(
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
-    let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
-        Some(audio_ports) => audio_ports
-            .config()
-            .context("Error while querying 'audio-ports' IO configuration")?,
-        None => AudioPortConfig::default(),
-    };
+    let audio_ports_config = plugin
+        .get_extension::<AudioPorts>()
+        .map(|x| x.config())
+        .transpose()
+        .context("Error while querying 'audio-ports' IO configuration")?
+        .unwrap_or_default();
 
-    let note_ports_config = match plugin.get_extension::<NotePorts>() {
-        Some(note_ports) => Some(
-            note_ports
-                .config()
-                .context("Error while querying 'note-ports' IO configuration")?,
-        ),
-        None => None,
-    };
+    let note_ports_config = plugin
+        .get_extension::<NotePorts>()
+        .map(|x| x.config())
+        .transpose()
+        .context("Error while querying 'note-ports' IO configuration")?
+        .unwrap_or_default();
 
-    let mut note_event_rng = note_ports_config.as_ref().map(NoteGenerator::new);
+    let mut note_event_rng = NoteGenerator::new(&note_ports_config);
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(
         &audio_ports_config,
         BUFFER_SIZE * 8, /* we do it in one block to simplify the test */
@@ -521,13 +504,11 @@ pub fn test_process_audio_reset_determinism(
         let mut rng = new_prng();
 
         process_data.buffers.randomize(&mut rng);
-        if let Some(note_event_rng) = note_event_rng.as_mut() {
-            note_event_rng.fill_event_queue(
-                &mut new_prng(),
-                &process_data.input_events,
-                process_data.block_size,
-            );
-        }
+        note_event_rng.fill_event_queue(
+            &mut new_prng(),
+            &process_data.input_events,
+            process_data.block_size,
+        );
 
         let result = match curr_iter {
             0 => ProcessControlFlow::Reset,
@@ -535,9 +516,7 @@ pub fn test_process_audio_reset_determinism(
             _ => {
                 plugin.reset();
                 process_data.reset();
-                if let Some(note_event_rng) = note_event_rng.as_mut() {
-                    note_event_rng.reset();
-                }
+                note_event_rng.reset();
 
                 ProcessControlFlow::Exit
             }
@@ -607,14 +586,12 @@ pub fn test_process_audio_config(
         }
     };
 
-    let note_ports_config = match plugin.get_extension::<NotePorts>() {
-        Some(note_ports) => Some(
-            note_ports
-                .config()
-                .context("Error while querying 'note-ports' IO configuration")?,
-        ),
-        None => None,
-    };
+    let note_ports_config = plugin
+        .get_extension::<NotePorts>()
+        .map(|x| x.config())
+        .transpose()
+        .context("Error while querying 'note-ports' IO configuration")?
+        .unwrap_or_default();
 
     for config_audio_ports_config in audio_ports_config
         .enumerate()
@@ -737,7 +714,7 @@ pub fn test_process_audio_config(
             // TODO: check info
         }
 
-        let mut note_event_rng = note_ports_config.as_ref().map(NoteGenerator::new);
+        let mut note_event_rng = NoteGenerator::new(&note_ports_config);
         let mut audio_buffers = if in_place {
             AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE)
         } else {
@@ -747,14 +724,11 @@ pub fn test_process_audio_config(
         let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
         run_simple(&plugin, &mut process_data, 5, |process_data| {
             process_data.buffers.randomize(&mut prng);
-
-            if let Some(note_event_rng) = note_event_rng.as_mut() {
-                note_event_rng.fill_event_queue(
-                    &mut prng,
-                    &process_data.input_events,
-                    process_data.block_size,
-                );
-            }
+            note_event_rng.fill_event_queue(
+                &mut prng,
+                &process_data.input_events,
+                process_data.block_size,
+            );
 
             Ok(())
         })

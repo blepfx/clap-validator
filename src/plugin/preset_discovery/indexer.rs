@@ -58,7 +58,9 @@ pub struct IndexerResults {
 /// Data parsed from a `clap_preset_discovery_filetype`.
 #[derive(Debug, Clone)]
 pub struct FileType {
+    #[allow(unused)]
     pub name: String,
+    #[allow(unused)]
     pub description: Option<String>,
     /// The file extension, doesn't contain a leading period.
     pub extension: String,

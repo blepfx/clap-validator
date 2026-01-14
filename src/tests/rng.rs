@@ -53,9 +53,15 @@ pub struct NoteGenerator<'a> {
 /// A helper to generate random parameter automation and modulation events in a couple different
 /// ways to stress test a plugin's parameter handling.
 pub struct ParamFuzzer<'a> {
+    /// The parameter info to generate random events for.
     params: &'a ParamInfo,
-    notes: NotePortConfig,
+
+    /// Whether to snap generated parameter values to the parameter's minimum or maximum value.
     snap_to_bounds: bool,
+
+    /// The range for the next event's timing relative to the previous event.
+    /// This will be capped to 0 when generating events
+    sample_offset_range: RangeInclusive<i32>,
 }
 
 /// The description of an active note in the [`NoteGenerator`].
@@ -579,7 +585,7 @@ impl<'a> NoteGenerator<'a> {
                         port_index: note_port_idx as i16,
                         channel: note.channel,
                         key: note.key,
-                        value: ParamFuzzer::random_value(param, prng),
+                        value: ParamFuzzer::random_modulation(param, prng),
                     }));
                 }
             }
@@ -661,14 +667,9 @@ impl<'a> ParamFuzzer<'a> {
     pub fn new(params: &'a ParamInfo) -> Self {
         ParamFuzzer {
             params,
-            notes: NotePortConfig::default(),
             snap_to_bounds: false,
+            sample_offset_range: -10..=20,
         }
-    }
-
-    pub fn with_note_config(mut self, notes: NotePortConfig) -> Self {
-        self.notes = notes;
-        self
     }
 
     pub fn with_snap_to_bounds(mut self) -> Self {
@@ -676,8 +677,75 @@ impl<'a> ParamFuzzer<'a> {
         self
     }
 
-    // TODO: Modulation and per-{key,channel,port,note_id} modulation
-    // TODO: Variants similar to `fill_event_queue` from `NoteGenerator`
+    /// Fill an event queue with random parameter change events for the next `num_samples` samples.
+    /// This does not clear the event queue. If the queue was not empty, then this will do a stable
+    /// sort after inserting _all_ events.
+    ///
+    /// Unlike [`ParamFuzzer::randomize_params_at`], this generates [`Event::ParamMod`] events as well as
+    /// generating events at random irregular unsynchronized (between different parameters) intervals.
+    pub fn fill_event_queue(&'a self, prng: &'a mut Pcg32, queue: &EventQueue, num_samples: u32) {
+        let mut events = vec![];
+        let mut sample = prng.random_range(self.sample_offset_range.clone()).max(0) as u32;
+        while sample < num_samples {
+            let Some(event) = self.generate(prng) else {
+                return;
+            };
+
+            events.push(event);
+            sample += prng.random_range(self.sample_offset_range.clone()).max(0) as u32;
+        }
+
+        queue.add_events(events);
+    }
+
+    /// Generate a single random parameter change event for one of the plugin's parameters.
+    pub fn generate(&'a self, prng: &'a mut Pcg32) -> Option<Event> {
+        let (param_id, param_info) = self
+            .params
+            .iter()
+            .filter(|(_, info)| !info.readonly() && !info.hidden())
+            .choose(prng)?;
+
+        if !self.snap_to_bounds && param_info.modulatable() && prng.random_bool(0.5) {
+            Some(Event::ParamValue(clap_event_param_value {
+                header: clap_event_header {
+                    size: std::mem::size_of::<clap_event_param_value>() as u32,
+                    time: 0,
+                    space_id: CLAP_CORE_EVENT_SPACE_ID,
+                    type_: CLAP_EVENT_PARAM_VALUE,
+                    flags: 0,
+                },
+                param_id: *param_id,
+                cookie: param_info.cookie,
+                note_id: -1,
+                port_index: -1,
+                channel: -1,
+                key: -1,
+                value: ParamFuzzer::random_modulation(param_info, prng),
+            }))
+        } else {
+            Some(Event::ParamValue(clap_event_param_value {
+                header: clap_event_header {
+                    size: std::mem::size_of::<clap_event_param_value>() as u32,
+                    time: 0,
+                    space_id: CLAP_CORE_EVENT_SPACE_ID,
+                    type_: CLAP_EVENT_PARAM_VALUE,
+                    flags: if param_info.automatable() {
+                        0
+                    } else {
+                        CLAP_EVENT_IS_LIVE
+                    },
+                },
+                param_id: *param_id,
+                cookie: param_info.cookie,
+                note_id: -1,
+                port_index: -1,
+                channel: -1,
+                key: -1,
+                value: ParamFuzzer::random_value(param_info, prng),
+            }))
+        }
+    }
 
     /// Randomize _all_ parameters at a certain sample index using **automation**, returning an
     /// iterator yielding automation events for all parameters.
@@ -736,6 +804,16 @@ impl<'a> ParamFuzzer<'a> {
             prng.random_range(param.range.clone()).round()
         } else {
             prng.random_range(param.range.clone())
+        }
+    }
+
+    pub fn random_modulation(param: &Param, prng: &mut Pcg32) -> f64 {
+        let range = (param.range.end() - param.range.start()).abs() * 0.5;
+
+        if param.stepped() {
+            prng.random_range(-range..=range).round()
+        } else {
+            prng.random_range(-range..=range)
         }
     }
 }

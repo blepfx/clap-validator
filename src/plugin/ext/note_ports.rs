@@ -6,6 +6,7 @@ use crate::util::unsafe_clap_call;
 use anyhow::Result;
 use clap_sys::ext::note_ports::{
     clap_note_dialect, clap_note_port_info, clap_plugin_note_ports, CLAP_EXT_NOTE_PORTS,
+    CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI, CLAP_NOTE_DIALECT_MIDI_MPE,
 };
 use std::collections::HashSet;
 use std::ffi::CStr;
@@ -152,5 +153,18 @@ impl NotePorts<'_> {
         }
 
         Ok(config)
+    }
+}
+
+impl NotePort {
+    pub fn supports_clap(&self) -> bool {
+        self.supported_dialects.contains(&CLAP_NOTE_DIALECT_CLAP)
+    }
+
+    pub fn supports_midi(&self) -> bool {
+        self.supported_dialects.contains(&CLAP_NOTE_DIALECT_MIDI)
+            || self
+                .supported_dialects
+                .contains(&CLAP_NOTE_DIALECT_MIDI_MPE)
     }
 }

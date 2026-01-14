@@ -57,6 +57,8 @@ pub enum PluginTestCase {
     ParamFuzzBounds,
     #[strum(serialize = "param-fuzz-sample-accurate")]
     ParamFuzzSampleAccurate,
+    #[strum(serialize = "param-fuzz-polyphonic")]
+    ParamFuzzPolyphonic,
     #[strum(serialize = "param-set-wrong-namespace")]
     ParamSetWrongNamespace,
     #[strum(serialize = "param-default-values")]
@@ -176,6 +178,11 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  generating them at fixed intervals (1, 100, 1000 samples). The plugin passes the \
                  test if it doesn't produce any infinite or NaN values, and doesn't crash.",
             ),
+            PluginTestCase::ParamFuzzPolyphonic => String::from(
+                "Sends polyphonic parameter change events alongside with note events, and has the \
+                 plugin process them. The plugin passes the test if it doesn't produce any \
+                 infinite or NaN values, and doesn't crash.",
+            ),
             PluginTestCase::ParamSetWrongNamespace => String::from(
                 "Sends events to the plugin with the 'CLAP_EVENT_PARAM_VALUE' event type but with \
                  a mismatching namespace ID. Asserts that the plugin's parameter values don't \
@@ -285,6 +292,9 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::ParamFuzzBounds => params::test_param_fuzz_bounds(library, plugin_id),
             PluginTestCase::ParamFuzzSampleAccurate => {
                 params::test_param_fuzz_sample_accurate(library, plugin_id)
+            }
+            PluginTestCase::ParamFuzzPolyphonic => {
+                params::test_param_fuzz_polyphonic(library, plugin_id)
             }
             PluginTestCase::ParamSetWrongNamespace => {
                 params::test_param_set_wrong_namespace(library, plugin_id)

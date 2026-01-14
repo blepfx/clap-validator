@@ -156,7 +156,7 @@ pub fn test_process_note_out_of_place(
 
     // We'll fill the input event queue with (consistent) random CLAP note and/or MIDI
     // events depending on what's supported by the plugin supports
-    let mut note_event_rng = NoteGenerator::new(note_ports_config);
+    let mut note_event_rng = NoteGenerator::new(&note_ports_config);
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
     let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
 
@@ -170,7 +170,7 @@ pub fn test_process_note_out_of_place(
             &mut prng,
             &process_data.input_events,
             process_data.block_size,
-        )?;
+        );
         Ok(())
     })?;
 
@@ -215,7 +215,7 @@ pub fn test_process_varying_sample_rates(
 
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
     for &sample_rate in SAMPLE_RATES {
-        let mut note_event_rng = note_ports_config.clone().map(NoteGenerator::new);
+        let mut note_event_rng = note_ports_config.as_ref().map(NoteGenerator::new);
         let mut process_data = ProcessData::new(
             &mut audio_buffers,
             ProcessConfig {
@@ -232,7 +232,7 @@ pub fn test_process_varying_sample_rates(
                     &mut prng,
                     &process_data.input_events,
                     process_data.block_size,
-                )?;
+                );
             }
 
             Ok(())
@@ -283,7 +283,7 @@ pub fn test_process_varying_block_sizes(
     };
 
     for &buffer_size in BLOCK_SIZES {
-        let mut note_event_rng = note_ports_config.clone().map(NoteGenerator::new);
+        let mut note_event_rng = note_ports_config.as_ref().map(NoteGenerator::new);
         let mut audio_buffers =
             AudioBuffers::new_out_of_place_f32(&audio_ports_config, buffer_size as usize);
         let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
@@ -301,7 +301,7 @@ pub fn test_process_varying_block_sizes(
                         &mut prng,
                         &process_data.input_events,
                         process_data.block_size,
-                    )?;
+                    );
                 }
 
                 Ok(())
@@ -350,7 +350,7 @@ pub fn test_process_random_block_sizes(
         None => None,
     };
 
-    let mut note_event_rng = note_ports_config.map(NoteGenerator::new);
+    let mut note_event_rng = note_ports_config.as_ref().map(NoteGenerator::new);
     let mut audio_buffers =
         AudioBuffers::new_out_of_place_f32(&audio_ports_config, MAX_BUFFER_SIZE as usize);
     let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
@@ -369,7 +369,7 @@ pub fn test_process_random_block_sizes(
                 &mut prng,
                 &process_data.input_events,
                 process_data.block_size,
-            )?;
+            );
         }
 
         Ok(())
@@ -508,7 +508,7 @@ pub fn test_process_audio_reset_determinism(
         None => None,
     };
 
-    let mut note_event_rng = note_ports_config.map(NoteGenerator::new);
+    let mut note_event_rng = note_ports_config.as_ref().map(NoteGenerator::new);
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(
         &audio_ports_config,
         BUFFER_SIZE * 8, /* we do it in one block to simplify the test */
@@ -526,7 +526,7 @@ pub fn test_process_audio_reset_determinism(
                 &mut new_prng(),
                 &process_data.input_events,
                 process_data.block_size,
-            )?;
+            );
         }
 
         let result = match curr_iter {
@@ -737,7 +737,7 @@ pub fn test_process_audio_config(
             // TODO: check info
         }
 
-        let mut note_event_rng = note_ports_config.clone().map(NoteGenerator::new);
+        let mut note_event_rng = note_ports_config.as_ref().map(NoteGenerator::new);
         let mut audio_buffers = if in_place {
             AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE)
         } else {
@@ -753,7 +753,7 @@ pub fn test_process_audio_config(
                     &mut prng,
                     &process_data.input_events,
                     process_data.block_size,
-                )?;
+                );
             }
 
             Ok(())

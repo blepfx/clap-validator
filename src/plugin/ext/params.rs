@@ -366,4 +366,29 @@ impl Param {
     pub fn automatable(&self) -> bool {
         (self.flags & CLAP_PARAM_IS_AUTOMATABLE) != 0
     }
+
+    /// Whether this parameter is automatable per note ID, key, channel, or port.
+    pub fn poly_automatable(&self) -> bool {
+        (self.flags
+            & (CLAP_PARAM_IS_AUTOMATABLE_PER_NOTE_ID
+                | CLAP_PARAM_IS_AUTOMATABLE_PER_KEY
+                | CLAP_PARAM_IS_AUTOMATABLE_PER_CHANNEL
+                | CLAP_PARAM_IS_AUTOMATABLE_PER_PORT))
+            != 0
+    }
+
+    /// Whether this parameter is modulatable.
+    pub fn modulatable(&self) -> bool {
+        (self.flags & CLAP_PARAM_IS_MODULATABLE) != 0
+    }
+
+    /// Whether this parameter is modulatable per note ID, key, channel, or port.
+    pub fn poly_modulatable(&self) -> bool {
+        (self.flags
+            & (CLAP_PARAM_IS_MODULATABLE_PER_NOTE_ID
+                | CLAP_PARAM_IS_MODULATABLE_PER_KEY
+                | CLAP_PARAM_IS_MODULATABLE_PER_CHANNEL
+                | CLAP_PARAM_IS_MODULATABLE_PER_PORT))
+            != 0
+    }
 }

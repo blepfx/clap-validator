@@ -248,7 +248,7 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str) -> Result
     // For each set of runs we'll generate new parameter values, and if the plugin supports notes
     // we'll also generate note events.
     let param_fuzzer = ParamFuzzer::new(&param_infos);
-    let mut note_event_rng = note_ports_config.map(NoteGenerator::new);
+    let mut note_event_rng = note_ports_config.as_ref().map(NoteGenerator::new);
 
     // We'll keep track of the current and the previous set of parameter value so we can write them
     // to a file if the test fails
@@ -281,7 +281,7 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str) -> Result
                         &mut prng,
                         &process_data.input_events,
                         BUFFER_SIZE as u32,
-                    )?;
+                    );
                 }
                 process_data.buffers.randomize(&mut prng);
 
@@ -379,7 +379,7 @@ pub fn test_param_fuzz_bounds(library: &PluginLibrary, plugin_id: &str) -> Resul
     // For each set of runs we'll generate new parameter values, and if the plugin supports notes
     // we'll also generate note events.
     let param_fuzzer = ParamFuzzer::new(&param_infos).with_snap_to_bounds();
-    let mut note_event_rng = note_ports_config.map(NoteGenerator::new);
+    let mut note_event_rng = note_ports_config.as_ref().map(NoteGenerator::new);
 
     // We'll keep track of the current and the previous set of parameter value so we can write them
     // to a file if the test fails
@@ -412,7 +412,7 @@ pub fn test_param_fuzz_bounds(library: &PluginLibrary, plugin_id: &str) -> Resul
                         &mut prng,
                         &process_data.input_events,
                         BUFFER_SIZE as u32,
-                    )?;
+                    );
                 }
                 process_data.buffers.randomize(&mut prng);
 
@@ -516,7 +516,7 @@ pub fn test_param_fuzz_sample_accurate(
     // For each set of runs we'll generate new parameter values, and if the plugin supports notes
     // we'll also generate note events.
     let param_fuzzer = ParamFuzzer::new(&param_infos);
-    let mut note_event_rng = note_ports_config.map(NoteGenerator::new);
+    let mut note_event_rng = note_ports_config.as_ref().map(NoteGenerator::new);
     let mut current_events: Option<Vec<Event>> = None;
 
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
@@ -542,7 +542,7 @@ pub fn test_param_fuzz_sample_accurate(
                     &mut prng,
                     &process_data.input_events,
                     BUFFER_SIZE as u32,
-                )?;
+                );
             }
 
             process_data.buffers.randomize(&mut prng);
@@ -581,6 +581,85 @@ pub fn test_param_fuzz_sample_accurate(
     // `ProcessingTest::run()` already handled callbacks for us
     host.callback_error_check()
         .context("An error occured during a host callback")?;
+
+    Ok(TestStatus::Success { details: None })
+}
+
+/// The test for `ProcessingTest::ParamFuzzPolyphonic`.
+pub fn test_param_fuzz_polyphonic(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+    let mut prng = new_prng();
+
+    let host = Host::new();
+    let plugin = library
+        .create_plugin(plugin_id, host.clone())
+        .context("Could not create the plugin instance")?;
+    plugin.init().context("Error during initialization")?;
+
+    let audio_ports = match plugin.get_extension::<AudioPorts>() {
+        Some(audio_ports) => audio_ports
+            .config()
+            .context("Could not fetch the plugin's audio port config")?,
+        None => AudioPortConfig::default(),
+    };
+
+    let note_ports = match plugin.get_extension::<NotePorts>() {
+        Some(note_ports) => note_ports
+            .config()
+            .context("Could not fetch the plugin's note port config")?,
+        None => {
+            return Ok(TestStatus::Skipped {
+                details: Some(format!(
+                    "The plugin does not implement the '{}' extension.",
+                    NotePorts::EXTENSION_ID.to_str().unwrap(),
+                )),
+            })
+        }
+    };
+
+    let params = match plugin.get_extension::<Params>() {
+        Some(params) => params,
+        None => {
+            return Ok(TestStatus::Skipped {
+                details: Some(format!(
+                    "The plugin does not implement the '{}' extension.",
+                    Params::EXTENSION_ID.to_str().unwrap(),
+                )),
+            })
+        }
+    };
+
+    let param_infos = params
+        .info()
+        .context("Could not fetch the plugin's parameters")?;
+
+    if param_infos
+        .values()
+        .all(|param| !param.poly_automatable() && !param.poly_modulatable())
+    {
+        return Ok(TestStatus::Skipped {
+            details: Some(String::from(
+                "The plugin does not have any poly-modulatable parameters.",
+            )),
+        });
+    }
+
+    let mut note_event_rng = NoteGenerator::new(&note_ports).with_params(&param_infos);
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports, BUFFER_SIZE);
+    let mut process_data = ProcessData::new(&mut audio_buffers, Default::default());
+
+    // TODO: mix in mono parameter changes as well?
+
+    run_simple(&plugin, &mut process_data, 5, |process_data| {
+        process_data.buffers.randomize(&mut prng);
+        note_event_rng.fill_event_queue(
+            &mut prng,
+            &process_data.input_events,
+            process_data.block_size,
+        );
+        Ok(())
+    })?;
+
+    host.handle_callbacks_once();
 
     Ok(TestStatus::Success { details: None })
 }

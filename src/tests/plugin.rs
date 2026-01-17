@@ -3,7 +3,10 @@
 use super::TestCase;
 use crate::{
     plugin::{
-        ext::{audio_ports_config::AudioPortsConfig, Extension},
+        ext::{
+            audio_ports_config::AudioPortsConfig, configurable_audio_ports::ConfigurableAudioPorts,
+            Extension,
+        },
         library::PluginLibrary,
     },
     tests::TestStatus,
@@ -13,6 +16,7 @@ use clap::ValueEnum;
 use std::process::Command;
 
 mod descriptor;
+mod layout;
 mod params;
 pub mod processing;
 mod state;
@@ -27,14 +31,14 @@ pub enum PluginTestCase {
     FeaturesCategories,
     #[strum(serialize = "features-duplicates")]
     FeaturesDuplicates,
+    #[strum(serialize = "layout-audio-ports-config")]
+    LayoutAudioPortsConfig,
+    #[strum(serialize = "layout-configurable-audio-ports")]
+    LayoutConfigurableAudioPorts,
     #[strum(serialize = "process-audio-out-of-place-basic")]
     ProcessAudioOutOfPlaceBasic,
     #[strum(serialize = "process-audio-in-place-basic")]
     ProcessAudioInPlaceBasic,
-    #[strum(serialize = "process-audio-out-of-place-layouts")]
-    ProcessAudioOutOfPlaceConfig,
-    #[strum(serialize = "process-audio-in-place-layouts")]
-    ProcessAudioInPlaceConfig,
     #[strum(serialize = "process-audio-constant-mask")]
     ProcessAudioConstantMask,
     #[strum(serialize = "process-audio-reset-determinism")]
@@ -104,13 +108,13 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  tests whether the output does not contain any non-finite or subnormal values. \
                  Uses in-place audio processing for buses that support it.",
             ),
-            PluginTestCase::ProcessAudioOutOfPlaceConfig => format!(
-                "Performs the same test as {}, but this time it tries all available port \
-                 configurations exposed via the '{}' extension.",
+            PluginTestCase::LayoutConfigurableAudioPorts => format!(
+                "Performs the same test as {}, but this time it tries random configurations \
+                 exposed via the '{}' extension.",
                 PluginTestCase::ProcessAudioOutOfPlaceBasic,
-                AudioPortsConfig::EXTENSION_ID.to_str().unwrap()
+                ConfigurableAudioPorts::EXTENSION_ID.to_str().unwrap()
             ),
-            PluginTestCase::ProcessAudioInPlaceConfig => format!(
+            PluginTestCase::LayoutAudioPortsConfig => format!(
                 "Performs the same test as {}, but this time it tries all available port \
                  configurations exposed via the '{}' extension.",
                 PluginTestCase::ProcessAudioInPlaceBasic,
@@ -255,17 +259,17 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::FeaturesDuplicates => {
                 descriptor::test_features_duplicates(library, plugin_id)
             }
+            PluginTestCase::LayoutAudioPortsConfig => {
+                layout::test_layout_audio_ports_config(library, plugin_id)
+            }
+            PluginTestCase::LayoutConfigurableAudioPorts => {
+                layout::test_layout_configurable_audio_ports(library, plugin_id)
+            }
             PluginTestCase::ProcessAudioOutOfPlaceBasic => {
                 processing::test_process_audio_basic(library, plugin_id, false)
             }
             PluginTestCase::ProcessAudioInPlaceBasic => {
                 processing::test_process_audio_basic(library, plugin_id, true)
-            }
-            PluginTestCase::ProcessAudioOutOfPlaceConfig => {
-                processing::test_process_audio_config(library, plugin_id, false)
-            }
-            PluginTestCase::ProcessAudioInPlaceConfig => {
-                processing::test_process_audio_config(library, plugin_id, true)
             }
             PluginTestCase::ProcessAudioConstantMask => {
                 processing::test_process_audio_constant_mask(library, plugin_id)

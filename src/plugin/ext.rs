@@ -7,6 +7,7 @@ use std::ptr::NonNull;
 
 pub mod audio_ports;
 pub mod audio_ports_config;
+pub mod configurable_audio_ports;
 pub mod latency;
 pub mod note_ports;
 pub mod params;

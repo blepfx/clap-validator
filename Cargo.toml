@@ -3,7 +3,7 @@ name = "clap-validator"
 version = "0.3.2"
 edition = "2021"
 license = "MIT"
-rust-version = "1.64.0"  # MSRV
+rust-version = "1.87.0"  # MSRV
 
 description = "A validator and automatic test suite for CLAP plugins"
 readme = "README.md"

@@ -378,9 +378,9 @@ impl Indexer {
 
             clap_preset_discovery_indexer: Mutex::new(clap_preset_discovery_indexer {
                 clap_version: CLAP_VERSION,
-                name: b"clap-validator\0".as_ptr() as *const c_char,
-                vendor: b"Robbert van der Helm\0".as_ptr() as *const c_char,
-                url: b"https://github.com/free-audio/clap-validator\0".as_ptr() as *const c_char,
+                name: c"clap-validator".as_ptr(),
+                vendor: c"Robbert van der Helm".as_ptr(),
+                url: c"https://github.com/free-audio/clap-validator".as_ptr(),
                 version: clap_validator_version.as_ptr(),
                 // This is filled with a pointer to this struct after the `Box` has been allocated
                 indexer_data: std::ptr::null_mut(),

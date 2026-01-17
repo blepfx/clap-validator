@@ -39,7 +39,7 @@ where
             )
         })?;
 
-        original_buffers.clone_from(&process.buffers);
+        original_buffers.clone_from(process.buffers);
 
         plugin.process(process).with_context(|| {
             format!("Failed to process cycle {} out of {}", curr_iter, num_iters)
@@ -409,7 +409,7 @@ pub fn test_process_audio_constant_mask(
             process.buffers.silence_all_inputs();
         }
 
-        original_buffers.clone_from(&process.buffers);
+        original_buffers.clone_from(process.buffers);
         curr_iter += 1;
 
         plugin
@@ -457,7 +457,7 @@ pub fn test_process_audio_constant_mask(
 
     if !has_received_constant_flag && has_received_constant_output {
         return Ok(TestStatus::Warning {
-            details: Some(format!(
+            details: Some(String::from(
                 "The plugin does not seem to set the constant mask during processing.",
             )),
         });
@@ -531,8 +531,8 @@ pub fn test_process_audio_reset_determinism(
 
     if !audio_output[0].is_same(&audio_output[1]) {
         return Ok(TestStatus::Warning {
-            details: Some(format!(
-                "Plugin output does not seem to be deterministic after reactivation"
+            details: Some(String::from(
+                "Plugin output does not seem to be deterministic after reactivation",
             )),
         });
     }
@@ -614,15 +614,13 @@ pub fn test_process_audio_config(
         {
             let main_input_channels = config_audio_ports
                 .inputs
-                .iter()
-                .next()
+                .first()
                 .filter(|x| x.is_main)
                 .map(|x| x.num_channels);
 
             let main_output_channels = config_audio_ports
                 .outputs
-                .iter()
-                .next()
+                .first()
                 .filter(|x| x.is_main)
                 .map(|x| x.num_channels);
 

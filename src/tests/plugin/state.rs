@@ -48,9 +48,9 @@ pub fn test_state_invalid_empty(library: &PluginLibrary, plugin_id: &str) -> Res
 
     match state.load(&[]) {
         Ok(_) => Ok(TestStatus::Warning {
-            details: Some(format!(
+            details: Some(String::from(
                 "The plugin returned true when 'clap_plugin_state::load()' was called when an \
-                 empty state, this is likely a bug."
+                 empty state, this is likely a bug.",
             )),
         }),
         Err(_) => {

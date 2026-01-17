@@ -159,9 +159,9 @@ impl InstanceState {
                 clap_version: CLAP_VERSION,
                 // This is populated with a pointer to the `Arc<Self>`'s data after creating the Arc
                 host_data: std::ptr::null_mut(),
-                name: b"clap-validator\0".as_ptr() as *const c_char,
-                vendor: b"Robbert van der Helm\0".as_ptr() as *const c_char,
-                url: b"https://github.com/free-audio/clap-validator\0".as_ptr() as *const c_char,
+                name: c"clap-validator".as_ptr(),
+                vendor: c"Robbert van der Helm".as_ptr(),
+                url: c"https://github.com/free-audio/clap-validator".as_ptr(),
                 version: clap_validator_version.as_ptr(),
                 get_extension: Some(Host::get_extension),
                 request_restart: Some(Host::request_restart),

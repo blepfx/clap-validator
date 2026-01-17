@@ -232,7 +232,7 @@ impl<'a> ProcessData<'a> {
 
         let process_data = clap_process {
             steady_time: self.sample_pos as i64,
-            frames_count: self.block_size as u32,
+            frames_count: self.block_size,
             transport: &self.transport_info,
             audio_inputs: if inputs.is_empty() {
                 std::ptr::null()
@@ -388,11 +388,11 @@ impl AudioBuffers {
             };
 
             if let Some(input) = buffer.input() {
-                if clap_inputs.len() <= input as usize {
-                    clap_inputs.resize(input as usize + 1, None);
+                if clap_inputs.len() <= input {
+                    clap_inputs.resize(input + 1, None);
                 }
 
-                clap_inputs[input as usize] = Some(clap_audio_buffer {
+                clap_inputs[input] = Some(clap_audio_buffer {
                     data32: if buffer.is_64bit() {
                         null_mut()
                     } else {
@@ -412,11 +412,11 @@ impl AudioBuffers {
             }
 
             if let Some(output) = buffer.output() {
-                if clap_outputs.len() <= output as usize {
-                    clap_outputs.resize(output as usize + 1, None);
+                if clap_outputs.len() <= output {
+                    clap_outputs.resize(output + 1, None);
                 }
 
-                clap_outputs[output as usize] = Some(clap_audio_buffer {
+                clap_outputs[output] = Some(clap_audio_buffer {
                     data32: if buffer.is_64bit() {
                         null_mut()
                     } else {

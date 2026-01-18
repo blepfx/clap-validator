@@ -57,6 +57,39 @@ jobs:
         run: |
           cargo build -p ${{ matrix.plugin }}
 
+      - name: Bundle plugin
+        if: matrix.os == 'macos-latest'
+        run: |
+          mkdir -p "./target/debug/${{ matrix.plugin }}.clap/Contents/MacOS"
+          cp "./target/debug/${{ matrix.plugin_lib }}" "./target/debug/${{ matrix.plugin }}.clap/Contents/MacOS/${{ matrix.plugin_lib }}"
+
+          # Create PkgInfo
+          echo "BNDL????" > "./target/debug/${{ matrix.plugin }}.clap/Contents/PkgInfo"
+
+          # Create minimal Info.plist
+          cat <<EOF > "./target/debug/${{ matrix.plugin }}.clap/Contents/Info.plist"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>${{ matrix.plugin_lib }}</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.example.${{ matrix.plugin }}</string>
+              <key>CFBundleName</key>
+              <string>${{ matrix.plugin }}</string>
+              <key>CFBundleVersion</key>
+              <string>1.0</string>
+          </dict>
+          </plist>
+          EOF
+          echo "PLUGIN_PATH=./target/debug/${{ matrix.plugin }}.clap" >> $GITHUB_ENV
+
+      - name: Bundle plugin
+        if: matrix.os != 'macos-latest'
+        run: |
+          echo "PLUGIN_PATH=./target/debug/${{ matrix.plugin_lib }}" >> $GITHUB_ENV
+
       - name: Run validator
         run: |
-          "target/debug/clap-validator" validate "./target/debug/${{ matrix.plugin_lib }}"
+          "target/debug/clap-validator" validate "$PLUGIN_PATH"

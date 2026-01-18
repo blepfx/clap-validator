@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
 use clap_sys::timestamp::{CLAP_TIMESTAMP_UNKNOWN, clap_timestamp};
+use rayon::iter::{ParallelBridge, ParallelIterator};
 use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::path::PathBuf;
@@ -174,20 +175,14 @@ pub trait IteratorExt: Iterator {
     fn map_parallel<R: Send>(
         self,
         parallel: bool,
-        f: impl Fn(Self::Item) -> R + Sync,
+        f: impl Fn(Self::Item) -> R + Send + Sync,
     ) -> impl Iterator<Item = R>
     where
         Self: Sized + Send,
         Self::Item: Send,
     {
         if parallel {
-            std::thread::scope(|s| {
-                self.map(|item| s.spawn(|| f(item)))
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .map(|handle| handle.join().unwrap())
-                    .collect::<Vec<_>>()
-            })
+            self.par_bridge().map(f).collect::<Vec<_>>()
         } else {
             self.map(f).collect::<Vec<_>>()
         }

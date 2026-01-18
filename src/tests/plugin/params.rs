@@ -1,11 +1,5 @@
 //! Tests that focus on parameters.
 
-use anyhow::{Context, Result};
-use clap_sys::events::CLAP_EVENT_PARAM_VALUE;
-use clap_sys::id::clap_id;
-use serde::Serialize;
-use std::collections::BTreeMap;
-
 use super::PluginTestCase;
 use crate::plugin::ext::Extension;
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
@@ -17,6 +11,11 @@ use crate::plugin::library::PluginLibrary;
 use crate::tests::plugin::processing::run_simple;
 use crate::tests::rng::{NoteGenerator, ParamFuzzer, new_prng};
 use crate::tests::{TestCase, TestStatus};
+use anyhow::{Context, Result};
+use clap_sys::events::CLAP_EVENT_PARAM_VALUE;
+use clap_sys::id::clap_id;
+use serde::Serialize;
+use std::collections::BTreeMap;
 
 /// The fixed buffer size to use for these tests.
 const BUFFER_SIZE: usize = 512;
@@ -498,30 +497,36 @@ pub fn test_param_fuzz_sample_accurate(
     let mut process_data = ProcessData::new(&mut audio_buffers, Default::default());
 
     for &interval in INTERVALS {
+        let num_steps = interval.div_ceil(BUFFER_SIZE as u32);
         let mut current_sample = 0;
-        let run_result = run_simple(&plugin, &mut process_data, 5, |process_data| {
-            while current_sample < BUFFER_SIZE as u32 {
-                let events: Vec<Event> = param_fuzzer
-                    .randomize_params_at(&mut prng, current_sample)
-                    .collect();
+        let run_result = run_simple(
+            &plugin,
+            &mut process_data,
+            num_steps as usize,
+            |process_data| {
+                while current_sample < BUFFER_SIZE as u32 {
+                    let events: Vec<Event> = param_fuzzer
+                        .randomize_params_at(&mut prng, current_sample)
+                        .collect();
 
-                process_data.input_events.add_events(events.clone());
-                current_events = Some(events);
-                current_sample += interval;
-            }
+                    process_data.input_events.add_events(events.clone());
+                    current_events = Some(events);
+                    current_sample += interval;
+                }
 
-            // Audio and MIDI/note events are randomized in accordance to what the plugin
-            // supports
-            note_event_rng.fill_event_queue(
-                &mut prng,
-                &process_data.input_events,
-                BUFFER_SIZE as u32,
-            );
-            process_data.buffers.randomize(&mut prng);
-            current_sample -= BUFFER_SIZE as u32;
+                // Audio and MIDI/note events are randomized in accordance to what the plugin
+                // supports
+                note_event_rng.fill_event_queue(
+                    &mut prng,
+                    &process_data.input_events,
+                    BUFFER_SIZE as u32,
+                );
+                process_data.buffers.randomize(&mut prng);
+                current_sample -= BUFFER_SIZE as u32;
 
-            Ok(())
-        });
+                Ok(())
+            },
+        );
 
         // If the run failed we'll want to write the parameter values to a file first
         if run_result.is_err() {

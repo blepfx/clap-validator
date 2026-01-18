@@ -296,10 +296,10 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 state::test_state_invalid_random(library, plugin_id)
             }
             PluginTestCase::StateReproducibilityBasic => {
-                state::test_state_reproducibility_null_cookies(library, plugin_id, false)
+                state::test_state_reproducibility_basic(library, plugin_id, false)
             }
             PluginTestCase::StateReproducibilityNullCookies => {
-                state::test_state_reproducibility_null_cookies(library, plugin_id, true)
+                state::test_state_reproducibility_basic(library, plugin_id, true)
             }
             PluginTestCase::StateReproducibilityFlush => {
                 state::test_state_reproducibility_flush(library, plugin_id)

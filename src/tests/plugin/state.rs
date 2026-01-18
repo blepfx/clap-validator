@@ -9,7 +9,7 @@ use std::io::Write;
 use super::PluginTestCase;
 use crate::plugin::ext::Extension;
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
-use crate::plugin::ext::params::{ParamInfo, Params};
+use crate::plugin::ext::params::Params;
 use crate::plugin::ext::state::State;
 use crate::plugin::host::Host;
 use crate::plugin::instance::process::{
@@ -24,6 +24,8 @@ use crate::tests::{TestCase, TestStatus};
 const EXPECTED_STATE_FILE_NAME: &str = "state-expected";
 /// The file name we'll use to dump the actual state when a test fails.
 const ACTUAL_STATE_FILE_NAME: &str = "state-actual";
+/// The file name we'll use to dump parameter diffs when a test fails.
+const PARAM_DIFF_FILE_NAME: &str = "param-diff.csv";
 
 /// The test for `PluginTestCase::StateInvalidEmpty`.
 pub fn test_state_invalid_empty(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
@@ -111,14 +113,14 @@ pub fn test_state_invalid_random(library: &PluginLibrary, plugin_id: &str) -> Re
     }
 }
 
-/// The test for `PluginTestCase::StateReproducibilityNullCookies`. See the description of this test
-/// for a detailed explanation, but we essentially check if saving a loaded state results in the
+/// The test for `PluginTestCase::StateReproducibilityNullCookies` and `PluginTestCase::StateReproducibilityBasic`.
+/// See the description of these test for a detailed explanation, but we essentially check if saving a loaded state results in the
 /// same state file, and whether a plugin's parameters are the same after loading the state.
 ///
 /// The `zero_out_cookies` parameter offers an alternative on this test that sends parameter change
 /// events with all cookies set to null pointers. The plugin should behave identically when this
 /// happens.
-pub fn test_state_reproducibility_null_cookies(
+pub fn test_state_reproducibility_basic(
     library: &PluginLibrary,
     plugin_id: &str,
     zero_out_cookies: bool,
@@ -260,20 +262,26 @@ pub fn test_state_reproducibility_null_cookies(
         .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
         .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
-    if !compare_params_lenient(&actual_param_values, &expected_param_values) {
-        let param_infos = params
-            .info()
-            .context("Failure while fetching the plugin's parameters")?;
+    let test = if zero_out_cookies {
+        PluginTestCase::StateReproducibilityNullCookies
+    } else {
+        PluginTestCase::StateReproducibilityBasic
+    };
 
-        // To avoid flooding the output too much, we'll print only the different values
+    if let Some(diff) = generate_param_diff(&actual_param_values, &expected_param_values, &params)?
+    {
+        let (param_diff_file_path, mut param_diff_file) =
+            test.temporary_file(plugin_id, PARAM_DIFF_FILE_NAME)?;
+        param_diff_file.write_all(diff.as_bytes())?;
+
         anyhow::bail!(
             "After reloading the state, the plugin's parameter values do not match the old values \
-             when queried through 'clap_plugin_params::get()'. The mismatching values are {}.",
-            format_mismatching_values(actual_param_values, &expected_param_values, &param_infos)
+             when queried through 'clap_plugin_params::get()'. \nDiff: '{}'.",
+            param_diff_file_path.display(),
         );
     }
 
-    // Now for the monent of truth
+    // Now for the moment of truth
     let actual_state = state.save()?;
     host.handle_callbacks_once();
 
@@ -283,19 +291,17 @@ pub fn test_state_reproducibility_null_cookies(
         Ok(TestStatus::Success { details: None })
     } else {
         let (expected_state_file_path, mut expected_state_file) =
-            PluginTestCase::StateReproducibilityBasic
-                .temporary_file(plugin_id, EXPECTED_STATE_FILE_NAME)?;
+            test.temporary_file(plugin_id, EXPECTED_STATE_FILE_NAME)?;
         let (actual_state_file_path, mut actual_state_file) =
-            PluginTestCase::StateReproducibilityBasic
-                .temporary_file(plugin_id, ACTUAL_STATE_FILE_NAME)?;
+            test.temporary_file(plugin_id, ACTUAL_STATE_FILE_NAME)?;
 
         expected_state_file.write_all(&expected_state)?;
         actual_state_file.write_all(&actual_state)?;
 
         Ok(TestStatus::Warning {
             details: Some(format!(
-                "The saved state after loading differs from the original saved state. Expected: \
-                 '{}'. Actual: '{}'.",
+                "The saved state after loading differs from the original saved state. \nExpected: \
+                 '{}'. \nActual: '{}'.",
                 expected_state_file_path.display(),
                 actual_state_file_path.display(),
             )),
@@ -476,16 +482,18 @@ pub fn test_state_reproducibility_flush(
         .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
         .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
-    if !compare_params_lenient(&actual_param_values, &expected_param_values) {
-        let param_infos = params
-            .info()
-            .context("Failure while fetching the plugin's parameters")?;
+    if let Some(diff) = generate_param_diff(&actual_param_values, &expected_param_values, &params)?
+    {
+        let (param_diff_file_path, mut param_diff_file) = PluginTestCase::StateReproducibilityFlush
+            .temporary_file(plugin_id, PARAM_DIFF_FILE_NAME)?;
+
+        param_diff_file.write_all(diff.as_bytes())?;
 
         anyhow::bail!(
             "Setting the same parameter values through 'clap_plugin_params::flush()' and through \
-             the process funciton results in different reported values when queried through \
-             'clap_plugin_params::get_value()'. The mismatching values are {}.",
-            format_mismatching_values(actual_param_values, &expected_param_values, &param_infos)
+             the process function results in different reported values when queried through \
+             'clap_plugin_params::get_value()'. \nDiff: '{}'.",
+            param_diff_file_path.display(),
         );
     }
 
@@ -510,7 +518,7 @@ pub fn test_state_reproducibility_flush(
         Ok(TestStatus::Warning {
             details: Some(format!(
                 "Sending the same parameter values to two different instances of the plugin \
-                 resulted in different state files. Expected: '{}'. Actual: '{}'.",
+                 resulted in different state files. \nExpected: '{}'. \nActual: '{}'.",
                 expected_state_file_path.display(),
                 actual_state_file_path.display(),
             )),
@@ -634,19 +642,18 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
         .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
         .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
-    if !compare_params_lenient(&actual_param_values, &expected_param_values) {
-        let param_infos = params
-            .info()
-            .context("Failure while fetching the plugin's parameters")?;
+    if let Some(diff) = generate_param_diff(&actual_param_values, &expected_param_values, &params)?
+    {
+        let (param_diff_file_path, mut param_diff_file) =
+            PluginTestCase::StateBufferedStreams.temporary_file(plugin_id, PARAM_DIFF_FILE_NAME)?;
 
-        // To avoid flooding the output too much, we'll print only the different
-        // values
+        param_diff_file.write_all(diff.as_bytes())?;
+
         anyhow::bail!(
             "After reloading the state by allowing the plugin to read at most \
              {BUFFERED_LOAD_MAX_BYTES} bytes at a time, the plugin's parameter values do not \
-             match the old values when queried through 'clap_plugin_params::get()'. The \
-             mismatching values are {}.",
-            format_mismatching_values(actual_param_values, &expected_param_values, &param_infos)
+             match the old values when queried through 'clap_plugin_params::get()'. \nDiff: '{}'.",
+            param_diff_file_path.display()
         );
     }
 
@@ -675,7 +682,7 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
                  state file being compared to was written unbuffered, reloaded by allowing the \
                  plugin to read only {BUFFERED_LOAD_MAX_BYTES} bytes at a time, and then written \
                  again by allowing the plugin to write only {BUFFERED_SAVE_MAX_BYTES} bytes at a \
-                 time. Expected: '{}'. Actual: '{}'.",
+                 time.\n Expected: '{}'.\n Actual: '{}'.",
                 expected_state_file_path.display(),
                 actual_state_file_path.display(),
             )),
@@ -684,52 +691,52 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
 }
 
 /// Build a string containing all different values between two sets of values.
-///
-/// # Panics
-///
-/// If the parameters in `actual_param_values` don't have corresponding entries in
-/// `expected_param_values` and `param_infos`.
-fn format_mismatching_values(
-    actual_param_values: BTreeMap<clap_id, f64>,
-    expected_param_values: &BTreeMap<clap_id, f64>,
-    param_infos: &ParamInfo,
-) -> String {
-    actual_param_values
-        .into_iter()
-        .filter_map(|(param_id, actual_value)| {
-            let expected_value = expected_param_values[&param_id];
-            if param_compare_approx(actual_value, expected_value) {
-                None
-            } else {
-                let param_name = &param_infos[&param_id].name;
-                Some(format!(
-                    "parameter {param_id} ('{param_name}'), expected {expected_value:?}, actual \
-                     {actual_value:?}"
-                ))
-            }
-        })
-        .collect::<Vec<String>>()
-        .join(", ")
-}
-
-fn compare_params_lenient(
+fn generate_param_diff(
     actual: &BTreeMap<clap_id, f64>,
     expected: &BTreeMap<clap_id, f64>,
-) -> bool {
-    if actual.len() != expected.len() {
-        return false;
+    params: &Params,
+) -> Result<Option<String>> {
+    let param_infos = params.info()?;
+
+    let diff = actual
+        .iter()
+        .filter_map(|(&param_id, &actual_value)| {
+            let expected_value = expected[&param_id];
+            if param_compare_approx(actual_value, expected_value) {
+                return None;
+            }
+
+            let param_name = &param_infos[&param_id].name;
+            let string_actual = params
+                .value_to_text(param_id, actual_value)
+                .ok()
+                .flatten()
+                .unwrap_or("<unrepresentable>".to_string());
+            let string_expected = params
+                .value_to_text(param_id, expected_value)
+                .ok()
+                .flatten()
+                .unwrap_or("<unrepresentable>".to_string());
+
+            Some(format!(
+                "{}, {:?}, {:?}, {:.4}, {:?}, {:.4}",
+                param_id,
+                param_name,
+                string_actual,
+                actual_value,
+                string_expected,
+                expected_value,
+            ))
+        })
+        .collect::<Vec<String>>();
+
+    if diff.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(format!(
+            "param-id, param-name, actual-string, actual-value, expected-string, \
+             expected-value\n{}",
+            diff.join("\n")
+        )))
     }
-
-    for (param_id, expected_value) in expected {
-        let actual_value = match actual.get(param_id) {
-            Some(value) => value,
-            None => return false,
-        };
-
-        if !param_compare_approx(*actual_value, *expected_value) {
-            return false;
-        }
-    }
-
-    true
 }

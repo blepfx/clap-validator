@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     name: Check on ${{ matrix.os }}
     steps:
@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         plugin: [clack-synth]
         include:
           - os: ubuntu-latest
@@ -41,6 +41,9 @@ jobs:
           - os: windows-latest
             plugin: clack-synth
             plugin_lib: clack_synth.dll
+          - os: macos-latest
+            plugin: clack-synth
+            plugin_lib: libclack_synth.dylib
     runs-on: ${{ matrix.os }}
     name: Validate ${{ matrix.plugin }} on ${{ matrix.os }}
     steps:

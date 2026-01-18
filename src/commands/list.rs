@@ -1,19 +1,54 @@
 //! Commands for listing information about the validator or installed plugins.
 
-use anyhow::{Context, Result};
-use colored::Colorize;
-use std::path::Path;
-use std::process::ExitCode;
-
-use super::{println_wrapped, println_wrapped_no_indent, TextWrapper};
+use super::{TextWrapper, println_wrapped, println_wrapped_no_indent};
 use crate::index::PresetIndexResult;
 use crate::plugin::preset_discovery::PresetFile;
+use anyhow::{Context, Result};
+use clap::Subcommand;
+use colored::Colorize;
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+/// Commands for listing tests and data realted to the installed plugins.
+#[derive(Subcommand)]
+pub enum ListCommand {
+    /// Lists basic information about all installed CLAP plugins.
+    Plugins {
+        /// Print JSON instead of a human readable format.
+        #[arg(short, long)]
+        json: bool,
+    },
+    /// Lists the available presets for one, more, or all installed CLAP plugins.
+    Presets {
+        /// Print JSON instead of a human readable format.
+        #[arg(short, long)]
+        json: bool,
+        /// Paths to one or more plugins that should be indexed for presets, optional.
+        ///
+        /// All installed plugins are crawled if this value is missing.
+        paths: Option<Vec<PathBuf>>,
+    },
+    /// Lists all available test cases.
+    Tests {
+        /// Print JSON instead of a human readable format.
+        #[arg(short, long)]
+        json: bool,
+    },
+}
+
+pub fn list(command: &ListCommand) -> Result<ExitCode> {
+    match command {
+        ListCommand::Plugins { json } => list_plugins(*json),
+        ListCommand::Presets { json, paths } => list_presets(*json, paths.as_deref()),
+        ListCommand::Tests { json } => list_tests(*json),
+    }
+}
 
 // TODO: The indexing here always happens in the same process. We should move this over to out of
 //       process scanning at some point.
 
 /// Lists basic information about all installed CLAP plugins.
-pub fn plugins(json: bool) -> Result<ExitCode> {
+fn list_plugins(json: bool) -> Result<ExitCode> {
     let plugin_index = crate::index::index();
 
     if json {
@@ -79,7 +114,7 @@ pub fn plugins(json: bool) -> Result<ExitCode> {
 }
 
 /// Lists presets for one, more, or all plugins.
-pub fn presets<P>(json: bool, plugin_paths: Option<&[P]>) -> Result<ExitCode>
+fn list_presets<P>(json: bool, plugin_paths: Option<&[P]>) -> Result<ExitCode>
 where
     P: AsRef<Path>,
 {
@@ -341,7 +376,7 @@ where
 }
 
 /// Lists all available test cases.
-pub fn tests(json: bool) -> Result<ExitCode> {
+fn list_tests(json: bool) -> Result<ExitCode> {
     let list = crate::tests::TestList::default();
 
     if json {

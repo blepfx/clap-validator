@@ -1,7 +1,5 @@
 use clap::{Parser, Subcommand, ValueEnum};
-use std::path::PathBuf;
 use std::process::ExitCode;
-use validator::{SingleTestSettings, ValidatorSettings};
 
 mod commands;
 mod index;
@@ -40,43 +38,16 @@ pub enum Verbosity {
 #[derive(Subcommand)]
 enum Command {
     /// Validate one or more plugins.
-    Validate(ValidatorSettings),
+    Validate(commands::validate::ValidatorSettings),
     /// Run a single test.
     ///
     /// This is used for the out-of-process testing. Since it's merely an implementation detail, the
     /// option is not shown in the CLI.
     #[command(hide = true)]
-    RunSingleTest(SingleTestSettings),
+    RunSingleTest(commands::validate::SingleTestSettings),
 
     #[command(subcommand)]
-    List(ListCommand),
-}
-
-/// Commands for listing tests and data realted to the installed plugins.
-#[derive(Subcommand)]
-pub enum ListCommand {
-    /// Lists basic information about all installed CLAP plugins.
-    Plugins {
-        /// Print JSON instead of a human readable format.
-        #[arg(short, long)]
-        json: bool,
-    },
-    /// Lists the available presets for one, more, or all installed CLAP plugins.
-    Presets {
-        /// Print JSON instead of a human readable format.
-        #[arg(short, long)]
-        json: bool,
-        /// Paths to one or more plugins that should be indexed for presets, optional.
-        ///
-        /// All installed plugins are crawled if this value is missing.
-        paths: Option<Vec<PathBuf>>,
-    },
-    /// Lists all available test cases.
-    Tests {
-        /// Print JSON instead of a human readable format.
-        #[arg(short, long)]
-        json: bool,
-    },
+    List(commands::list::ListCommand),
 }
 
 fn main() -> ExitCode {
@@ -106,11 +77,7 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Command::Validate(settings) => commands::validate::validate(cli.verbosity, &settings),
         Command::RunSingleTest(settings) => commands::validate::run_single(&settings),
-        Command::List(ListCommand::Plugins { json }) => commands::list::plugins(json),
-        Command::List(ListCommand::Presets { json, paths }) => {
-            commands::list::presets(json, paths.as_deref())
-        }
-        Command::List(ListCommand::Tests { json }) => commands::list::tests(json),
+        Command::List(command) => commands::list::list(&command),
     };
 
     match result {

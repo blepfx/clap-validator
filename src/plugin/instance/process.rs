@@ -3,13 +3,13 @@
 use anyhow::Result;
 use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::events::{
-    clap_event_header, clap_event_midi, clap_event_note, clap_event_note_expression,
-    clap_event_param_mod, clap_event_param_value, clap_event_transport, clap_input_events,
-    clap_output_events, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, CLAP_EVENT_NOTE_CHOKE,
-    CLAP_EVENT_NOTE_END, CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON,
-    CLAP_EVENT_PARAM_MOD, CLAP_EVENT_PARAM_VALUE, CLAP_EVENT_TRANSPORT,
-    CLAP_TRANSPORT_HAS_BEATS_TIMELINE, CLAP_TRANSPORT_HAS_SECONDS_TIMELINE,
-    CLAP_TRANSPORT_HAS_TEMPO, CLAP_TRANSPORT_HAS_TIME_SIGNATURE, CLAP_TRANSPORT_IS_PLAYING,
+    CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, CLAP_EVENT_NOTE_CHOKE, CLAP_EVENT_NOTE_END,
+    CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_MOD,
+    CLAP_EVENT_PARAM_VALUE, CLAP_EVENT_TRANSPORT, CLAP_TRANSPORT_HAS_BEATS_TIMELINE,
+    CLAP_TRANSPORT_HAS_SECONDS_TIMELINE, CLAP_TRANSPORT_HAS_TEMPO,
+    CLAP_TRANSPORT_HAS_TIME_SIGNATURE, CLAP_TRANSPORT_IS_PLAYING, clap_event_header,
+    clap_event_midi, clap_event_note, clap_event_note_expression, clap_event_param_mod,
+    clap_event_param_value, clap_event_transport, clap_input_events, clap_output_events,
 };
 use clap_sys::fixedpoint::{CLAP_BEATTIME_FACTOR, CLAP_SECTIME_FACTOR};
 use clap_sys::process::clap_process;
@@ -24,8 +24,8 @@ use std::ptr::null_mut;
 use std::sync::atomic::Ordering;
 
 use crate::plugin::ext::audio_ports::AudioPortConfig;
-use crate::plugin::instance::audio_thread::PluginAudioThread;
 use crate::plugin::instance::Plugin;
+use crate::plugin::instance::audio_thread::PluginAudioThread;
 use crate::util::check_null_ptr;
 
 /// The input and output data for a call to `clap_plugin::process()`.
@@ -819,27 +819,31 @@ impl EventQueue {
     }
 
     unsafe extern "C" fn size(list: *const clap_input_events) -> u32 {
-        check_null_ptr!(list, (*list).ctx);
-        let this = &*((*list).ctx as *const Self);
-        this.events.lock().len() as u32
+        unsafe {
+            check_null_ptr!(list, (*list).ctx);
+            let this = &*((*list).ctx as *const Self);
+            this.events.lock().len() as u32
+        }
     }
 
     unsafe extern "C" fn get(
         list: *const clap_input_events,
         index: u32,
     ) -> *const clap_event_header {
-        check_null_ptr!(list, (*list).ctx);
-        let this = &*((*list).ctx as *const Self);
+        unsafe {
+            check_null_ptr!(list, (*list).ctx);
+            let this = &*((*list).ctx as *const Self);
 
-        let events = this.events.lock();
-        match events.get(index as usize) {
-            Some(event) => event.header(),
-            None => {
-                log::warn!(
-                    "The plugin tried to get an event with index {index} ({} total events)",
-                    events.len()
-                );
-                std::ptr::null()
+            let events = this.events.lock();
+            match events.get(index as usize) {
+                Some(event) => event.header(),
+                None => {
+                    log::warn!(
+                        "The plugin tried to get an event with index {index} ({} total events)",
+                        events.len()
+                    );
+                    std::ptr::null()
+                }
             }
         }
     }
@@ -848,16 +852,18 @@ impl EventQueue {
         list: *const clap_output_events,
         event: *const clap_event_header,
     ) -> bool {
-        check_null_ptr!(list, (*list).ctx, event);
-        let this = &*((*list).ctx as *const Self);
+        unsafe {
+            check_null_ptr!(list, (*list).ctx, event);
+            let this = &*((*list).ctx as *const Self);
 
-        // The monotonicity of the plugin's event insertion order is checked as part of the output
-        // consistency checks
-        this.events
-            .lock()
-            .push(Event::from_header_ptr(event).unwrap());
+            // The monotonicity of the plugin's event insertion order is checked as part of the output
+            // consistency checks
+            this.events
+                .lock()
+                .push(Event::from_header_ptr(event).unwrap());
 
-        true
+            true
+        }
     }
 }
 
@@ -868,27 +874,29 @@ impl Event {
             anyhow::bail!("Null pointer provided for 'clap_event_header'.");
         }
 
-        match ((*ptr).space_id, ((*ptr).type_)) {
-            (
-                CLAP_CORE_EVENT_SPACE_ID,
-                CLAP_EVENT_NOTE_ON
-                | CLAP_EVENT_NOTE_OFF
-                | CLAP_EVENT_NOTE_CHOKE
-                | CLAP_EVENT_NOTE_END,
-            ) => Ok(Event::Note(*(ptr as *const clap_event_note))),
-            (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_EXPRESSION) => Ok(Event::NoteExpression(
-                *(ptr as *const clap_event_note_expression),
-            )),
-            (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE) => {
-                Ok(Event::ParamValue(*(ptr as *const clap_event_param_value)))
+        unsafe {
+            match ((*ptr).space_id, ((*ptr).type_)) {
+                (
+                    CLAP_CORE_EVENT_SPACE_ID,
+                    CLAP_EVENT_NOTE_ON
+                    | CLAP_EVENT_NOTE_OFF
+                    | CLAP_EVENT_NOTE_CHOKE
+                    | CLAP_EVENT_NOTE_END,
+                ) => Ok(Event::Note(*(ptr as *const clap_event_note))),
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_EXPRESSION) => Ok(
+                    Event::NoteExpression(*(ptr as *const clap_event_note_expression)),
+                ),
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE) => {
+                    Ok(Event::ParamValue(*(ptr as *const clap_event_param_value)))
+                }
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_MOD) => {
+                    Ok(Event::ParamMod(*(ptr as *const clap_event_param_mod)))
+                }
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI) => {
+                    Ok(Event::Midi(*(ptr as *const clap_event_midi)))
+                }
+                (_, _) => Ok(Event::Unknown(*ptr)),
             }
-            (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_MOD) => {
-                Ok(Event::ParamMod(*(ptr as *const clap_event_param_mod)))
-            }
-            (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI) => {
-                Ok(Event::Midi(*(ptr as *const clap_event_midi)))
-            }
-            (_, _) => Ok(Event::Unknown(*ptr)),
         }
     }
 

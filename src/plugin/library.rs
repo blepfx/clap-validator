@@ -2,9 +2,9 @@
 
 use anyhow::{Context, Result};
 use clap_sys::entry::clap_plugin_entry;
-use clap_sys::factory::plugin_factory::{clap_plugin_factory, CLAP_PLUGIN_FACTORY_ID};
+use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
 use clap_sys::factory::preset_discovery::{
-    clap_preset_discovery_factory, CLAP_PRESET_DISCOVERY_FACTORY_ID,
+    CLAP_PRESET_DISCOVERY_FACTORY_ID, clap_preset_discovery_factory,
 };
 use clap_sys::plugin::clap_plugin_descriptor;
 use clap_sys::version::clap_version;

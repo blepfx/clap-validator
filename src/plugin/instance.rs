@@ -6,12 +6,12 @@ use clap_sys::plugin::clap_plugin;
 use std::ffi::CStr;
 use std::marker::PhantomData;
 use std::ops::Deref;
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use super::assert_plugin_state;
 use super::ext::Extension;
 use super::library::{PluginLibrary, PluginMetadata};
 use crate::plugin::host::{CallbackTask, Host, InstanceState};
@@ -65,6 +65,52 @@ pub enum PluginStatus {
     Activating,
     Activated,
     Processing,
+}
+
+impl PluginStatus {
+    #[track_caller]
+    pub fn assert_is(&self, expected: PluginStatus) {
+        if *self != expected {
+            panic!(
+                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, \
+                 must be {:?}). This is a bug in the validator.",
+                self, expected
+            )
+        }
+    }
+
+    #[track_caller]
+    pub fn assert_is_not(&self, unexpected: PluginStatus) {
+        if *self == unexpected {
+            panic!(
+                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, \
+                 must not be {:?}). This is a bug in the validator.",
+                self, unexpected
+            )
+        }
+    }
+
+    #[track_caller]
+    pub fn assert_active(&self) {
+        if *self < PluginStatus::Activated {
+            panic!(
+                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, \
+                 must be activated). This is a bug in the validator.",
+                self
+            )
+        }
+    }
+
+    #[track_caller]
+    pub fn assert_inactive(&self) {
+        if *self >= PluginStatus::Activated {
+            panic!(
+                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, \
+                 must be deactivated). This is a bug in the validator.",
+                self
+            )
+        }
+    }
 }
 
 /// An unsafe `Send` wrapper around [`Plugin`], needed to create the audio thread abstraction since
@@ -175,7 +221,7 @@ impl<'lib> Plugin<'lib> {
     /// this extension. Returns `None` if it does not. The plugin needs to be initialized using
     /// [`init()`][Self::init()] before this may be called.
     pub fn get_extension<'a, T: Extension<&'a Self>>(&'a self) -> Option<T> {
-        assert_plugin_state!(self, state != PluginStatus::Uninitialized);
+        self.status().assert_is_not(PluginStatus::Uninitialized);
 
         let plugin = self.as_ptr();
         let extension_ptr = unsafe_clap_call! {
@@ -202,7 +248,7 @@ impl<'lib> Plugin<'lib> {
         &'a self,
         f: F,
     ) -> T {
-        assert_plugin_state!(self, state == PluginStatus::Activated);
+        self.status().assert_is(PluginStatus::Activated);
 
         crossbeam::scope(|s| {
             let unsafe_self_wrapper = PluginSendWrapper(self);
@@ -222,27 +268,28 @@ impl<'lib> Plugin<'lib> {
                     this.state
                         .audio_thread
                         .store(Some(std::thread::current().id()));
-                    let result = f(PluginAudioThread::new(this));
-                    this.state.audio_thread.store(None);
 
-                    // The main thread should unblock when the audio thread is done
+                    let result = catch_unwind(AssertUnwindSafe(|| f(PluginAudioThread::new(this))));
+
+                    this.state.audio_thread.store(None);
                     callback_task_sender.send(CallbackTask::Stop).unwrap();
 
-                    result
+                    result.unwrap_or_else(|panic_info| resume_unwind(panic_info))
                 })
                 .expect("Unable to spawn an audio thread");
 
-            // Handle callbacks requests on the main thread whle the aduio thread is running
+            // Handle callbacks requests on the main thread while the audio thread is running
             self.host().handle_callbacks_blocking();
-
-            audio_thread.join().expect("Audio thread panicked")
+            audio_thread
+                .join()
+                .unwrap_or_else(|panic_info| resume_unwind(panic_info))
         })
-        .expect("Audio thread panicked")
+        .unwrap()
     }
 
     /// Initialize the plugin. This needs to be called before doing anything else.
     pub fn init(&self) -> Result<()> {
-        assert_plugin_state!(self, state == PluginStatus::Uninitialized);
+        self.status().assert_is(PluginStatus::Uninitialized);
 
         let plugin = self.as_ptr();
         if unsafe_clap_call! { plugin=>init(plugin) } {
@@ -268,7 +315,7 @@ impl<'lib> Plugin<'lib> {
         min_buffer_size: usize,
         max_buffer_size: usize,
     ) -> Result<()> {
-        assert_plugin_state!(self, state == PluginStatus::Deactivated);
+        self.status().assert_is(PluginStatus::Deactivated);
 
         // Apparently 0 is invalid here
         assert!(min_buffer_size >= 1);
@@ -293,7 +340,7 @@ impl<'lib> Plugin<'lib> {
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
     pub fn deactivate(&self) {
-        assert_plugin_state!(self, state == PluginStatus::Activated);
+        self.status().assert_is(PluginStatus::Activated);
 
         let plugin = self.as_ptr();
         unsafe_clap_call! { plugin=>deactivate(plugin) };

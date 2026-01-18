@@ -9,20 +9,17 @@
 //! To facilitate this, the test cases are all identified by variants in an enum, and that enum can
 //! be converted to and from a string representation.
 
+use crate::util;
 use anyhow::{Context, Result};
-use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use std::any::TypeId;
 use std::collections::BTreeMap;
-use std::ffi::OsStr;
 use std::fmt::Display;
 use std::fs;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 use std::str::FromStr;
 use std::time::Duration;
 use strum::IntoEnumIterator;
-
-use crate::{util, Verbosity};
 
 mod plugin;
 mod plugin_library;
@@ -77,19 +74,14 @@ pub struct TestList {
 
 /// An abstraction for a test case. This mostly exists because we need two separate kinds of tests
 /// (per library and per plugin), and it's good to keep the interface uniform.
-pub trait TestCase<'a>: Display + FromStr + IntoEnumIterator + Sized + 'static {
+pub trait TestCase<'a>: Display + FromStr + Sized + 'static {
     /// The type of the arguments the test cases are parameterized over. This can be an instance of
     /// the plugin library and a plugin ID, or just the file path to the plugin library.
-    type TestArgs;
+    type TestArgs: Serialize + Deserialize<'a>;
 
     /// Get the textual description for a test case. This description won't contain any line breaks,
     /// but it may consist of multiple sentences.
     fn description(&self) -> String;
-
-    /// Set the arguments for `clap-validator run-single-test` to run this test with the specified
-    /// arguments. This way the [`run_out_of_process()`][Self::run_out_of_process()] method can be
-    /// defined in a way that works for all `TestCase`s.
-    fn set_out_of_process_args(&self, command: &mut Command, args: Self::TestArgs);
 
     /// Run a test case for a specified arguments in the current, returning the result. If the test
     /// cuases the plugin to segfault, then this will obviously not return. See
@@ -98,80 +90,7 @@ pub trait TestCase<'a>: Display + FromStr + IntoEnumIterator + Sized + 'static {
     ///
     /// In the event that this is called for a plugin ID that does not exist within the plugin
     /// library, then the test will also be marked as failed.
-    fn run_in_process(&self, args: Self::TestArgs) -> Result<TestStatus>;
-
-    /// Run a test case for a plugin in another process, returning the result. If the test cuases the
-    /// plugin to segfault, then the result will have a status of `TestStatus::Crashed`. If
-    /// `hide_output` is set, then the tested plugin's output will not be printed to STDIO.
-    ///
-    /// The verbosity option is threaded through here so out of process tests use the same logger
-    /// verbosity as in-process tests.
-    ///
-    /// In the event that this is called for a plugin ID that does not exist within the plugin
-    /// library, then the test will also be marked as failed.
-    ///
-    /// This will only return an error if the actual `clap-validator` process call failed.
-    fn run_out_of_process(
-        &self,
-        args: Self::TestArgs,
-        verbosity: Verbosity,
-        hide_output: bool,
-    ) -> Result<TestStatus> {
-        // The idea here is that we'll invoke the same clap-validator binary with a special hidden command
-        // that runs a single test. This is the reason why test cases must be convertible to and
-        // from strings. If everything goes correctly, then the child process will write the results
-        // as JSON to the specified file path. This is intentionaly not done through STDIO since the
-        // hosted plugin may also write things there, and doing STDIO redirection within the child
-        // process is more complicated than just writing the result to a temporary file.
-
-        // This temporary file will automatically be removed when this function exits
-        let output_file_path = tempfile::Builder::new()
-            .suffix(".json")
-            .tempfile()
-            .context("Could not create a temporary file path")?
-            .into_temp_path();
-        let clap_validator_binary =
-            std::env::current_exe().context("Could not find the path to the current executable")?;
-        let mut command = Command::new(clap_validator_binary);
-
-        command
-            .arg("--verbosity")
-            .arg(verbosity.to_possible_value().unwrap().get_name())
-            .arg("run-single-test")
-            .args([OsStr::new("--output-file"), output_file_path.as_os_str()]);
-        self.set_out_of_process_args(&mut command, args);
-        if hide_output {
-            command.stdout(Stdio::null());
-            command.stderr(Stdio::null());
-        }
-
-        let exit_status = command
-            .spawn()
-            .context("Could not call clap-validator for out-of-process validation")?
-            // The docs make it seem like this can only fail if the process isn't running, but if
-            // spawn succeeds then this can never fail:
-            .wait()
-            .context("Error while waiting on clap-validator to finish running the test")?;
-
-        if !exit_status.success() {
-            return Ok(TestStatus::Crashed {
-                details: exit_status.to_string(),
-            });
-        }
-
-        // At this point, the child process _should_ have written its output to `output_file_path`,
-        // and we can just parse it from there
-        let result =
-            serde_json::from_str(&fs::read_to_string(&output_file_path).with_context(|| {
-                format!(
-                    "Could not read the child process output from '{}'",
-                    output_file_path.display()
-                )
-            })?)
-            .context("Could not parse the child process output to JSON")?;
-
-        Ok(result)
-    }
+    fn run(&self, args: Self::TestArgs) -> Result<TestStatus>;
 
     /// Get a writable temporary file handle for this test case. The file will be located at
     /// `$TMP_DIR/clap-validator/$plugin_id/$test_name/$file_name`. The temporary files directory is
@@ -195,14 +114,6 @@ pub trait TestCase<'a>: Display + FromStr + IntoEnumIterator + Sized + 'static {
             fs::File::create(&path).context("Could not create a temporary file for the test")?;
 
         Ok((path, file))
-    }
-}
-
-impl From<Result<TestStatus>> for TestStatus {
-    fn from(status: Result<TestStatus>) -> Self {
-        status.unwrap_or_else(|err| TestStatus::Failed {
-            details: Some(format!("{err:#}")),
-        })
     }
 }
 
@@ -239,6 +150,45 @@ impl Default for TestList {
             plugin_tests: PluginTestCase::iter()
                 .map(|c| (c.to_string(), c.description()))
                 .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SerializedTest {
+    pub test_type: String,
+    pub test_name: String,
+    pub data: String,
+}
+
+impl SerializedTest {
+    pub fn from_test<'a, T: TestCase<'a>>(test: &T, data: &T::TestArgs) -> Result<Self> {
+        if TypeId::of::<T>() == TypeId::of::<PluginTestCase>() {
+            Ok(Self {
+                test_type: "plugin".into(),
+                test_name: test.to_string(),
+                data: serde_json::to_string(&data)?,
+            })
+        } else if TypeId::of::<T>() == TypeId::of::<PluginLibraryTestCase>() {
+            Ok(Self {
+                test_type: "plugin_library".into(),
+                test_name: test.to_string(),
+                data: serde_json::to_string(&data)?,
+            })
+        } else {
+            anyhow::bail!("Unsupported test case type for serialization.");
+        }
+    }
+
+    pub fn run(&self) -> Result<TestStatus> {
+        if self.test_type == "plugin" {
+            let test: PluginTestCase = self.test_name.parse()?;
+            test.run(serde_json::from_str(&self.data)?)
+        } else if self.test_type == "plugin_library" {
+            let test: PluginLibraryTestCase = self.test_name.parse()?;
+            test.run(serde_json::from_str(&self.data)?)
+        } else {
+            anyhow::bail!("Unsupported test type '{}'", self.test_type);
         }
     }
 }

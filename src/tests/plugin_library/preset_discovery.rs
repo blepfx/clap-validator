@@ -5,9 +5,9 @@ use clap_sys::factory::preset_discovery::CLAP_PRESET_DISCOVERY_FACTORY_ID;
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::plugin::ext::Extension;
 use crate::plugin::ext::audio_ports::AudioPorts;
 use crate::plugin::ext::preset_load::PresetLoad;
-use crate::plugin::ext::Extension;
 use crate::plugin::host::Host;
 use crate::plugin::instance::process::{AudioBuffers, ProcessConfig, ProcessData};
 use crate::plugin::library::PluginLibrary;
@@ -30,7 +30,7 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
                     "The plugin does not implement the '{}' factory.",
                     CLAP_PRESET_DISCOVERY_FACTORY_ID.to_str().unwrap(),
                 )),
-            })
+            });
         }
     };
 
@@ -128,7 +128,7 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
                             plugin_id,
                             PresetLoad::EXTENSION_ID.to_str().unwrap(),
                         )),
-                    })
+                    });
                 }
             };
             // We'll try to run some audio through the plugin to make sure the preset change was
@@ -218,7 +218,7 @@ pub fn test_descriptor_consistency(library_path: &Path) -> Result<TestStatus> {
                     "The plugin does not implement the '{}' factory.",
                     CLAP_PRESET_DISCOVERY_FACTORY_ID.to_str().unwrap(),
                 )),
-            })
+            });
         }
     };
 

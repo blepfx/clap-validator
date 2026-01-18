@@ -1,22 +1,13 @@
-use crate::{
-    plugin::{
-        assert_plugin_state,
-        ext::Extension,
-        instance::{Plugin, PluginStatus},
-    },
-    util::unsafe_clap_call,
+use crate::plugin::ext::Extension;
+use crate::plugin::instance::Plugin;
+use crate::util::unsafe_clap_call;
+use clap_sys::ext::audio_ports::{CLAP_PORT_MONO, CLAP_PORT_STEREO};
+use clap_sys::ext::configurable_audio_ports::{
+    CLAP_EXT_CONFIGURABLE_AUDIO_PORTS, clap_audio_port_configuration_request,
+    clap_plugin_configurable_audio_ports,
 };
-use clap_sys::ext::{
-    audio_ports::{CLAP_PORT_MONO, CLAP_PORT_STEREO},
-    configurable_audio_ports::{
-        clap_audio_port_configuration_request, clap_plugin_configurable_audio_ports,
-        CLAP_EXT_CONFIGURABLE_AUDIO_PORTS,
-    },
-};
-use std::{
-    ffi::CStr,
-    ptr::{null, NonNull},
-};
+use std::ffi::CStr;
+use std::ptr::{NonNull, null};
 
 /// TODO: surround/ambisonic extensions?
 #[derive(Debug, Clone, Copy)]
@@ -49,7 +40,7 @@ impl<'a> ConfigurableAudioPorts<'a> {
         &self,
         requests: impl IntoIterator<Item = AudioPortsRequest>,
     ) -> bool {
-        assert_plugin_state!(self.plugin, state < PluginStatus::Activated);
+        self.plugin.status().assert_inactive();
 
         let requests = requests
             .into_iter()
@@ -80,7 +71,7 @@ impl<'a> ConfigurableAudioPorts<'a> {
         &self,
         requests: impl IntoIterator<Item = AudioPortsRequest>,
     ) -> bool {
-        assert_plugin_state!(self.plugin, state < PluginStatus::Activated);
+        self.plugin.status().assert_inactive();
 
         let requests = requests
             .into_iter()

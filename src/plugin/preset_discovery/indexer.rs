@@ -5,18 +5,18 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::cell::RefCell;
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
 use std::path::Path;
 use std::pin::Pin;
 use std::thread::ThreadId;
 
 use clap_sys::factory::preset_discovery::{
-    clap_preset_discovery_filetype, clap_preset_discovery_indexer, clap_preset_discovery_location,
-    clap_preset_discovery_location_kind, clap_preset_discovery_soundpack,
     CLAP_PRESET_DISCOVERY_IS_DEMO_CONTENT, CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT,
     CLAP_PRESET_DISCOVERY_IS_FAVORITE, CLAP_PRESET_DISCOVERY_IS_USER_CONTENT,
     CLAP_PRESET_DISCOVERY_LOCATION_FILE, CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN,
+    clap_preset_discovery_filetype, clap_preset_discovery_indexer, clap_preset_discovery_location,
+    clap_preset_discovery_location_kind, clap_preset_discovery_soundpack,
 };
 use clap_sys::version::CLAP_VERSION;
 use parking_lot::Mutex;
@@ -238,7 +238,7 @@ impl LocationValue {
                     )
                 }
 
-                let path = CStr::from_ptr(location);
+                let path = unsafe { CStr::from_ptr(location) };
                 let path_str = path
                     .to_str()
                     .context("Invalid UTF-8 in preset discovery location")?;
@@ -457,10 +457,10 @@ impl Indexer {
         filetype: *const clap_preset_discovery_filetype,
     ) -> bool {
         check_null_ptr!(indexer, (*indexer).indexer_data, filetype);
-        let this = &*((*indexer).indexer_data as *const Self);
+        let this = unsafe { &*((*indexer).indexer_data as *const Self) };
 
         this.assert_same_thread("clap_preset_discovery_indexer::declare_filetype()");
-        match FileType::from_descriptor(&*filetype) {
+        match FileType::from_descriptor(unsafe { &*filetype }) {
             Ok(file_type) => {
                 this.results.borrow_mut().file_types.push(file_type);
 
@@ -481,10 +481,10 @@ impl Indexer {
         location: *const clap_preset_discovery_location,
     ) -> bool {
         check_null_ptr!(indexer, (*indexer).indexer_data, location);
-        let this = &*((*indexer).indexer_data as *const Self);
+        let this = unsafe { &*((*indexer).indexer_data as *const Self) };
 
         this.assert_same_thread("clap_preset_discovery_indexer::declare_location()");
-        match Location::from_descriptor(&*location) {
+        match Location::from_descriptor(unsafe { &*location }) {
             Ok(location) => {
                 this.results.borrow_mut().locations.push(location);
 
@@ -505,10 +505,10 @@ impl Indexer {
         soundpack: *const clap_preset_discovery_soundpack,
     ) -> bool {
         check_null_ptr!(indexer, (*indexer).indexer_data, soundpack);
-        let this = &*((*indexer).indexer_data as *const Self);
+        let this = unsafe { &*((*indexer).indexer_data as *const Self) };
 
         this.assert_same_thread("clap_preset_discovery_indexer::declare_soundpack()");
-        match Soundpack::from_descriptor(&*soundpack) {
+        match Soundpack::from_descriptor(unsafe { &*soundpack }) {
             Ok(soundpack) => {
                 this.results.borrow_mut().soundpacks.push(soundpack);
 

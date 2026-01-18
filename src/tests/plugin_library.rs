@@ -3,9 +3,7 @@
 use super::TestCase;
 use crate::tests::TestStatus;
 use anyhow::Result;
-use clap::ValueEnum;
 use std::path::Path;
-use std::process::Command;
 
 mod factories;
 mod preset_discovery;
@@ -71,25 +69,7 @@ impl<'a> TestCase<'a> for PluginLibraryTestCase {
         }
     }
 
-    fn set_out_of_process_args(&self, command: &mut Command, library_path: Self::TestArgs) {
-        let test_name = self.to_string();
-
-        command
-            .arg(
-                crate::validator::SingleTestType::PluginLibrary
-                    .to_possible_value()
-                    .unwrap()
-                    .get_name(),
-            )
-            .arg(library_path)
-            // This is the plugin ID argument. We could make the `run-single-test` subcommand more
-            // complicated and have this conditionally be required depending on the test type, but
-            // this is simpler to reason about.
-            .arg("(none)")
-            .arg(test_name);
-    }
-
-    fn run_in_process(&self, library_path: Self::TestArgs) -> Result<TestStatus> {
+    fn run(&self, library_path: Self::TestArgs) -> Result<TestStatus> {
         match self {
             PluginLibraryTestCase::PresetDiscoveryCrawl => {
                 preset_discovery::test_crawl(library_path, false)

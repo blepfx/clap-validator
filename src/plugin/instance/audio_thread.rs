@@ -11,7 +11,6 @@ use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
-use super::assert_plugin_state;
 use super::process::ProcessData;
 use super::{Plugin, PluginStatus};
 use crate::plugin::ext::Extension;
@@ -84,7 +83,7 @@ impl<'a> PluginAudioThread<'a> {
     // TODO: Remove this unused attribute once we implement audio thread extensions
     #[allow(unused)]
     pub fn get_extension<T: Extension<&'a Self>>(&'a self) -> Option<T> {
-        assert_plugin_state!(self, state != PluginStatus::Uninitialized);
+        self.status().assert_is_not(PluginStatus::Uninitialized);
 
         let plugin = self.as_ptr();
         let extension_ptr =
@@ -104,7 +103,7 @@ impl<'a> PluginAudioThread<'a> {
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
     pub fn start_processing(&self) -> Result<()> {
-        assert_plugin_state!(self, state == PluginStatus::Activated);
+        self.status().assert_is(PluginStatus::Activated);
 
         let plugin = self.as_ptr();
         if unsafe_clap_call! { plugin=>start_processing(plugin) } {
@@ -120,7 +119,7 @@ impl<'a> PluginAudioThread<'a> {
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
     pub fn process(&self, process_data: &mut ProcessData) -> Result<ProcessStatus> {
-        assert_plugin_state!(self, state == PluginStatus::Processing);
+        self.status().assert_is(PluginStatus::Processing);
 
         let plugin = self.as_ptr();
         let result = process_data.with_clap_process_data(|clap_process_data| {
@@ -144,7 +143,7 @@ impl<'a> PluginAudioThread<'a> {
 
     /// Reset the internal state of the plugin.
     pub fn reset(&self) {
-        assert_plugin_state!(self, state >= PluginStatus::Activated);
+        self.status().assert_active();
 
         let plugin = self.as_ptr();
         unsafe_clap_call! { plugin=>reset(plugin) };
@@ -154,7 +153,7 @@ impl<'a> PluginAudioThread<'a> {
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
     pub fn stop_processing(&self) {
-        assert_plugin_state!(self, state == PluginStatus::Processing);
+        self.status().assert_is(PluginStatus::Processing);
 
         let plugin = self.as_ptr();
         unsafe_clap_call! { plugin=>stop_processing(plugin) };

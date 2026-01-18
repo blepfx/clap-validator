@@ -1,13 +1,9 @@
-use crate::{
-    plugin::{
-        assert_plugin_state,
-        ext::Extension,
-        instance::{Plugin, PluginStatus},
-    },
-    util::unsafe_clap_call,
-};
-use clap_sys::ext::latency::{clap_plugin_latency, CLAP_EXT_LATENCY};
-use std::{ffi::CStr, ptr::NonNull};
+use crate::plugin::ext::Extension;
+use crate::plugin::instance::{Plugin, PluginStatus};
+use crate::util::unsafe_clap_call;
+use clap_sys::ext::latency::{CLAP_EXT_LATENCY, clap_plugin_latency};
+use std::ffi::CStr;
+use std::ptr::NonNull;
 
 #[allow(unused)]
 pub struct Latency<'a> {
@@ -31,7 +27,7 @@ impl<'a> Extension<&'a Plugin<'a>> for Latency<'a> {
 impl<'a> Latency<'a> {
     #[allow(unused)]
     pub fn get(&self) -> u32 {
-        assert_plugin_state!(self.plugin, state == PluginStatus::Activating);
+        self.plugin.status().assert_is(PluginStatus::Activating);
 
         let latency = self.latency.as_ptr();
         let plugin = self.plugin.as_ptr();

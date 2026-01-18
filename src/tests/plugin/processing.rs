@@ -1,16 +1,16 @@
 //! Contains most of the boilerplate around testing audio processing.
 
+use crate::plugin::ext::Extension;
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::NotePorts;
-use crate::plugin::ext::Extension;
 use crate::plugin::host::Host;
+use crate::plugin::instance::Plugin;
 use crate::plugin::instance::process::{
     AudioBuffers, ProcessConfig, ProcessControlFlow, ProcessData,
 };
-use crate::plugin::instance::Plugin;
 use crate::plugin::library::PluginLibrary;
-use crate::tests::rng::{new_prng, NoteGenerator};
 use crate::tests::TestStatus;
+use crate::tests::rng::{NoteGenerator, new_prng};
 use anyhow::{Context, Result};
 use rand::Rng;
 

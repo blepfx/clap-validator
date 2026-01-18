@@ -5,9 +5,9 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap_sys::factory::preset_discovery::{
-    clap_preset_discovery_metadata_receiver, CLAP_PRESET_DISCOVERY_IS_DEMO_CONTENT,
-    CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT, CLAP_PRESET_DISCOVERY_IS_FAVORITE,
-    CLAP_PRESET_DISCOVERY_IS_USER_CONTENT,
+    CLAP_PRESET_DISCOVERY_IS_DEMO_CONTENT, CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT,
+    CLAP_PRESET_DISCOVERY_IS_FAVORITE, CLAP_PRESET_DISCOVERY_IS_USER_CONTENT,
+    clap_preset_discovery_metadata_receiver,
 };
 use clap_sys::timestamp::clap_timestamp;
 use clap_sys::universal_plugin_id::clap_universal_plugin_id;
@@ -392,7 +392,7 @@ impl<'a> MetadataReceiver<'a> {
     ) {
         // We'll have a dedicated error message for a missing `error_message`
         check_null_ptr!(receiver, (*receiver).receiver_data);
-        let this = &*((*receiver).receiver_data as *const Self);
+        let this = unsafe { &*((*receiver).receiver_data as *const Self) };
 
         this.assert_same_thread("clap_preset_discovery_metadata_receiver::on_error()");
 
@@ -416,7 +416,7 @@ impl<'a> MetadataReceiver<'a> {
         load_key: *const c_char,
     ) -> bool {
         check_null_ptr!(receiver, (*receiver).receiver_data);
-        let this = &*((*receiver).receiver_data as *const Self);
+        let this = unsafe { &*((*receiver).receiver_data as *const Self) };
 
         this.assert_same_thread("clap_preset_discovery_metadata_receiver::begin_preset()");
 
@@ -512,7 +512,7 @@ impl<'a> MetadataReceiver<'a> {
         plugin_id: *const clap_universal_plugin_id,
     ) {
         check_null_ptr!(receiver, (*receiver).receiver_data, plugin_id);
-        let this = &*((*receiver).receiver_data as *const Self);
+        let this = unsafe { &*((*receiver).receiver_data as *const Self) };
 
         this.assert_same_thread("clap_preset_discovery_metadata_receiver::add_plugin_id()");
 
@@ -566,7 +566,7 @@ impl<'a> MetadataReceiver<'a> {
         soundpack_id: *const c_char,
     ) {
         check_null_ptr!(receiver, (*receiver).receiver_data);
-        let this = &*((*receiver).receiver_data as *const Self);
+        let this = unsafe { &*((*receiver).receiver_data as *const Self) };
 
         this.assert_same_thread("clap_preset_discovery_metadata_receiver::set_soundpack_id()");
 
@@ -599,7 +599,7 @@ impl<'a> MetadataReceiver<'a> {
         flags: u32,
     ) {
         check_null_ptr!(receiver, (*receiver).receiver_data);
-        let this = &*((*receiver).receiver_data as *const Self);
+        let this = unsafe { &*((*receiver).receiver_data as *const Self) };
 
         this.assert_same_thread("clap_preset_discovery_metadata_receiver::set_flags()");
 
@@ -628,7 +628,7 @@ impl<'a> MetadataReceiver<'a> {
         creator: *const c_char,
     ) {
         check_null_ptr!(receiver, (*receiver).receiver_data);
-        let this = &*((*receiver).receiver_data as *const Self);
+        let this = unsafe { &*((*receiver).receiver_data as *const Self) };
 
         this.assert_same_thread("clap_preset_discovery_metadata_receiver::set_creator()");
 
@@ -636,6 +636,7 @@ impl<'a> MetadataReceiver<'a> {
             "'clap_preset_discovery_metadata_receiver::set_creator()' called with an invalid \
              parameter",
         );
+
         match creator {
             Ok(creator) => {
                 let mut next_preset_data = this.next_preset_data.borrow_mut();
@@ -661,7 +662,7 @@ impl<'a> MetadataReceiver<'a> {
         description: *const c_char,
     ) {
         check_null_ptr!(receiver, (*receiver).receiver_data);
-        let this = &*((*receiver).receiver_data as *const Self);
+        let this = unsafe { &*((*receiver).receiver_data as *const Self) };
 
         this.assert_same_thread("clap_preset_discovery_metadata_receiver::set_description()");
 
@@ -695,7 +696,7 @@ impl<'a> MetadataReceiver<'a> {
         modification_time: clap_timestamp,
     ) {
         check_null_ptr!(receiver, (*receiver).receiver_data);
-        let this = &*((*receiver).receiver_data as *const Self);
+        let this = unsafe { &*((*receiver).receiver_data as *const Self) };
 
         this.assert_same_thread("clap_preset_discovery_metadata_receiver::set_timestamps()");
 
@@ -739,7 +740,7 @@ impl<'a> MetadataReceiver<'a> {
         feature: *const c_char,
     ) {
         check_null_ptr!(receiver, (*receiver).receiver_data);
-        let this = &*((*receiver).receiver_data as *const Self);
+        let this = unsafe { &*((*receiver).receiver_data as *const Self) };
 
         this.assert_same_thread("clap_preset_discovery_metadata_receiver::add_feature()");
 
@@ -773,7 +774,7 @@ impl<'a> MetadataReceiver<'a> {
         value: *const c_char,
     ) {
         check_null_ptr!(receiver, (*receiver).receiver_data);
-        let this = &*((*receiver).receiver_data as *const Self);
+        let this = unsafe { &*((*receiver).receiver_data as *const Self) };
 
         this.assert_same_thread("clap_preset_discovery_metadata_receiver::add_extra_info()");
 

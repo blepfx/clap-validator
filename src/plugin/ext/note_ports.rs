@@ -5,8 +5,8 @@ use crate::plugin::instance::Plugin;
 use crate::util::unsafe_clap_call;
 use anyhow::Result;
 use clap_sys::ext::note_ports::{
-    clap_note_dialect, clap_note_port_info, clap_plugin_note_ports, CLAP_EXT_NOTE_PORTS,
-    CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI, CLAP_NOTE_DIALECT_MIDI_MPE,
+    CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI,
+    CLAP_NOTE_DIALECT_MIDI_MPE, clap_note_dialect, clap_note_port_info, clap_plugin_note_ports,
 };
 use std::collections::HashSet;
 use std::ffi::CStr;

@@ -1,20 +1,20 @@
 //! Data structures and utilities for hosting plugins.
 
 use anyhow::{Context, Result};
-use clap_sys::ext::audio_ports::{clap_host_audio_ports, CLAP_EXT_AUDIO_PORTS};
-use clap_sys::ext::latency::{clap_host_latency, CLAP_EXT_LATENCY};
+use clap_sys::ext::audio_ports::{CLAP_EXT_AUDIO_PORTS, clap_host_audio_ports};
+use clap_sys::ext::latency::{CLAP_EXT_LATENCY, clap_host_latency};
 use clap_sys::ext::note_ports::{
-    clap_host_note_ports, clap_note_dialect, CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_CLAP,
-    CLAP_NOTE_DIALECT_MIDI, CLAP_NOTE_DIALECT_MIDI_MPE,
+    CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI,
+    CLAP_NOTE_DIALECT_MIDI_MPE, clap_host_note_ports, clap_note_dialect,
 };
 use clap_sys::ext::params::{
-    clap_host_params, clap_param_clear_flags, clap_param_rescan_flags, CLAP_EXT_PARAMS,
+    CLAP_EXT_PARAMS, clap_host_params, clap_param_clear_flags, clap_param_rescan_flags,
 };
-use clap_sys::ext::preset_load::{clap_host_preset_load, CLAP_EXT_PRESET_LOAD};
-use clap_sys::ext::state::{clap_host_state, CLAP_EXT_STATE};
-use clap_sys::ext::tail::{clap_host_tail, CLAP_EXT_TAIL};
-use clap_sys::ext::thread_check::{clap_host_thread_check, CLAP_EXT_THREAD_CHECK};
-use clap_sys::ext::voice_info::{clap_host_voice_info, CLAP_EXT_VOICE_INFO};
+use clap_sys::ext::preset_load::{CLAP_EXT_PRESET_LOAD, clap_host_preset_load};
+use clap_sys::ext::state::{CLAP_EXT_STATE, clap_host_state};
+use clap_sys::ext::tail::{CLAP_EXT_TAIL, clap_host_tail};
+use clap_sys::ext::thread_check::{CLAP_EXT_THREAD_CHECK, clap_host_thread_check};
+use clap_sys::ext::voice_info::{CLAP_EXT_VOICE_INFO, clap_host_voice_info};
 use clap_sys::factory::preset_discovery::clap_preset_discovery_location_kind;
 use clap_sys::host::clap_host;
 use clap_sys::id::clap_id;
@@ -25,12 +25,12 @@ use crossbeam::channel;
 use parking_lot::Mutex;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_void};
 use std::os::raw::c_char;
 use std::pin::Pin;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::ThreadId;
 
 use crate::plugin::instance::{PluginHandle, PluginStatus};

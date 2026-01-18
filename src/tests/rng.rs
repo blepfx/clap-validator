@@ -1,15 +1,15 @@
 //! Utilities for generating pseudo-random data.
 
 use clap_sys::events::{
+    CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_IS_LIVE, CLAP_EVENT_MIDI, CLAP_EVENT_NOTE_CHOKE,
+    CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_VALUE,
+    CLAP_NOTE_EXPRESSION_PRESSURE, CLAP_NOTE_EXPRESSION_TUNING, CLAP_NOTE_EXPRESSION_VOLUME,
     clap_event_header, clap_event_midi, clap_event_note, clap_event_note_expression,
-    clap_event_param_value, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_IS_LIVE, CLAP_EVENT_MIDI,
-    CLAP_EVENT_NOTE_CHOKE, CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON,
-    CLAP_EVENT_PARAM_VALUE, CLAP_NOTE_EXPRESSION_PRESSURE, CLAP_NOTE_EXPRESSION_TUNING,
-    CLAP_NOTE_EXPRESSION_VOLUME,
+    clap_event_param_value,
 };
 use midi_consts::channel_event as midi;
-use rand::seq::IteratorRandom;
 use rand::Rng;
+use rand::seq::IteratorRandom;
 use rand_pcg::Pcg32;
 use std::ops::RangeInclusive;
 

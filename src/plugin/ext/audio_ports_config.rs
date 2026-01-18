@@ -1,17 +1,15 @@
-use crate::{
-    plugin::{ext::Extension, instance::Plugin},
-    util::{c_char_slice_to_string, clap_call, unsafe_clap_call},
-};
+use crate::plugin::ext::Extension;
+use crate::plugin::instance::Plugin;
+use crate::util::{c_char_slice_to_string, clap_call, unsafe_clap_call};
 use anyhow::Result;
-use clap_sys::{
-    ext::audio_ports_config::{
-        clap_audio_ports_config, clap_plugin_audio_ports_config,
-        clap_plugin_audio_ports_config_info, CLAP_EXT_AUDIO_PORTS_CONFIG,
-        CLAP_EXT_AUDIO_PORTS_CONFIG_INFO,
-    },
-    id::clap_id,
+use clap_sys::ext::audio_ports_config::{
+    CLAP_EXT_AUDIO_PORTS_CONFIG, CLAP_EXT_AUDIO_PORTS_CONFIG_INFO, clap_audio_ports_config,
+    clap_plugin_audio_ports_config, clap_plugin_audio_ports_config_info,
 };
-use std::{ffi::CStr, mem::zeroed, ptr::NonNull};
+use clap_sys::id::clap_id;
+use std::ffi::CStr;
+use std::mem::zeroed;
+use std::ptr::NonNull;
 
 #[derive(Debug)]
 pub struct AudioPortsConfig<'a> {

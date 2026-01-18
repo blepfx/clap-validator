@@ -3,8 +3,8 @@
 use anyhow::{Context, Result};
 use clap_sys::ext::ambisonic::CLAP_PORT_AMBISONIC;
 use clap_sys::ext::audio_ports::{
-    clap_audio_port_info, clap_plugin_audio_ports, CLAP_AUDIO_PORT_IS_MAIN, CLAP_EXT_AUDIO_PORTS,
-    CLAP_PORT_MONO, CLAP_PORT_STEREO,
+    CLAP_AUDIO_PORT_IS_MAIN, CLAP_EXT_AUDIO_PORTS, CLAP_PORT_MONO, CLAP_PORT_STEREO,
+    clap_audio_port_info, clap_plugin_audio_ports,
 };
 use clap_sys::ext::surround::CLAP_PORT_SURROUND;
 use clap_sys::id::CLAP_INVALID_ID;

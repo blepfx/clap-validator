@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
-use clap_sys::timestamp::{clap_timestamp, CLAP_TIMESTAMP_UNKNOWN};
+use clap_sys::timestamp::{CLAP_TIMESTAMP_UNKNOWN, clap_timestamp};
 use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::path::PathBuf;
@@ -12,8 +12,11 @@ use std::path::PathBuf;
 /// Assert that the specified pointers are non-null. Panics if this is not the case.
 macro_rules! check_null_ptr {
     ($ptr:expr) => {
-        if $ptr.is_null() {
-            panic!("'{}' is not allowed to be a null pointer", stringify!($ptr))
+        #[allow(unused_unsafe)]
+        unsafe {
+            if $ptr.is_null() {
+                panic!("'{}' is not allowed to be a null pointer", stringify!($ptr))
+            }
         }
     };
     ($($ptrs:expr),*) => {
@@ -44,9 +47,7 @@ macro_rules! unsafe_clap_call {
     }
 }
 
-pub(crate) use check_null_ptr;
-pub(crate) use clap_call;
-pub(crate) use unsafe_clap_call;
+pub(crate) use {check_null_ptr, clap_call, unsafe_clap_call};
 
 /// Similar to, [`std::any::type_name_of_val()`], but on stable Rust, and stripping away the pointer
 /// part.
@@ -67,27 +68,33 @@ pub unsafe fn cstr_ptr_to_string(ptr: *const c_char) -> Result<Option<String>> {
         return Ok(None);
     }
 
-    CStr::from_ptr(ptr)
-        .to_str()
-        .map(|str| Some(String::from(str)))
-        .context("Error while parsing UTF-8")
+    unsafe {
+        CStr::from_ptr(ptr)
+            .to_str()
+            .map(|str| Some(String::from(str)))
+            .context("Error while parsing UTF-8")
+    }
 }
 
 /// The same as [`cstr_ptr_to_string()`], but it returns an error if the string is empty.
 pub unsafe fn cstr_ptr_to_mandatory_string(ptr: *const c_char) -> Result<String> {
-    match cstr_ptr_to_string(ptr)? {
-        Some(string) if string.is_empty() => anyhow::bail!("The string is empty."),
-        Some(string) => Ok(string),
-        None => anyhow::bail!("The string is a null pointer."),
+    unsafe {
+        match cstr_ptr_to_string(ptr)? {
+            Some(string) if string.is_empty() => anyhow::bail!("The string is empty."),
+            Some(string) => Ok(string),
+            None => anyhow::bail!("The string is a null pointer."),
+        }
     }
 }
 
 /// The same as [`cstr_ptr_to_string()`], but it treats empty strings as missing. Useful for parsing
 /// optional fields from structs.
 pub unsafe fn cstr_ptr_to_optional_string(ptr: *const c_char) -> Result<Option<String>> {
-    match cstr_ptr_to_string(ptr)? {
-        Some(string) if string.is_empty() => Ok(None),
-        x => Ok(x),
+    unsafe {
+        match cstr_ptr_to_string(ptr)? {
+            Some(string) if string.is_empty() => Ok(None),
+            x => Ok(x),
+        }
     }
 }
 
@@ -98,18 +105,20 @@ pub unsafe fn cstr_ptr_to_optional_string(ptr: *const c_char) -> Result<Option<S
 ///
 /// `ptr` should point to a valid null terminated C-string array.
 pub unsafe fn cstr_array_to_vec(mut ptr: *const *const c_char) -> Result<Option<Vec<String>>> {
-    if ptr.is_null() {
-        return Ok(None);
-    }
+    unsafe {
+        if ptr.is_null() {
+            return Ok(None);
+        }
 
-    let mut strings = Vec::new();
-    while !(*ptr).is_null() {
-        // We already checked for null pointers, so we can safely unwrap this
-        strings.push(cstr_ptr_to_string(*ptr)?.unwrap());
-        ptr = ptr.offset(1);
-    }
+        let mut strings = Vec::new();
+        while !(*ptr).is_null() {
+            // We already checked for null pointers, so we can safely unwrap this
+            strings.push(cstr_ptr_to_string(*ptr)?.unwrap());
+            ptr = ptr.offset(1);
+        }
 
-    Ok(Some(strings))
+        Ok(Some(strings))
+    }
 }
 
 /// Convert a `c_char` slice to a `String`. Returns an error if the slice did not contain a null
@@ -143,19 +152,45 @@ pub fn parse_timestamp(timestamp: clap_timestamp) -> Result<Option<DateTime<Utc>
     Ok(parsed)
 }
 
-/// [`std::env::temp_dir`], but taking `XDG_RUNTIME_DIR` on Linux into account.
-fn temp_dir() -> PathBuf {
-    #[cfg(all(unix, not(target_os = "macos")))]
-    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR").map(PathBuf::from) {
-        if dir.is_dir() {
-            return dir;
-        }
-    }
-
-    std::env::temp_dir()
-}
-
 /// A temporary directory used by the validator. This is cleared when launching the validator.
 pub fn validator_temp_dir() -> PathBuf {
+    /// [`std::env::temp_dir`], but taking `XDG_RUNTIME_DIR` on Linux into account.
+    fn temp_dir() -> PathBuf {
+        #[cfg(all(unix, not(target_os = "macos")))]
+        if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR").map(PathBuf::from) {
+            if dir.is_dir() {
+                return dir;
+            }
+        }
+
+        std::env::temp_dir()
+    }
+
     temp_dir().join("clap-validator")
+}
+
+impl<T: ?Sized> IteratorExt for T where T: Iterator {}
+pub trait IteratorExt: Iterator {
+    fn map_parallel<R: Send>(
+        self,
+        parallel: bool,
+        f: impl Fn(Self::Item) -> R + Sync,
+    ) -> impl Iterator<Item = R>
+    where
+        Self: Sized + Send,
+        Self::Item: Send,
+    {
+        if parallel {
+            std::thread::scope(|s| {
+                self.map(|item| s.spawn(|| f(item)))
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .map(|handle| handle.join().unwrap())
+                    .collect::<Vec<_>>()
+            })
+        } else {
+            self.map(f).collect::<Vec<_>>()
+        }
+        .into_iter()
+    }
 }

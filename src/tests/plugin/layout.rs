@@ -1,24 +1,17 @@
-use crate::{
-    plugin::{
-        ext::{
-            audio_ports::{AudioPortConfig, AudioPorts},
-            audio_ports_config::{AudioPortsConfig, AudioPortsConfigInfo},
-            configurable_audio_ports::{AudioPortsRequest, ConfigurableAudioPorts},
-            note_ports::NotePorts,
-            Extension,
-        },
-        host::Host,
-        instance::process::{AudioBuffers, ProcessConfig, ProcessData},
-        library::PluginLibrary,
-    },
-    tests::{
-        plugin::processing::run_simple,
-        rng::{new_prng, NoteGenerator},
-        TestStatus,
-    },
-};
+use crate::plugin::ext::Extension;
+use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
+use crate::plugin::ext::audio_ports_config::{AudioPortsConfig, AudioPortsConfigInfo};
+use crate::plugin::ext::configurable_audio_ports::{AudioPortsRequest, ConfigurableAudioPorts};
+use crate::plugin::ext::note_ports::NotePorts;
+use crate::plugin::host::Host;
+use crate::plugin::instance::process::{AudioBuffers, ProcessConfig, ProcessData};
+use crate::plugin::library::PluginLibrary;
+use crate::tests::TestStatus;
+use crate::tests::plugin::processing::run_simple;
+use crate::tests::rng::{NoteGenerator, new_prng};
 use anyhow::{Context, Result};
-use rand::{seq::SliceRandom, Rng};
+use rand::Rng;
+use rand::seq::SliceRandom;
 use rand_pcg::Pcg32;
 
 const BUFFER_SIZE: usize = 512;

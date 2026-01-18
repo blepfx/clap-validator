@@ -1,19 +1,13 @@
 //! Tests for individual plugin instances.
 
 use super::TestCase;
-use crate::{
-    plugin::{
-        ext::{
-            audio_ports_config::AudioPortsConfig, configurable_audio_ports::ConfigurableAudioPorts,
-            Extension,
-        },
-        library::PluginLibrary,
-    },
-    tests::TestStatus,
-};
-use anyhow::Result;
-use clap::ValueEnum;
-use std::process::Command;
+use crate::plugin::ext::Extension;
+use crate::plugin::ext::audio_ports_config::AudioPortsConfig;
+use crate::plugin::ext::configurable_audio_ports::ConfigurableAudioPorts;
+use crate::plugin::library::PluginLibrary;
+use crate::tests::TestStatus;
+use anyhow::{Context, Result};
+use std::path::Path;
 
 mod descriptor;
 mod layout;
@@ -84,7 +78,7 @@ pub enum PluginTestCase {
 impl<'a> TestCase<'a> for PluginTestCase {
     /// A loaded CLAP plugin library and the ID of the plugin contained within that library that
     /// should be tested.
-    type TestArgs = (&'a PluginLibrary, &'a str);
+    type TestArgs = (&'a Path, &'a str);
 
     fn description(&self) -> String {
         match self {
@@ -233,22 +227,10 @@ impl<'a> TestCase<'a> for PluginTestCase {
         }
     }
 
-    fn set_out_of_process_args(&self, command: &mut Command, (library, plugin_id): Self::TestArgs) {
-        let test_name = self.to_string();
+    fn run(&self, (library_path, plugin_id): Self::TestArgs) -> Result<TestStatus> {
+        let library = &PluginLibrary::load(library_path)
+            .with_context(|| format!("Could not load '{}'", library_path.display()))?;
 
-        command
-            .arg(
-                crate::validator::SingleTestType::Plugin
-                    .to_possible_value()
-                    .unwrap()
-                    .get_name(),
-            )
-            .arg(library.plugin_path())
-            .arg(plugin_id)
-            .arg(test_name);
-    }
-
-    fn run_in_process(&self, (library, plugin_id): Self::TestArgs) -> Result<TestStatus> {
         match self {
             PluginTestCase::DescriptorConsistency => {
                 descriptor::test_consistency(library, plugin_id)

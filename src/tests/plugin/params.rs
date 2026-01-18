@@ -7,15 +7,15 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 
 use super::PluginTestCase;
+use crate::plugin::ext::Extension;
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::ext::params::{ParamInfo, Params};
-use crate::plugin::ext::Extension;
 use crate::plugin::host::Host;
 use crate::plugin::instance::process::{AudioBuffers, Event, ProcessData};
 use crate::plugin::library::PluginLibrary;
 use crate::tests::plugin::processing::run_simple;
-use crate::tests::rng::{new_prng, NoteGenerator, ParamFuzzer};
+use crate::tests::rng::{NoteGenerator, ParamFuzzer, new_prng};
 use crate::tests::{TestCase, TestStatus};
 
 /// The fixed buffer size to use for these tests.
@@ -73,7 +73,7 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
                     "The plugin does not implement the '{}' extension.",
                     Params::EXTENSION_ID.to_str().unwrap(),
                 )),
-            })
+            });
         }
     };
     host.handle_callbacks_once();
@@ -213,7 +213,7 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str) -> Result
                     "The plugin does not implement the '{}' extension.",
                     Params::EXTENSION_ID.to_str().unwrap(),
                 )),
-            })
+            });
         }
     };
     host.handle_callbacks_once();
@@ -337,7 +337,7 @@ pub fn test_param_fuzz_bounds(library: &PluginLibrary, plugin_id: &str) -> Resul
                     "The plugin does not implement the '{}' extension.",
                     Params::EXTENSION_ID.to_str().unwrap(),
                 )),
-            })
+            });
         }
     };
     host.handle_callbacks_once();
@@ -469,7 +469,7 @@ pub fn test_param_fuzz_sample_accurate(
                     "The plugin does not implement the '{}' extension.",
                     Params::EXTENSION_ID.to_str().unwrap(),
                 )),
-            })
+            });
         }
     };
     host.handle_callbacks_once();
@@ -589,7 +589,7 @@ pub fn test_param_fuzz_modulation(library: &PluginLibrary, plugin_id: &str) -> R
                     "The plugin does not implement the '{}' extension.",
                     Params::EXTENSION_ID.to_str().unwrap(),
                 )),
-            })
+            });
         }
     };
 
@@ -651,7 +651,7 @@ pub fn test_param_set_wrong_namespace(
                     "The plugin does not implement the '{}' extension.",
                     Params::EXTENSION_ID.to_str().unwrap(),
                 )),
-            })
+            });
         }
     };
     host.handle_callbacks_once();
@@ -731,7 +731,7 @@ pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Re
                     "The plugin does not implement the '{}' extension.",
                     Params::EXTENSION_ID.to_str().unwrap(),
                 )),
-            })
+            });
         }
     };
     host.handle_callbacks_once();

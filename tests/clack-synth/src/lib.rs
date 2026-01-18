@@ -1,10 +1,18 @@
 use crate::params::{PolySynthParamModulations, PolySynthParams};
 use crate::poly_oscillator::PolyOscillator;
+use clack_extensions::audio_ports_config::{
+    AudioPortConfigWriter, AudioPortsConfiguration, MainPortInfo, PluginAudioPortsConfig,
+    PluginAudioPortsConfigImpl,
+};
+use clack_extensions::configurable_audio_ports::{
+    AudioPortsRequestList, PluginConfigurableAudioPorts, PluginConfigurableAudioPortsImpl,
+};
 use clack_extensions::state::PluginState;
 use clack_extensions::{audio_ports::*, note_ports::*, params::*};
 use clack_plugin::events::spaces::CoreEventSpace;
 use clack_plugin::prelude::*;
 use clack_plugin::process::ConstantMask;
+use std::ffi::CString;
 
 mod oscillator;
 mod params;
@@ -25,7 +33,9 @@ impl Plugin for PolySynthPlugin {
             .register::<PluginAudioPorts>()
             .register::<PluginNotePorts>()
             .register::<PluginParams>()
-            .register::<PluginState>();
+            .register::<PluginState>()
+            .register::<PluginAudioPortsConfig>()
+            .register::<PluginConfigurableAudioPorts>();
     }
 }
 
@@ -47,11 +57,15 @@ impl DefaultPluginFactory for PolySynthPlugin {
         _host: HostMainThreadHandle<'a>,
         shared: &'a PolySynthPluginShared,
     ) -> Result<PolySynthPluginMainThread<'a>, PluginError> {
-        Ok(PolySynthPluginMainThread { shared })
+        Ok(PolySynthPluginMainThread {
+            shared,
+            channels: 2,
+        })
     }
 }
 
 pub struct PolySynthAudioProcessor<'a> {
+    channels: u32,
     poly_osc: PolyOscillator,
     modulation_values: PolySynthParamModulations,
     shared: &'a PolySynthPluginShared,
@@ -62,11 +76,12 @@ impl<'a> PluginAudioProcessor<'a, PolySynthPluginShared, PolySynthPluginMainThre
 {
     fn activate(
         _host: HostAudioProcessorHandle<'a>,
-        _main_thread: &mut PolySynthPluginMainThread,
+        main_thread: &mut PolySynthPluginMainThread,
         shared: &'a PolySynthPluginShared,
         audio_config: PluginAudioConfiguration,
     ) -> Result<Self, PluginError> {
         Ok(Self {
+            channels: main_thread.channels,
             poly_osc: PolyOscillator::new(16, audio_config.sample_rate as f32),
             modulation_values: PolySynthParamModulations::new(),
             shared,
@@ -106,6 +121,8 @@ impl<'a> PluginAudioProcessor<'a, PolySynthPluginShared, PolySynthPluginMainThre
                 self.modulation_values.volume(),
             );
         }
+
+        assert!(output_channels.channel_count() == self.channels);
 
         // Copy the first channel to all other channels for mono output
         if output_channels.channel_count() > 1 {
@@ -167,9 +184,9 @@ impl PluginAudioPortsImpl for PolySynthPluginMainThread<'_> {
             writer.set(&AudioPortInfo {
                 id: ClapId::new(1),
                 name: b"main",
-                channel_count: 1,
+                channel_count: self.channels,
                 flags: AudioPortFlags::IS_MAIN,
-                port_type: Some(AudioPortType::MONO),
+                port_type: AudioPortType::from_channel_count(self.channels),
                 in_place_pair: None,
             });
         }
@@ -193,6 +210,53 @@ impl PluginNotePortsImpl for PolySynthPluginMainThread<'_> {
     }
 }
 
+impl PluginAudioPortsConfigImpl for PolySynthPluginMainThread<'_> {
+    fn count(&mut self) -> u32 {
+        8
+    }
+
+    fn get(&mut self, index: u32, writer: &mut AudioPortConfigWriter) {
+        writer.write(&AudioPortsConfiguration {
+            id: ClapId::new(index),
+            name: CString::new(format!("Config {}", index))
+                .unwrap()
+                .as_bytes(),
+            input_port_count: 0,
+            output_port_count: 1,
+            main_input: None,
+            main_output: Some(MainPortInfo {
+                channel_count: index + 1,
+                port_type: AudioPortType::from_channel_count(self.channels),
+            }),
+        });
+    }
+
+    fn select(&mut self, config_id: ClapId) -> Result<(), PluginError> {
+        if config_id.get() < 8 {
+            self.channels = config_id.get() + 1;
+            Ok(())
+        } else {
+            Err(PluginError::Message("Invalid configuration ID"))
+        }
+    }
+}
+
+impl PluginConfigurableAudioPortsImpl for PolySynthPluginMainThread<'_> {
+    fn can_apply_configuration(&mut self, requests: AudioPortsRequestList) -> bool {
+        matches!(requests.get(0), Some(request) if !request.is_input && request.channel_count > 0)
+    }
+
+    fn apply_configuration(&mut self, requests: AudioPortsRequestList) -> bool {
+        match requests.get(0) {
+            Some(request) if !request.is_input && request.channel_count > 0 => {
+                self.channels = request.channel_count;
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
 pub struct PolySynthPluginShared {
     params: PolySynthParams,
 }
@@ -201,6 +265,7 @@ impl PluginShared<'_> for PolySynthPluginShared {}
 
 pub struct PolySynthPluginMainThread<'a> {
     shared: &'a PolySynthPluginShared,
+    channels: u32,
 }
 
 impl<'a> PluginMainThread<'a, PolySynthPluginShared> for PolySynthPluginMainThread<'a> {}

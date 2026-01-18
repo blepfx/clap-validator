@@ -91,7 +91,7 @@ impl<'a> ConfigurableAudioPorts<'a> {
         let plugin = self.plugin.as_ptr();
         let ext = self.configurable_audio_ports.as_ptr();
 
-        unsafe_clap_call! { ext=>can_apply_configuration(
+        unsafe_clap_call! { ext=>apply_configuration(
             plugin,
             requests.as_ptr(),
             requests.len() as u32

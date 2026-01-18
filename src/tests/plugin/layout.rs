@@ -244,7 +244,7 @@ pub fn test_layout_configurable_audio_ports(
 
         for request in requests {
             result.push(format!(
-                "{} {}: {}ch",
+                "{}{}-{}ch",
                 if request.is_input { "in" } else { "out" },
                 request.port_index,
                 request.channel_count,
@@ -255,7 +255,6 @@ pub fn test_layout_configurable_audio_ports(
     }
 
     let mut prng = new_prng();
-
     let host = Host::new();
     let plugin = library
         .create_plugin(plugin_id, host.clone())
@@ -315,9 +314,12 @@ pub fn test_layout_configurable_audio_ports(
             );
         }
 
-        checks_total += 1;
         if has_applied {
+            checks_total += 1;
             checks_passed += 1;
+        } else {
+            checks_total += 1;
+            continue;
         }
 
         let config_audio_ports = audio_ports

@@ -10,4 +10,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 clack-plugin = { git = "https://github.com/Quant1um/clack", branch = "configurable-audio-ports" }
-clack-extensions = { git = "https://github.com/Quant1um/clack", branch = "configurable-audio-ports", features = ["audio-ports", "clack-plugin", "note-ports", "params", "state"] }
+clack-extensions = { git = "https://github.com/Quant1um/clack", branch = "configurable-audio-ports", features = ["audio-ports", "audio-ports-config", "configurable-audio-ports", "clack-plugin", "note-ports", "params", "state"] }

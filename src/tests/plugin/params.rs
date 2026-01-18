@@ -84,8 +84,7 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
     // We keep track of how many parameters support these conversions. A plugin
     // should support either conversion either for all of its parameters, or for
     // none of them.
-    const VALUES_PER_PARAM: usize = 6;
-    let expected_conversions = param_infos.len() * VALUES_PER_PARAM;
+    let expected_conversions = param_infos.len() * 101;
 
     let mut num_supported_value_to_text = 0;
     let mut num_supported_text_to_value = 0;

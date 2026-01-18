@@ -65,7 +65,7 @@ pub fn test_state_invalid_empty(library: &PluginLibrary, plugin_id: &str) -> Res
     }
 }
 
-/// The test for `PluginTestCase::StateRandomGarbage`.
+/// The test for `PluginTestCase::StateInvalidRandom`.
 pub fn test_state_invalid_random(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
 
@@ -91,20 +91,20 @@ pub fn test_state_invalid_random(library: &PluginLibrary, plugin_id: &str) -> Re
     host.handle_callbacks_once();
 
     let mut random_data = vec![0u8; 1024 * 1024];
-    let mut result = Ok(());
+    let mut succeeded = false;
 
     for _ in 0..3 {
         prng.fill(&mut random_data[..]);
-        result = result.or(state.load(&random_data));
+        succeeded |= state.load(&random_data).is_ok();
     }
 
     host.handle_callbacks_once();
     host.callback_error_check()
         .context("An error occured during a host callback")?;
 
-    match result {
-        Err(_) => Ok(TestStatus::Success { details: None }),
-        Ok(_) => Ok(TestStatus::Warning {
+    match succeeded {
+        false => Ok(TestStatus::Success { details: None }),
+        true => Ok(TestStatus::Warning {
             details: Some(String::from(
                 "The plugin loaded random bytes successfully, which is unexpected, but the plugin \
                  did not crash.",
@@ -720,12 +720,7 @@ fn generate_param_diff(
 
             Some(format!(
                 "{}, {:?}, {:?}, {:.4}, {:?}, {:.4}",
-                param_id,
-                param_name,
-                string_actual,
-                actual_value,
-                string_expected,
-                expected_value,
+                param_id, param_name, string_actual, actual_value, string_expected, expected_value,
             ))
         })
         .collect::<Vec<String>>();

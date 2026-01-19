@@ -47,11 +47,11 @@ pub struct AudioPort {
 }
 
 impl<'a> Extension<&'a Plugin<'a>> for AudioPorts<'a> {
-    const EXTENSION_ID: &'static CStr = CLAP_EXT_AUDIO_PORTS;
+    const IDS: &'static [&'static CStr] = &[CLAP_EXT_AUDIO_PORTS];
 
     type Struct = clap_plugin_audio_ports;
 
-    fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
+    unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
         Self {
             plugin,
             audio_ports: extension_struct,

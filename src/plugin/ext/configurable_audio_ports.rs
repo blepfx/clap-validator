@@ -3,8 +3,8 @@ use crate::plugin::instance::Plugin;
 use crate::util::unsafe_clap_call;
 use clap_sys::ext::audio_ports::{CLAP_PORT_MONO, CLAP_PORT_STEREO};
 use clap_sys::ext::configurable_audio_ports::{
-    CLAP_EXT_CONFIGURABLE_AUDIO_PORTS, clap_audio_port_configuration_request,
-    clap_plugin_configurable_audio_ports,
+    CLAP_EXT_CONFIGURABLE_AUDIO_PORTS, CLAP_EXT_CONFIGURABLE_AUDIO_PORTS_COMPAT,
+    clap_audio_port_configuration_request, clap_plugin_configurable_audio_ports,
 };
 use std::ffi::CStr;
 use std::ptr::{NonNull, null};
@@ -23,11 +23,14 @@ pub struct ConfigurableAudioPorts<'a> {
 }
 
 impl<'a> Extension<&'a Plugin<'a>> for ConfigurableAudioPorts<'a> {
-    const EXTENSION_ID: &'static CStr = CLAP_EXT_CONFIGURABLE_AUDIO_PORTS;
+    const IDS: &'static [&'static CStr] = &[
+        CLAP_EXT_CONFIGURABLE_AUDIO_PORTS,
+        CLAP_EXT_CONFIGURABLE_AUDIO_PORTS_COMPAT,
+    ];
 
     type Struct = clap_plugin_configurable_audio_ports;
 
-    fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
+    unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
         Self {
             plugin,
             configurable_audio_ports: extension_struct,

@@ -97,7 +97,7 @@ impl PluginMainThreadParams for PolySynthPluginMainThread<'_> {
     fn get_info(&mut self, param_index: u32, info: &mut ParamInfoWriter) {
         if param_index == 0 {
             info.set(&ParamInfo {
-                id: 1.into(),
+                id: PARAM_VOLUME_ID,
                 flags: ParamInfoFlags::IS_AUTOMATABLE
                     | ParamInfoFlags::IS_MODULATABLE
                     | ParamInfoFlags::IS_AUTOMATABLE_PER_CHANNEL

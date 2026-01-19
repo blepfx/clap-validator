@@ -3,7 +3,8 @@ use crate::plugin::instance::Plugin;
 use crate::util::{c_char_slice_to_string, clap_call, unsafe_clap_call};
 use anyhow::Result;
 use clap_sys::ext::audio_ports_config::{
-    CLAP_EXT_AUDIO_PORTS_CONFIG, CLAP_EXT_AUDIO_PORTS_CONFIG_INFO, clap_audio_ports_config,
+    CLAP_EXT_AUDIO_PORTS_CONFIG, CLAP_EXT_AUDIO_PORTS_CONFIG_INFO,
+    CLAP_EXT_AUDIO_PORTS_CONFIG_INFO_COMPAT, clap_audio_ports_config,
     clap_plugin_audio_ports_config, clap_plugin_audio_ports_config_info,
 };
 use clap_sys::id::clap_id;
@@ -37,11 +38,11 @@ pub struct AudioPortsConfigConfig {
 }
 
 impl<'a> Extension<&'a Plugin<'a>> for AudioPortsConfig<'a> {
-    const EXTENSION_ID: &'static CStr = CLAP_EXT_AUDIO_PORTS_CONFIG;
+    const IDS: &'static [&'static CStr] = &[CLAP_EXT_AUDIO_PORTS_CONFIG];
 
     type Struct = clap_plugin_audio_ports_config;
 
-    fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
+    unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
         Self {
             plugin,
             audio_ports_config: extension_struct,
@@ -50,11 +51,14 @@ impl<'a> Extension<&'a Plugin<'a>> for AudioPortsConfig<'a> {
 }
 
 impl<'a> Extension<&'a Plugin<'a>> for AudioPortsConfigInfo<'a> {
-    const EXTENSION_ID: &'static CStr = CLAP_EXT_AUDIO_PORTS_CONFIG_INFO;
+    const IDS: &'static [&'static CStr] = &[
+        CLAP_EXT_AUDIO_PORTS_CONFIG_INFO,
+        CLAP_EXT_AUDIO_PORTS_CONFIG_INFO_COMPAT,
+    ];
 
     type Struct = clap_plugin_audio_ports_config_info;
 
-    fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
+    unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
         Self {
             plugin,
             audio_ports_config_info: extension_struct,

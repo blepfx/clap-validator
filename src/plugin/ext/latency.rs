@@ -12,11 +12,11 @@ pub struct Latency<'a> {
 }
 
 impl<'a> Extension<&'a Plugin<'a>> for Latency<'a> {
-    const EXTENSION_ID: &'static CStr = CLAP_EXT_LATENCY;
+    const IDS: &'static [&'static CStr] = &[CLAP_EXT_LATENCY];
 
     type Struct = clap_plugin_latency;
 
-    fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
+    unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
         Self {
             plugin,
             latency: extension_struct,

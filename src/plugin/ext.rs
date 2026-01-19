@@ -19,13 +19,17 @@ pub mod state;
 /// this trait for `Plugin`, and abstractions for audio thread functions will implement this trait
 /// for `PluginAudioThread`.
 pub trait Extension<P> {
-    /// The C-string ID for the extension.
-    const EXTENSION_ID: &'static CStr;
+    /// The C-string IDs for the extension.
+    const IDS: &'static [&'static CStr];
 
     /// The type of the C-struct for the extension.
     type Struct;
 
     /// Construct the extension for the plugin type `P`. This allows the abstraction to be limited
     /// to only work with the main thread `&Plugin` or the audio thread `&PluginAudioThread`.
-    fn new(plugin: P, extension_struct: NonNull<Self::Struct>) -> Self;
+    ///
+    /// # Safety
+    /// The extension struct pointer must be a valid pointer to the correct extension struct for
+    /// the plugin instance and given EXTENSION_ID.
+    unsafe fn new(plugin: P, extension_struct: NonNull<Self::Struct>) -> Self;
 }

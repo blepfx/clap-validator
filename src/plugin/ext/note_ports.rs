@@ -41,11 +41,11 @@ pub struct NotePort {
 }
 
 impl<'a> Extension<&'a Plugin<'a>> for NotePorts<'a> {
-    const EXTENSION_ID: &'static CStr = CLAP_EXT_NOTE_PORTS;
+    const IDS: &'static [&'static CStr] = &[CLAP_EXT_NOTE_PORTS];
 
     type Struct = clap_plugin_note_ports;
 
-    fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
+    unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
         Self {
             plugin,
             note_ports: extension_struct,

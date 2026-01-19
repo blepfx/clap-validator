@@ -1,14 +1,18 @@
 //! Data structures and utilities for hosting plugins.
 
 use anyhow::{Context, Result};
-use clap_sys::ext::audio_ports::{CLAP_EXT_AUDIO_PORTS, clap_host_audio_ports};
+use clap_sys::ext::audio_ports::{
+    CLAP_AUDIO_PORTS_RESCAN_NAMES, CLAP_EXT_AUDIO_PORTS, clap_host_audio_ports,
+};
 use clap_sys::ext::latency::{CLAP_EXT_LATENCY, clap_host_latency};
 use clap_sys::ext::note_ports::{
     CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI,
-    CLAP_NOTE_DIALECT_MIDI_MPE, clap_host_note_ports, clap_note_dialect,
+    CLAP_NOTE_DIALECT_MIDI_MPE, CLAP_NOTE_PORTS_RESCAN_ALL, CLAP_NOTE_PORTS_RESCAN_NAMES,
+    clap_host_note_ports, clap_note_dialect,
 };
 use clap_sys::ext::params::{
-    CLAP_EXT_PARAMS, clap_host_params, clap_param_clear_flags, clap_param_rescan_flags,
+    CLAP_EXT_PARAMS, CLAP_PARAM_RESCAN_ALL, CLAP_PARAM_RESCAN_INFO, CLAP_PARAM_RESCAN_TEXT,
+    CLAP_PARAM_RESCAN_VALUES, clap_host_params, clap_param_clear_flags, clap_param_rescan_flags,
 };
 use clap_sys::ext::preset_load::{CLAP_EXT_PRESET_LOAD, clap_host_preset_load};
 use clap_sys::ext::state::{CLAP_EXT_STATE, clap_host_state};
@@ -22,6 +26,7 @@ use clap_sys::plugin::clap_plugin;
 use clap_sys::version::CLAP_VERSION;
 use crossbeam::atomic::AtomicCell;
 use crossbeam::channel;
+use crossbeam::queue::SegQueue;
 use parking_lot::Mutex;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -109,6 +114,8 @@ pub struct InstanceState {
     /// this object.
     clap_host: Mutex<clap_host>,
 
+    pub callback_events: SegQueue<CallbackEvent>,
+
     /// The plugin's current state in terms of activation and processing status.
     pub status: AtomicCell<PluginStatus>,
 
@@ -141,6 +148,24 @@ pub enum CallbackTask {
     Stop,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CallbackEvent {
+    RequestProcess,
+    RequestFlush,
+    RescanParamsValues,
+    RescanParamsText,
+    RescanParamsInfo,
+    RescanParamsAll,
+    RescanAudioPortsNames,
+    RescanAudioPortsAll,
+    RescanNotePortsNames,
+    RescanNotePortsAll,
+    ChangedLatency,
+    ChangedTail,
+    ChangedVoiceInfo,
+    ChangedState,
+}
+
 impl InstanceState {
     /// Construct a new plugin instance object. The [`InstanceState::plugin`] field must be set
     /// later because the `clap_host` struct needs to be passed to `clap_factory::create_plugin()`,
@@ -170,6 +195,7 @@ impl InstanceState {
             }),
             _clap_validator_version: clap_validator_version,
 
+            callback_events: SegQueue::new(),
             status: AtomicCell::new(PluginStatus::default()),
 
             audio_thread: AtomicCell::new(None),
@@ -529,10 +555,12 @@ impl Host {
 
     unsafe extern "C" fn request_process(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
+        let (instance, _) = unsafe { InstanceState::from_clap_host_ptr(host) };
 
         // Handling this within the context of the validator would be a bit messy. Do plugins use
         // this?
-        log::debug!("TODO: Handle 'clap_host::request_process()'");
+        log::trace!("'clap_host::request_process()' was called by the plugin");
+        instance.callback_events.push(CallbackEvent::RequestProcess);
     }
 
     unsafe extern "C" fn request_callback(host: *const clap_host) {
@@ -555,19 +583,34 @@ impl Host {
         let (_, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
 
         this.assert_main_thread("clap_host_audio_ports::is_rescan_flag_supported()");
-        log::debug!("TODO: Handle 'clap_host_audio_ports::is_rescan_flag_supported()'");
-
+        log::trace!("'clap_host_audio_ports::is_rescan_flag_supported()' was called");
         true
     }
 
-    unsafe extern "C" fn ext_audio_ports_rescan(host: *const clap_host, _flags: u32) {
+    unsafe extern "C" fn ext_audio_ports_rescan(host: *const clap_host, flags: u32) {
         check_null_ptr!(host, (*host).host_data);
-        let (_, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
+        let (instance, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
 
-        // TODO: A couple of these flags are only allowed when the plugin is not activated, make
-        //       sure to check for this when implementing this functionality
         this.assert_main_thread("clap_host_audio_ports::rescan()");
-        log::debug!("TODO: Handle 'clap_host_audio_ports::rescan()'");
+        log::trace!("'clap_host_audio_ports::rescan()' was called");
+
+        if flags & CLAP_AUDIO_PORTS_RESCAN_NAMES != 0 {
+            instance
+                .callback_events
+                .push(CallbackEvent::RescanAudioPortsNames);
+        }
+
+        if flags & !CLAP_AUDIO_PORTS_RESCAN_NAMES != 0 {
+            if instance.status.load() > PluginStatus::Activated {
+                this.set_callback_error(
+                    "'clap_host_audio_ports::rescan()' was called while the plugin was activated",
+                );
+            }
+
+            instance
+                .callback_events
+                .push(CallbackEvent::RescanAudioPortsAll);
+        }
     }
 
     unsafe extern "C" fn ext_note_ports_supported_dialects(
@@ -577,16 +620,36 @@ impl Host {
         let (_, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
 
         this.assert_main_thread("clap_host_note_ports::supported_dialects()");
+        log::trace!("'clap_host_note_ports::supported_dialects()' was called");
 
         CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI | CLAP_NOTE_DIALECT_MIDI_MPE
     }
 
-    unsafe extern "C" fn ext_note_ports_rescan(host: *const clap_host, _flags: u32) {
+    unsafe extern "C" fn ext_note_ports_rescan(host: *const clap_host, flags: u32) {
         check_null_ptr!(host, (*host).host_data);
-        let (_, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
+        let (instance, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
 
         this.assert_main_thread("clap_host_note_ports::rescan()");
-        log::debug!("TODO: Handle 'clap_host_note_ports::rescan()'");
+        log::trace!("'clap_host_note_ports::rescan()' was called");
+
+        if flags & CLAP_NOTE_PORTS_RESCAN_NAMES != 0 {
+            instance
+                .callback_events
+                .push(CallbackEvent::RescanNotePortsNames);
+        }
+
+        if flags & CLAP_NOTE_PORTS_RESCAN_ALL != 0 {
+            if instance.status.load() > PluginStatus::Activated {
+                this.set_callback_error(
+                    "'clap_host_note_ports::rescan(CLAP_NOTE_PORTS_RESCAN_ALL)' was called while \
+                     the plugin was activated",
+                );
+            }
+
+            instance
+                .callback_events
+                .push(CallbackEvent::RescanNotePortsAll);
+        }
     }
 
     unsafe extern "C" fn ext_preset_load_on_error(
@@ -653,15 +716,43 @@ impl Host {
         }
     }
 
-    unsafe extern "C" fn ext_params_rescan(
-        host: *const clap_host,
-        _flags: clap_param_rescan_flags,
-    ) {
+    unsafe extern "C" fn ext_params_rescan(host: *const clap_host, flags: clap_param_rescan_flags) {
         check_null_ptr!(host, (*host).host_data);
-        let (_, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
+        let (instance, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
 
         this.assert_main_thread("clap_host_params::rescan()");
-        log::debug!("TODO: Handle 'clap_host_params::rescan()'");
+        log::trace!("'clap_host_params::rescan()' was called");
+
+        if flags & CLAP_PARAM_RESCAN_VALUES != 0 {
+            instance
+                .callback_events
+                .push(CallbackEvent::RescanParamsValues);
+        }
+
+        if flags & CLAP_PARAM_RESCAN_TEXT != 0 {
+            instance
+                .callback_events
+                .push(CallbackEvent::RescanParamsText);
+        }
+
+        if flags & CLAP_PARAM_RESCAN_INFO != 0 {
+            instance
+                .callback_events
+                .push(CallbackEvent::RescanParamsInfo);
+        }
+
+        if flags & CLAP_PARAM_RESCAN_ALL != 0 {
+            if instance.status.load() > PluginStatus::Activated {
+                this.set_callback_error(
+                    "'clap_host_params::rescan(CLAP_PARAM_RESCAN_ALL)' was called while the \
+                     plugin is activated",
+                );
+            }
+
+            instance
+                .callback_events
+                .push(CallbackEvent::RescanParamsAll);
+        }
     }
 
     unsafe extern "C" fn ext_params_clear(
@@ -678,18 +769,20 @@ impl Host {
 
     unsafe extern "C" fn ext_params_request_flush(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let (_, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
+        let (instance, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
 
         this.assert_not_audio_thread("clap_host_params::request_flush()");
-        log::debug!("TODO: Handle 'clap_host_params::request_flush()'");
+        log::trace!("'clap_host_params::request_flush()' was called");
+        instance.callback_events.push(CallbackEvent::RequestFlush);
     }
 
     unsafe extern "C" fn ext_state_mark_dirty(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let (_, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
+        let (instance, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
 
         this.assert_main_thread("clap_host_state::mark_dirty()");
-        log::debug!("TODO: Handle 'clap_host_state::mark_dirty()'");
+        log::trace!("'clap_host_state::mark_dirty()' was called");
+        instance.callback_events.push(CallbackEvent::ChangedState);
     }
 
     unsafe extern "C" fn ext_thread_check_is_main_thread(host: *const clap_host) -> bool {
@@ -710,28 +803,35 @@ impl Host {
         check_null_ptr!(host, (*host).host_data);
         let (instance, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
 
-        this.assert_main_thread("clap_host_latency::changed()");
         if instance.status.load() != PluginStatus::Activating {
             this.set_callback_error(
                 "'clap_host_latency::changed()' must only be called within \
                  'clap_plugin::activate()'",
             );
         }
+
+        this.assert_main_thread("clap_host_latency::changed()");
+        log::trace!("'clap_host_latency::changed()' was called");
+        instance.callback_events.push(CallbackEvent::ChangedLatency);
     }
 
     unsafe extern "C" fn ext_tail_changed(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let (_, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
+        let (instance, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
 
         this.assert_audio_thread("clap_host_tail::changed()");
-        log::debug!("TODO: Handle 'clap_host_tail::changed()'");
+        log::trace!("'clap_host_tail::changed()' was called");
+        instance.callback_events.push(CallbackEvent::ChangedTail);
     }
 
     unsafe extern "C" fn ext_voice_info_changed(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let (_, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
+        let (instance, this) = unsafe { InstanceState::from_clap_host_ptr(host) };
 
         this.assert_main_thread("clap_host_voice_info::changed()");
-        log::debug!("TODO: Handle 'clap_host_voice_info::changed()'");
+        log::trace!("'clap_host_voice_info::changed()' was called");
+        instance
+            .callback_events
+            .push(CallbackEvent::ChangedVoiceInfo);
     }
 }

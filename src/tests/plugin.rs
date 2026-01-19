@@ -1,9 +1,6 @@
 //! Tests for individual plugin instances.
 
 use super::TestCase;
-use crate::plugin::ext::Extension;
-use crate::plugin::ext::audio_ports_config::AudioPortsConfig;
-use crate::plugin::ext::configurable_audio_ports::ConfigurableAudioPorts;
 use crate::plugin::library::PluginLibrary;
 use crate::tests::TestStatus;
 use anyhow::{Context, Result};
@@ -104,15 +101,13 @@ impl<'a> TestCase<'a> for PluginTestCase {
             ),
             PluginTestCase::LayoutConfigurableAudioPorts => format!(
                 "Performs the same test as {}, but this time it tries random configurations \
-                 exposed via the '{}' extension.",
+                 exposed via the 'configurable-audio-ports' extension.",
                 PluginTestCase::ProcessAudioOutOfPlaceBasic,
-                ConfigurableAudioPorts::EXTENSION_ID.to_str().unwrap()
             ),
             PluginTestCase::LayoutAudioPortsConfig => format!(
                 "Performs the same test as {}, but this time it tries all available port \
-                 configurations exposed via the '{}' extension.",
+                 configurations exposed via the 'audio-ports-config' extension.",
                 PluginTestCase::ProcessAudioInPlaceBasic,
-                AudioPortsConfig::EXTENSION_ID.to_str().unwrap()
             ),
             PluginTestCase::ProcessAudioConstantMask => String::from(
                 "Processes random audio through the plugin with its default parameter values \

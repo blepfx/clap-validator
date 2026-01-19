@@ -1,11 +1,5 @@
 //! Tests involving the preset discovery factory.
 
-use anyhow::{Context, Result};
-use clap_sys::factory::preset_discovery::CLAP_PRESET_DISCOVERY_FACTORY_ID;
-use std::collections::BTreeMap;
-use std::path::Path;
-
-use crate::plugin::ext::Extension;
 use crate::plugin::ext::audio_ports::AudioPorts;
 use crate::plugin::ext::preset_load::PresetLoad;
 use crate::plugin::host::Host;
@@ -13,6 +7,10 @@ use crate::plugin::instance::process::{AudioBuffers, ProcessConfig, ProcessData}
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::preset_discovery::{LocationValue, PluginAbi, Preset, PresetFile};
 use crate::tests::TestStatus;
+use anyhow::{Context, Result};
+use clap_sys::factory::preset_discovery::CLAP_PRESET_DISCOVERY_FACTORY_ID;
+use std::collections::BTreeMap;
+use std::path::Path;
 
 // TODO: Test for duplicate locations and soundpacks in declared data across all providers
 
@@ -124,9 +122,8 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
                 None => {
                     return Ok(TestStatus::Skipped {
                         details: Some(format!(
-                            "'{}' does not implement the '{}' extension.",
+                            "'{}' does not implement the 'preset-load' extension.",
                             plugin_id,
-                            PresetLoad::EXTENSION_ID.to_str().unwrap(),
                         )),
                     });
                 }

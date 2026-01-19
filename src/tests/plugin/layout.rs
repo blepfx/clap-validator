@@ -1,4 +1,3 @@
-use crate::plugin::ext::Extension;
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::audio_ports_config::{AudioPortsConfig, AudioPortsConfigInfo};
 use crate::plugin::ext::configurable_audio_ports::{AudioPortsRequest, ConfigurableAudioPorts};
@@ -33,9 +32,8 @@ pub fn test_layout_audio_ports_config(
         Some(audio_ports) => audio_ports,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    AudioPorts::EXTENSION_ID.to_str().unwrap(),
+                details: Some(String::from(
+                    "The plugin does not implement the 'audio-ports' extension.",
                 )),
             });
         }
@@ -46,9 +44,8 @@ pub fn test_layout_audio_ports_config(
         Some(audio_ports_config) => audio_ports_config,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    AudioPortsConfig::EXTENSION_ID.to_str().unwrap(),
+                details: Some(String::from(
+                    "The plugin does not implement the 'audio-ports-config' extension.",
                 )),
             });
         }
@@ -265,9 +262,8 @@ pub fn test_layout_configurable_audio_ports(
         Some(audio_ports) => audio_ports,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    AudioPorts::EXTENSION_ID.to_str().unwrap(),
+                details: Some(String::from(
+                    "The plugin does not implement the 'audio-ports' extension.",
                 )),
             });
         }
@@ -277,9 +273,8 @@ pub fn test_layout_configurable_audio_ports(
         Some(extension) => extension,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    ConfigurableAudioPorts::EXTENSION_ID.to_str().unwrap(),
+                details: Some(String::from(
+                    "The plugin does not implement the 'configurable-audio-ports' extension.",
                 )),
             });
         }

@@ -33,11 +33,11 @@ pub struct Params<'a> {
 }
 
 impl<'a> Extension<&'a Plugin<'a>> for Params<'a> {
-    const EXTENSION_ID: &'static CStr = CLAP_EXT_PARAMS;
+    const IDS: &'static [&'static CStr] = &[CLAP_EXT_PARAMS];
 
     type Struct = clap_plugin_params;
 
-    fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
+    unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
         Self {
             plugin,
             params: extension_struct,

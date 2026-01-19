@@ -1,6 +1,5 @@
 //! Contains most of the boilerplate around testing audio processing.
 
-use crate::plugin::ext::Extension;
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::NotePorts;
 use crate::plugin::host::Host;
@@ -79,9 +78,8 @@ pub fn test_process_audio_basic(
             .context("Error while querying 'audio-ports' IO configuration")?,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    AudioPorts::EXTENSION_ID.to_str().unwrap(),
+                details: Some(String::from(
+                    "The plugin does not implement the 'audio-ports' extension.",
                 )),
             });
         }
@@ -135,9 +133,8 @@ pub fn test_process_note_out_of_place(
             .context("Error while querying 'note-ports' IO configuration")?,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    NotePorts::EXTENSION_ID.to_str().unwrap(),
+                details: Some(String::from(
+                    "The plugin does not implement the 'note-ports' extension.",
                 )),
             });
         }
@@ -145,10 +142,9 @@ pub fn test_process_note_out_of_place(
 
     if note_ports_config.inputs.is_empty() {
         return Ok(TestStatus::Skipped {
-            details: Some(format!(
-                "The plugin implements the '{}' extension but it does not have any input note \
-                 ports.",
-                NotePorts::EXTENSION_ID.to_str().unwrap()
+            details: Some(String::from(
+                "The plugin implements the 'note-ports' extension but it does not have any input \
+                 note ports.",
             )),
         });
     }
@@ -384,9 +380,8 @@ pub fn test_process_audio_constant_mask(
             .context("Error while querying 'audio-ports' IO configuration")?,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    AudioPorts::EXTENSION_ID.to_str().unwrap(),
+                details: Some(String::from(
+                    "The plugin does not implement the 'audio-ports' extension.",
                 )),
             });
         }

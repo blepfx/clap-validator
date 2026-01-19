@@ -86,17 +86,20 @@ impl<'a> PluginAudioThread<'a> {
         self.status().assert_is_not(PluginStatus::Uninitialized);
 
         let plugin = self.as_ptr();
-        let extension_ptr =
-            unsafe_clap_call! { plugin=>get_extension(plugin, T::EXTENSION_ID.as_ptr()) };
+        for id in T::IDS {
+            let extension_ptr = unsafe_clap_call! { plugin=>get_extension(plugin, id.as_ptr()) };
 
-        if extension_ptr.is_null() {
-            None
-        } else {
-            Some(T::new(
-                self,
-                NonNull::new(extension_ptr as *mut T::Struct).unwrap(),
-            ))
+            if !extension_ptr.is_null() {
+                return unsafe {
+                    Some(T::new(
+                        self,
+                        NonNull::new(extension_ptr as *mut T::Struct).unwrap(),
+                    ))
+                };
+            }
         }
+
+        None
     }
 
     /// Prepare for audio processing. Returns an error if the plugin returned `false`. See

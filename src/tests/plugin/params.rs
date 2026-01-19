@@ -1,7 +1,6 @@
 //! Tests that focus on parameters.
 
 use super::PluginTestCase;
-use crate::plugin::ext::Extension;
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::ext::params::{ParamInfo, Params};
@@ -68,9 +67,8 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
         Some(params) => params,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    Params::EXTENSION_ID.to_str().unwrap(),
+                details: Some(String::from(
+                    "The plugin does not implement the 'params' extension.",
                 )),
             });
         }
@@ -207,9 +205,8 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str) -> Result
         Some(params) => params,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    Params::EXTENSION_ID.to_str().unwrap(),
+                details: Some(String::from(
+                    "The plugin does not implement the 'params' extension.",
                 )),
             });
         }
@@ -331,9 +328,8 @@ pub fn test_param_fuzz_bounds(library: &PluginLibrary, plugin_id: &str) -> Resul
         Some(params) => params,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    Params::EXTENSION_ID.to_str().unwrap(),
+                details: Some(String::from(
+                    "The plugin does not implement the 'params' extension.",
                 )),
             });
         }
@@ -463,9 +459,8 @@ pub fn test_param_fuzz_sample_accurate(
         Some(params) => params,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    Params::EXTENSION_ID.to_str().unwrap(),
+                details: Some(String::from(
+                    "The plugin does not implement the 'params' extension.",
                 )),
             });
         }
@@ -589,9 +584,8 @@ pub fn test_param_fuzz_modulation(library: &PluginLibrary, plugin_id: &str) -> R
         Some(params) => params,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    Params::EXTENSION_ID.to_str().unwrap(),
+                details: Some(String::from(
+                    "The plugin does not implement the 'params' extension.",
                 )),
             });
         }
@@ -651,9 +645,8 @@ pub fn test_param_set_wrong_namespace(
         Some(params) => params,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    Params::EXTENSION_ID.to_str().unwrap(),
+                details: Some(String::from(
+                    "The plugin does not implement the 'params' extension.",
                 )),
             });
         }
@@ -731,9 +724,8 @@ pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Re
         Some(params) => params,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(format!(
-                    "The plugin does not implement the '{}' extension.",
-                    Params::EXTENSION_ID.to_str().unwrap(),
+                details: Some(String::from(
+                    "The plugin does not implement the 'params' extension.",
                 )),
             });
         }

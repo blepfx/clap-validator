@@ -40,7 +40,7 @@ pub struct Plugin<'lib> {
     handle: PluginHandle,
     /// Information about this plugin instance stored on the host. This keeps track of things like
     /// audio thread IDs, whether the plugin has pending callbacks, and what state it is in.
-    pub state: Pin<Arc<InstanceState>>,
+    state: Pin<Arc<InstanceState>>,
 
     /// The CLAP plugin library this plugin instance was created from. This field is not used
     /// directly, but keeping a reference to the library here prevents the plugin instance from
@@ -224,18 +224,20 @@ impl<'lib> Plugin<'lib> {
         self.status().assert_is_not(PluginStatus::Uninitialized);
 
         let plugin = self.as_ptr();
-        let extension_ptr = unsafe_clap_call! {
-            plugin=>get_extension(plugin, T::EXTENSION_ID.as_ptr())
-        };
+        for id in T::IDS {
+            let extension_ptr = unsafe_clap_call! { plugin=>get_extension(plugin, id.as_ptr()) };
 
-        if extension_ptr.is_null() {
-            None
-        } else {
-            Some(T::new(
-                self,
-                NonNull::new(extension_ptr as *mut T::Struct).unwrap(),
-            ))
+            if !extension_ptr.is_null() {
+                return unsafe {
+                    Some(T::new(
+                        self,
+                        NonNull::new(extension_ptr as *mut T::Struct).unwrap(),
+                    ))
+                };
+            }
         }
+
+        None
     }
 
     /// Execute some code for this plugin from an audio thread context. The closure receives a

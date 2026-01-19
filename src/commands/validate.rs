@@ -1,7 +1,7 @@
 //! Commands for validating plugins.
 
 use super::{TextWrapper, println_wrapped};
-use crate::tests::TestStatus;
+use crate::tests::{TestResult, TestStatus};
 use crate::{Verbosity, validator};
 use anyhow::{Context, Result};
 use clap::Args;
@@ -122,34 +122,30 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Ex
             serde_json::to_string_pretty(&result).expect("Could not format JSON")
         );
     } else {
-        let mut wrapper = TextWrapper::default();
-        // This doesn't need to be a macro but the alternatives are to either wrap `wrapper` in a
-        // refcell or to inline this, so this is probably still better
-        macro_rules! print_test {
-            ($test:expr) => {
-                println_wrapped!(
-                    wrapper,
-                    "   - {} {}: {}",
-                    $test.name,
-                    format!("({}ms)", $test.duration.as_millis()).black().bold(),
-                    $test.description
-                );
+        fn print_test(wrapper: &mut TextWrapper, test: &TestResult) {
+            println_wrapped!(
+                wrapper,
+                "   - {} {}: {}",
+                test.name,
+                format!("({}ms)", test.duration.as_millis()).black().bold(),
+                test.description
+            );
 
-                let status_text = match $test.status {
-                    TestStatus::Success { .. } => "PASSED".green(),
-                    TestStatus::Crashed { .. } => "CRASHED".red().bold(),
-                    TestStatus::Failed { .. } => "FAILED".red(),
-                    TestStatus::Skipped { .. } => "SKIPPED".yellow(),
-                    TestStatus::Warning { .. } => "WARNING".yellow(),
-                };
-                let test_result = match $test.status.details() {
-                    Some(reason) => format!("     {status_text}: {reason}"),
-                    None => format!("     {status_text}"),
-                };
-                wrapper.print_auto(test_result);
+            let status_text = match test.status {
+                TestStatus::Success { .. } => "PASSED".green(),
+                TestStatus::Crashed { .. } => "CRASHED".red().bold(),
+                TestStatus::Failed { .. } => "FAILED".red(),
+                TestStatus::Skipped { .. } => "SKIPPED".yellow(),
+                TestStatus::Warning { .. } => "WARNING".yellow(),
             };
+            let test_result = match test.status.details() {
+                Some(reason) => format!("     {status_text}: {reason}"),
+                None => format!("     {status_text}"),
+            };
+            wrapper.print_auto(test_result);
         }
 
+        let mut wrapper = TextWrapper::default();
         if !result.plugin_library_tests.is_empty() {
             println!("Plugin library tests:");
             for (library_path, tests) in result.plugin_library_tests {
@@ -158,7 +154,7 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Ex
 
                 for test in tests {
                     println!();
-                    print_test!(test);
+                    print_test(&mut wrapper, &test);
                 }
             }
 
@@ -173,7 +169,7 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Ex
 
                 for test in tests {
                     println!();
-                    print_test!(test);
+                    print_test(&mut wrapper, &test);
                 }
             }
 

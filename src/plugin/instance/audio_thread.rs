@@ -7,19 +7,16 @@ use clap_sys::process::{
     CLAP_PROCESS_SLEEP, CLAP_PROCESS_TAIL,
 };
 use std::marker::PhantomData;
-use std::pin::Pin;
 use std::ptr::NonNull;
-use std::sync::Arc;
 
 use super::process::ProcessData;
 use super::{Plugin, PluginStatus};
 use crate::plugin::ext::Extension;
-use crate::plugin::host::InstanceState;
+use crate::plugin::instance::InstanceState;
 use crate::util::unsafe_clap_call;
 
 /// An audio thread equivalent to [`Plugin`]. This version only allows audio thread functions to be
 /// called. It can be constructed using [`Plugin::on_audio_thread()`].
-#[derive(Debug)]
 pub struct PluginAudioThread<'a> {
     /// The plugin instance this audio thread belongs to. This is needed to ensure that the audio
     /// thread instance cannot outlive the plugin instance (which cannot outlive the plugin
@@ -42,7 +39,7 @@ pub enum ProcessStatus {
 
 impl Drop for PluginAudioThread<'_> {
     fn drop(&mut self) {
-        match self.state().status.load() {
+        match self.status() {
             PluginStatus::Processing => self.stop_processing(),
             PluginStatus::Activated => (),
             state => panic!(
@@ -66,14 +63,13 @@ impl<'a> PluginAudioThread<'a> {
         self.plugin.as_ptr()
     }
 
-    /// Get the underlying `Plugin`'s [`InstanceState`] object.
-    pub fn state(&self) -> &Pin<Arc<InstanceState>> {
-        &self.plugin.state
+    pub fn state(&self) -> &InstanceState {
+        self.plugin.state()
     }
 
     /// Get the plugin's current initialization status.
     pub fn status(&self) -> PluginStatus {
-        self.state().status.load()
+        self.plugin.status()
     }
 
     /// Get the _audio thread_ extension abstraction for the extension `T`, if the plugin supports
@@ -110,7 +106,7 @@ impl<'a> PluginAudioThread<'a> {
 
         let plugin = self.as_ptr();
         if unsafe_clap_call! { plugin=>start_processing(plugin) } {
-            self.state().status.store(PluginStatus::Processing);
+            self.plugin.state().status.store(PluginStatus::Processing);
             Ok(())
         } else {
             anyhow::bail!("'clap_plugin::start_processing()' returned false.")
@@ -161,6 +157,6 @@ impl<'a> PluginAudioThread<'a> {
         let plugin = self.as_ptr();
         unsafe_clap_call! { plugin=>stop_processing(plugin) };
 
-        self.state().status.store(PluginStatus::Activated);
+        self.plugin.state.status.store(PluginStatus::Activated);
     }
 }

@@ -2,7 +2,6 @@
 
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::NotePorts;
-use crate::plugin::host::Host;
 use crate::plugin::instance::Plugin;
 use crate::plugin::instance::process::{
     AudioBuffers, ProcessConfig, ProcessControlFlow, ProcessData,
@@ -66,9 +65,8 @@ pub fn test_process_audio_basic(
 ) -> Result<TestStatus> {
     let mut prng = new_prng();
 
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -85,6 +83,10 @@ pub fn test_process_audio_basic(
         }
     };
 
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
+
     let mut audio_buffers = if in_place {
         AudioBuffers::new_in_place_f32(&audio_ports_config, BUFFER_SIZE)
     } else {
@@ -97,9 +99,10 @@ pub fn test_process_audio_basic(
         Ok(())
     })?;
 
-    // The `Host` contains built-in thread safety checks
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
+
     Ok(TestStatus::Success { details: None })
 }
 
@@ -113,9 +116,8 @@ pub fn test_process_note_out_of_place(
 ) -> Result<TestStatus> {
     let mut prng = new_prng();
 
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -149,6 +151,10 @@ pub fn test_process_note_out_of_place(
         });
     }
 
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
+
     // We'll fill the input event queue with (consistent) random CLAP note and/or MIDI
     // events depending on what's supported by the plugin supports
     let mut note_event_rng = NoteGenerator::new(&note_ports_config);
@@ -169,8 +175,10 @@ pub fn test_process_note_out_of_place(
         Ok(())
     })?;
 
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
+
     Ok(TestStatus::Success { details: None })
 }
 
@@ -186,9 +194,8 @@ pub fn test_process_varying_sample_rates(
 
     let mut prng = new_prng();
 
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -205,6 +212,10 @@ pub fn test_process_varying_sample_rates(
         .transpose()
         .context("Error while querying 'note-ports' IO configuration")?
         .unwrap_or_default();
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
     for &sample_rate in SAMPLE_RATES {
@@ -233,8 +244,9 @@ pub fn test_process_varying_sample_rates(
         ))?;
     }
 
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -250,9 +262,8 @@ pub fn test_process_varying_block_sizes(
 
     let mut prng = new_prng();
 
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -277,6 +288,10 @@ pub fn test_process_varying_block_sizes(
         let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
         let num_iters = (32768 / buffer_size).min(5);
 
+        plugin
+            .handle_callback()
+            .context("An error occured during a callback")?;
+
         run_simple(
             &plugin,
             &mut process_data,
@@ -298,8 +313,9 @@ pub fn test_process_varying_block_sizes(
         ))?;
     }
 
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -313,9 +329,8 @@ pub fn test_process_random_block_sizes(
 
     let mut prng = new_prng();
 
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -332,6 +347,10 @@ pub fn test_process_random_block_sizes(
         .transpose()
         .context("Error while querying 'note-ports' IO configuration")?
         .unwrap_or_default();
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     let mut note_event_rng = NoteGenerator::new(&note_ports_config);
     let mut audio_buffers =
@@ -355,8 +374,9 @@ pub fn test_process_random_block_sizes(
         Ok(())
     })?;
 
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -368,9 +388,8 @@ pub fn test_process_audio_constant_mask(
 ) -> Result<TestStatus> {
     let mut prng = new_prng();
 
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -395,6 +414,10 @@ pub fn test_process_audio_constant_mask(
 
     let mut has_received_constant_output = false;
     let mut has_received_constant_flag = false;
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     process_data.run(&plugin, |plugin, process| {
         process.buffers.randomize(&mut prng);
@@ -446,8 +469,9 @@ pub fn test_process_audio_constant_mask(
         }
     })?;
 
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     if !has_received_constant_flag && has_received_constant_output {
         return Ok(TestStatus::Warning {
@@ -465,9 +489,8 @@ pub fn test_process_audio_reset_determinism(
     library: &PluginLibrary,
     plugin_id: &str,
 ) -> Result<TestStatus> {
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -484,6 +507,10 @@ pub fn test_process_audio_reset_determinism(
         .transpose()
         .context("Error while querying 'note-ports' IO configuration")?
         .unwrap_or_default();
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     let mut note_event_rng = NoteGenerator::new(&note_ports_config);
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(
@@ -535,8 +562,9 @@ pub fn test_process_audio_reset_determinism(
         anyhow::bail!("Plugin output differs after reset");
     }
 
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }

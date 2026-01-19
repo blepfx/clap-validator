@@ -12,7 +12,6 @@ use crate::util::unsafe_clap_call;
 use super::Extension;
 
 /// Abstraction for the `preset-load` extension covering the main thread functionality.
-#[derive(Debug)]
 pub struct PresetLoad<'a> {
     plugin: &'a Plugin<'a>,
     preset_load: NonNull<clap_plugin_preset_load>,

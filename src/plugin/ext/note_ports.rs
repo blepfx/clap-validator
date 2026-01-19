@@ -14,7 +14,6 @@ use std::mem;
 use std::ptr::NonNull;
 
 /// Abstraction for the `note-ports` extension covering the main thread functionality.
-#[derive(Debug)]
 pub struct NotePorts<'a> {
     plugin: &'a Plugin<'a>,
     note_ports: NonNull<clap_plugin_note_ports>,

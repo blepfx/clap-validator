@@ -26,7 +26,6 @@ use crate::util::{self, c_char_slice_to_string, unsafe_clap_call};
 pub type ParamInfo = BTreeMap<clap_id, Param>;
 
 /// Abstraction for the `params` extension covering the main thread functionality.
-#[derive(Debug)]
 pub struct Params<'a> {
     plugin: &'a Plugin<'a>,
     params: NonNull<clap_plugin_params>,

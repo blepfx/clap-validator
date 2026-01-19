@@ -32,6 +32,6 @@ pub trait Extension<P> {
     ///
     /// # Safety
     /// The extension struct pointer must be a valid pointer to the correct extension struct for
-    /// the plugin instance and given EXTENSION_ID.
+    /// the plugin instance and given `IDS`.
     unsafe fn new(plugin: P, extension_struct: NonNull<Self::Struct>) -> Self;
 }

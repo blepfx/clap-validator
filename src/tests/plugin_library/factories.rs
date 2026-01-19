@@ -1,12 +1,10 @@
 //! Tests interacting with the plugin's factories.
 
+use crate::plugin::library::PluginLibrary;
+use crate::tests::TestStatus;
 use anyhow::{Context, Result};
 use clap_sys::version::clap_version_is_compatible;
 use std::path::Path;
-
-use crate::plugin::host::Host;
-use crate::plugin::library::PluginLibrary;
-use crate::tests::TestStatus;
 
 /// The test for `PluginLibraryTestCase::QueryNonexistentFactory`.
 pub fn test_query_nonexistent_factory(library_path: &Path) -> Result<TestStatus> {
@@ -86,7 +84,7 @@ pub fn test_create_id_with_trailing_garbage(library_path: &Path) -> Result<TestS
 
     // This should return an error/null-pointer instead of actually instantiating a
     // plugin
-    if library.create_plugin(&fake_plugin_id, Host::new()).is_ok() {
+    if library.create_plugin(&fake_plugin_id).is_ok() {
         anyhow::bail!(
             "Creating a plugin instance with a non-existent plugin ID '{fake_plugin_id}' should \
              return a null pointer, but it did not."

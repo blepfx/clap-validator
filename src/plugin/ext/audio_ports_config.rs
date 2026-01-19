@@ -12,13 +12,11 @@ use std::ffi::CStr;
 use std::mem::zeroed;
 use std::ptr::NonNull;
 
-#[derive(Debug)]
 pub struct AudioPortsConfig<'a> {
     plugin: &'a Plugin<'a>,
     audio_ports_config: NonNull<clap_plugin_audio_ports_config>,
 }
 
-#[derive(Debug)]
 pub struct AudioPortsConfigInfo<'a> {
     plugin: &'a Plugin<'a>,
     audio_ports_config_info: NonNull<clap_plugin_audio_ports_config_info>,

@@ -14,7 +14,6 @@ use crate::plugin::instance::Plugin;
 use crate::util::{check_null_ptr, unsafe_clap_call};
 
 /// Abstraction for the `state` extension covering the main thread functionality.
-#[derive(Debug)]
 pub struct State<'a> {
     plugin: &'a Plugin<'a>,
     state: NonNull<clap_plugin_state>,

@@ -1,15 +1,13 @@
 //! Tests surrounding plugin features.
 
+use crate::plugin::library::PluginLibrary;
+use crate::tests::TestStatus;
 use anyhow::{Context, Result};
 use clap_sys::plugin_features::{
     CLAP_PLUGIN_FEATURE_ANALYZER, CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, CLAP_PLUGIN_FEATURE_INSTRUMENT,
     CLAP_PLUGIN_FEATURE_NOTE_DETECTOR, CLAP_PLUGIN_FEATURE_NOTE_EFFECT,
 };
 use std::collections::HashSet;
-
-use crate::plugin::host::Host;
-use crate::plugin::library::PluginLibrary;
-use crate::tests::TestStatus;
 
 /// Verifies that the descriptor stored in the factory and the descriptor stored on the plugin
 /// object are equivalent.
@@ -26,9 +24,8 @@ pub fn test_consistency(library: &PluginLibrary, plugin_id: &str) -> Result<Test
         .find(|plugin_meta| plugin_meta.id == plugin_id)
         .expect("Incorrect plugin ID for metadata query, this is a bug in clap-validator");
 
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host)
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     let plugin_descriptor = plugin.descriptor()?;
 

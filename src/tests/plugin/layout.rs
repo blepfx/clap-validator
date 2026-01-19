@@ -2,7 +2,6 @@ use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::audio_ports_config::{AudioPortsConfig, AudioPortsConfigInfo};
 use crate::plugin::ext::configurable_audio_ports::{AudioPortsRequest, ConfigurableAudioPorts};
 use crate::plugin::ext::note_ports::NotePorts;
-use crate::plugin::host::Host;
 use crate::plugin::instance::process::{AudioBuffers, ProcessConfig, ProcessData};
 use crate::plugin::library::PluginLibrary;
 use crate::tests::TestStatus;
@@ -22,9 +21,8 @@ pub fn test_layout_audio_ports_config(
 ) -> Result<TestStatus> {
     let mut prng = new_prng();
 
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -199,9 +197,10 @@ pub fn test_layout_audio_ports_config(
         })?;
     }
 
-    // The `Host` contains built-in thread safety checks
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
+
     Ok(TestStatus::Success { details: None })
 }
 
@@ -252,9 +251,8 @@ pub fn test_layout_configurable_audio_ports(
     }
 
     let mut prng = new_prng();
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -343,8 +341,9 @@ pub fn test_layout_configurable_audio_ports(
         })?;
     }
 
-    // The `Host` contains built-in thread safety checks
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
+
     Ok(TestStatus::Success { details: None })
 }

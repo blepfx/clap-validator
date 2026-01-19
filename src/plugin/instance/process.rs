@@ -1,5 +1,9 @@
 //! Data structures and functions surrounding audio processing.
 
+use crate::plugin::ext::audio_ports::AudioPortConfig;
+use crate::plugin::instance::Plugin;
+use crate::plugin::instance::audio_thread::PluginAudioThread;
+use crate::util::check_null_ptr;
 use anyhow::Result;
 use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::events::{
@@ -21,12 +25,6 @@ use std::ffi::c_void;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::ptr::null_mut;
-use std::sync::atomic::Ordering;
-
-use crate::plugin::ext::audio_ports::AudioPortConfig;
-use crate::plugin::instance::Plugin;
-use crate::plugin::instance::audio_thread::PluginAudioThread;
-use crate::util::check_null_ptr;
 
 /// The input and output data for a call to `clap_plugin::process()`.
 pub struct ProcessData<'a> {
@@ -289,7 +287,8 @@ impl<'a> ProcessData<'a> {
         let mut running = true;
         while running {
             plugin.activate(self.config.sample_rate, 1, self.buffers.len())?;
-            plugin.host().handle_callbacks_once();
+            plugin.handle_callback()?;
+
             self.reset();
 
             plugin.on_audio_thread(|plugin| -> Result<()> {
@@ -306,7 +305,7 @@ impl<'a> ProcessData<'a> {
                     if plugin
                         .state()
                         .requested_restart
-                        .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+                        .compare_exchange(true, false)
                         .is_ok()
                     {
                         log::trace!(
@@ -330,7 +329,7 @@ impl<'a> ProcessData<'a> {
         }
 
         // Handle callbacks the plugin may have made during deactivate
-        plugin.host().handle_callbacks_once();
+        plugin.handle_callback()?;
 
         Ok(())
     }

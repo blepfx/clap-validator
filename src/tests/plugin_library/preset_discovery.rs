@@ -2,7 +2,6 @@
 
 use crate::plugin::ext::audio_ports::AudioPorts;
 use crate::plugin::ext::preset_load::PresetLoad;
-use crate::plugin::host::Host;
 use crate::plugin::instance::process::{AudioBuffers, ProcessConfig, ProcessData};
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::preset_discovery::{LocationValue, PluginAbi, Preset, PresetFile};
@@ -109,9 +108,8 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
         // With everything indexed, we can try loading these presets. We'll reuse one plugin
         // instance per plugin.
         for (plugin_id, presets) in loadable_presets_by_plugin_id {
-            let host = Host::new();
             let plugin = library
-                .create_plugin(&plugin_id, host.clone())
+                .create_plugin(&plugin_id)
                 .with_context(|| format!("Could not create a plugin instance for '{plugin_id}'"))?;
             plugin
                 .init()
@@ -131,7 +129,9 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
             // We'll try to run some audio through the plugin to make sure the preset change was
             // successful, but it doesn't matter if the plugin doesn't have any audio ports
             let audio_ports = plugin.get_extension::<AudioPorts>();
-            host.handle_callbacks_once();
+            plugin
+                .handle_callback()
+                .context("An error occured during a host callback")?;
 
             let audio_ports_config = audio_ports
                 .map(|ports| ports.config())
@@ -162,8 +162,7 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
                 // In case the plugin uses `clap_host_preset_load::on_error()` to report an error,
                 // we will check that first before making sure the preset loaded correctly. This
                 // might otherwise mask the error message.
-                host.handle_callbacks_once();
-                host.callback_error_check().with_context(|| {
+                plugin.handle_callback().with_context(|| {
                     format!(
                         "An error occurred while loading the preset '{}' for plugin '{}'",
                         preset.name, plugin_id
@@ -186,14 +185,12 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
                         )
                     })?;
 
-                host.handle_callbacks_once();
-                host.callback_error_check().with_context(|| {
+                plugin.handle_callback().with_context(|| {
                     format!("An error occured during a host callback made by '{plugin_id}'")
                 })?;
             }
 
-            host.handle_callbacks_once();
-            host.callback_error_check().with_context(|| {
+            plugin.handle_callback().with_context(|| {
                 format!("An error occured during a host callback made by '{plugin_id}'")
             })?;
         }

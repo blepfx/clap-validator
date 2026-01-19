@@ -20,7 +20,6 @@ use crate::util::unsafe_clap_call;
 use super::Extension;
 
 /// Abstraction for the `audio-ports` extension covering the main thread functionality.
-#[derive(Debug)]
 pub struct AudioPorts<'a> {
     plugin: &'a Plugin<'a>,
     audio_ports: NonNull<clap_plugin_audio_ports>,

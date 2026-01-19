@@ -1,5 +1,8 @@
 //! Interactions with CLAP plugin libraries, which may contain multiple plugins.
 
+use super::instance::Plugin;
+use super::preset_discovery::PresetDiscoveryFactory;
+use crate::util::{self, unsafe_clap_call};
 use anyhow::{Context, Result};
 use clap_sys::entry::clap_plugin_entry;
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
@@ -13,12 +16,6 @@ use std::collections::HashSet;
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
-use std::rc::Rc;
-
-use super::instance::Plugin;
-use super::preset_discovery::PresetDiscoveryFactory;
-use crate::plugin::host::Host;
-use crate::util::{self, unsafe_clap_call};
 
 /// A CLAP plugin library built from a CLAP plugin's entry point. This can be used to iterate over
 /// all plugins exposed by the library and to initialize plugins.
@@ -166,14 +163,6 @@ impl PluginLibrary {
             .expect("A Plugin was constructed for a plugin with no entry point");
         let plugin_factory = unsafe_clap_call! { entry_point=>get_factory(CLAP_PLUGIN_FACTORY_ID.as_ptr()) }
             as *const clap_plugin_factory;
-        // TODO: Should we log anything here? In theory not supporting the plugin factory is
-        //       perfectly legal, but it's a bit weird
-        if plugin_factory.is_null() {
-            anyhow::bail!(
-                "The plugin does not support the '{}' factory.",
-                CLAP_PLUGIN_FACTORY_ID.to_str().unwrap()
-            );
-        }
 
         let mut metadata = PluginLibraryMetadata {
             version: (
@@ -183,6 +172,11 @@ impl PluginLibrary {
             ),
             plugins: Vec::new(),
         };
+
+        if plugin_factory.is_null() {
+            return Ok(metadata);
+        }
+
         let num_plugins = unsafe_clap_call! { plugin_factory=>get_plugin_count(plugin_factory) };
         for i in 0..num_plugins {
             let descriptor =
@@ -231,7 +225,7 @@ impl PluginLibrary {
     /// IDs supported by this plugin library can be found by calling
     /// [`metadata()`][Self::metadata()]. The returned plugin has not yet been initialized, and
     /// `destroy()` will be called automatically when the object is dropped.
-    pub fn create_plugin(&self, id: &str, host: Rc<Host>) -> Result<Plugin<'_>> {
+    pub fn create_plugin(&self, id: &str) -> Result<Plugin<'_>> {
         let entry_point = get_clap_entry_point(&self.library)
             .expect("A Plugin was constructed for a plugin with no entry point");
         let plugin_factory = unsafe_clap_call! { entry_point=>get_factory(CLAP_PLUGIN_FACTORY_ID.as_ptr()) }
@@ -244,7 +238,7 @@ impl PluginLibrary {
         }
 
         let id_cstring = CString::new(id).context("Plugin ID contained null bytes")?;
-        Plugin::new(self, host, unsafe { &*plugin_factory }, &id_cstring)
+        Plugin::new(self, unsafe { &*plugin_factory }, &id_cstring)
     }
 
     /// Returns the plugin's preset discovery factory, if it has one.

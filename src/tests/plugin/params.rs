@@ -4,7 +4,6 @@ use super::PluginTestCase;
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::ext::params::{ParamInfo, Params};
-use crate::plugin::host::Host;
 use crate::plugin::instance::process::{AudioBuffers, Event, ProcessData};
 use crate::plugin::library::PluginLibrary;
 use crate::tests::plugin::processing::run_simple;
@@ -57,9 +56,8 @@ impl<'a> ParamValue<'a> {
 
 /// The test for `ProcessingTest::ParamConversions`.
 pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -73,7 +71,10 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
             });
         }
     };
-    host.handle_callbacks_once();
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     let param_infos = params
         .info()
@@ -157,7 +158,20 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
         }
     }
 
-    if !(num_supported_value_to_text == 0 || num_supported_value_to_text == expected_conversions) {
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
+
+    if num_supported_value_to_text == 0 || num_supported_text_to_value == 0 {
+        return Ok(TestStatus::Skipped {
+            details: Some(String::from(
+                "The plugin's parameters need to support both value to text and text to value \
+                 conversions for this test.",
+            )),
+        });
+    }
+
+    if num_supported_value_to_text != expected_conversions {
         anyhow::bail!(
             "'clap_plugin_params::value_to_text()' returned true for \
              {num_supported_value_to_text} out of {expected_conversions} calls. This function is \
@@ -165,7 +179,8 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
              Examples of failing conversions were: {failed_value_to_text_calls:#?}"
         );
     }
-    if !(num_supported_text_to_value == 0 || num_supported_text_to_value == expected_conversions) {
+
+    if num_supported_text_to_value != expected_conversions {
         anyhow::bail!(
             "'clap_plugin_params::text_to_value()' returned true for \
              {num_supported_text_to_value} out of {expected_conversions} calls. This function is \
@@ -174,27 +189,14 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
         );
     }
 
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
-    if num_supported_value_to_text == 0 || num_supported_text_to_value == 0 {
-        Ok(TestStatus::Skipped {
-            details: Some(String::from(
-                "The plugin's parameters need to support both value to text and text to value \
-                 conversions for this test.",
-            )),
-        })
-    } else {
-        Ok(TestStatus::Success { details: None })
-    }
+    Ok(TestStatus::Success { details: None })
 }
 
 /// The test for `ProcessingTest::ParamFuzzBasic`.
 pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
-
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -211,7 +213,10 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str) -> Result
             });
         }
     };
-    host.handle_callbacks_once();
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     let audio_ports_config = audio_ports
         .map(|ports| ports.config())
@@ -304,9 +309,9 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str) -> Result
         std::mem::swap(&mut previous_events, &mut current_events);
     }
 
-    // `ProcessingTest::run()` already handled callbacks for us
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -315,9 +320,8 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str) -> Result
 pub fn test_param_fuzz_bounds(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
 
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -334,7 +338,10 @@ pub fn test_param_fuzz_bounds(library: &PluginLibrary, plugin_id: &str) -> Resul
             });
         }
     };
-    host.handle_callbacks_once();
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     let audio_ports_config = audio_ports
         .map(|ports| ports.config())
@@ -430,9 +437,9 @@ pub fn test_param_fuzz_bounds(library: &PluginLibrary, plugin_id: &str) -> Resul
         std::mem::swap(&mut previous_events, &mut current_events);
     }
 
-    // `ProcessingTest::run()` already handled callbacks for us
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -445,10 +452,8 @@ pub fn test_param_fuzz_sample_accurate(
     const INTERVALS: &[u32] = &[1000, 100, 1];
 
     let mut prng = new_prng();
-
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -465,7 +470,10 @@ pub fn test_param_fuzz_sample_accurate(
             });
         }
     };
-    host.handle_callbacks_once();
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     let audio_ports_config = audio_ports
         .map(|ports| ports.config())
@@ -549,9 +557,9 @@ pub fn test_param_fuzz_sample_accurate(
         }
     }
 
-    // `ProcessingTest::run()` already handled callbacks for us
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -559,10 +567,8 @@ pub fn test_param_fuzz_sample_accurate(
 /// The test for `ProcessingTest::ParamFuzzModulation`.
 pub fn test_param_fuzz_modulation(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
-
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -617,7 +623,9 @@ pub fn test_param_fuzz_modulation(library: &PluginLibrary, plugin_id: &str) -> R
         Ok(())
     })?;
 
-    host.handle_callbacks_once();
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -628,10 +636,8 @@ pub fn test_param_set_wrong_namespace(
     plugin_id: &str,
 ) -> Result<TestStatus> {
     let mut prng = new_prng();
-
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -651,7 +657,10 @@ pub fn test_param_set_wrong_namespace(
             });
         }
     };
-    host.handle_callbacks_once();
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     let param_infos = params
         .info()
@@ -696,8 +705,10 @@ pub fn test_param_set_wrong_namespace(
         .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
         .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
+
     if actual_param_values == initial_param_values {
         Ok(TestStatus::Success { details: None })
     } else {
@@ -714,9 +725,8 @@ pub fn test_param_set_wrong_namespace(
 
 /// The test for `ProcessingTest::ParamDefaultValues`.
 pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -730,7 +740,10 @@ pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Re
             });
         }
     };
-    host.handle_callbacks_once();
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     let param_infos = params
         .info()
@@ -752,8 +765,9 @@ pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Re
         }
     }
 
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }

@@ -10,7 +10,6 @@ use super::PluginTestCase;
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::params::Params;
 use crate::plugin::ext::state::State;
-use crate::plugin::host::Host;
 use crate::plugin::instance::process::{
     AudioBuffers, Event, EventQueue, ProcessConfig, ProcessData,
 };
@@ -28,9 +27,8 @@ const PARAM_DIFF_FILE_NAME: &str = "param-diff.csv";
 
 /// The test for `PluginTestCase::StateInvalidEmpty`.
 pub fn test_state_invalid_empty(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
 
     plugin.init().context("Error during initialization")?;
@@ -44,22 +42,21 @@ pub fn test_state_invalid_empty(library: &PluginLibrary, plugin_id: &str) -> Res
             });
         }
     };
-    host.handle_callbacks_once();
 
-    match state.load(&[]) {
+    let result = state.load(&[]);
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
+
+    match result {
         Ok(_) => Ok(TestStatus::Warning {
             details: Some(String::from(
                 "The plugin returned true when 'clap_plugin_state::load()' was called when an \
                  empty state, this is likely a bug.",
             )),
         }),
-        Err(_) => {
-            host.handle_callbacks_once();
-            host.callback_error_check()
-                .context("An error occured during a host callback")?;
-
-            Ok(TestStatus::Success { details: None })
-        }
+        Err(_) => Ok(TestStatus::Success { details: None }),
     }
 }
 
@@ -67,9 +64,8 @@ pub fn test_state_invalid_empty(library: &PluginLibrary, plugin_id: &str) -> Res
 pub fn test_state_invalid_random(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
 
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
 
     plugin.init().context("Error during initialization")?;
@@ -85,7 +81,9 @@ pub fn test_state_invalid_random(library: &PluginLibrary, plugin_id: &str) -> Re
         }
     };
 
-    host.handle_callbacks_once();
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     let mut random_data = vec![0u8; 1024 * 1024];
     let mut succeeded = false;
@@ -95,9 +93,9 @@ pub fn test_state_invalid_random(library: &PluginLibrary, plugin_id: &str) -> Re
         succeeded |= state.load(&random_data).is_ok();
     }
 
-    host.handle_callbacks_once();
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     match succeeded {
         false => Ok(TestStatus::Success { details: None }),
@@ -124,9 +122,8 @@ pub fn test_state_reproducibility_basic(
 ) -> Result<TestStatus> {
     let mut prng = new_prng();
 
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
 
     // We'll drop and reinitialize the plugin later
@@ -139,6 +136,7 @@ pub fn test_state_reproducibility_basic(
                 .context("Error while querying 'audio-ports' IO configuration")?,
             None => AudioPortConfig::default(),
         };
+
         let params = match plugin.get_extension::<Params>() {
             Some(params) => params,
             None => {
@@ -159,7 +157,10 @@ pub fn test_state_reproducibility_basic(
                 });
             }
         };
-        host.handle_callbacks_once();
+
+        plugin
+            .handle_callback()
+            .context("An error occured during a callback")?;
 
         let param_infos = params
             .info()
@@ -206,7 +207,10 @@ pub fn test_state_reproducibility_basic(
             .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
         let expected_state = state.save()?;
-        host.handle_callbacks_once();
+
+        plugin
+            .handle_callback()
+            .context("An error occured during a callback")?;
 
         (expected_state, expected_param_values)
     };
@@ -218,7 +222,7 @@ pub fn test_state_reproducibility_basic(
     drop(plugin);
 
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance a second time")?;
     plugin
         .init()
@@ -235,6 +239,7 @@ pub fn test_state_reproducibility_basic(
             });
         }
     };
+
     let state = match plugin.get_extension::<State>() {
         Some(state) => state,
         None => {
@@ -245,10 +250,16 @@ pub fn test_state_reproducibility_basic(
             });
         }
     };
-    host.handle_callbacks_once();
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     state.load(&expected_state)?;
-    host.handle_callbacks_once();
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     let actual_param_values: BTreeMap<clap_id, f64> = expected_param_values
         .keys()
@@ -276,10 +287,11 @@ pub fn test_state_reproducibility_basic(
 
     // Now for the moment of truth
     let actual_state = state.save()?;
-    host.handle_callbacks_once();
 
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
+
     if actual_state == expected_state {
         Ok(TestStatus::Success { details: None })
     } else {
@@ -309,9 +321,8 @@ pub fn test_state_reproducibility_flush(
 ) -> Result<TestStatus> {
     let mut prng = new_prng();
 
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
 
     // We'll drop and reinitialize the plugin later. This first pass sets the values using the flush
@@ -341,7 +352,10 @@ pub fn test_state_reproducibility_flush(
                 });
             }
         };
-        host.handle_callbacks_once();
+
+        plugin
+            .handle_callback()
+            .context("An error occured during a callback")?;
 
         let param_infos = params
             .info()
@@ -365,7 +379,10 @@ pub fn test_state_reproducibility_flush(
 
         input_events.add_events(random_param_set_events.clone());
         params.flush(&input_events, &output_events);
-        host.handle_callbacks_once();
+
+        plugin
+            .handle_callback()
+            .context("An error occured during a callback")?;
 
         // We'll compare against these values in that second pass
         let expected_param_values: BTreeMap<clap_id, f64> = param_infos
@@ -373,7 +390,10 @@ pub fn test_state_reproducibility_flush(
             .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
             .collect::<Result<BTreeMap<clap_id, f64>>>()?;
         let expected_state = state.save()?;
-        host.handle_callbacks_once();
+
+        plugin
+            .handle_callback()
+            .context("An error occured during a callback")?;
 
         // Plugins with no parameters at all should of course not trigger this error
         if expected_param_values == initial_param_values && !random_param_set_events.is_empty() {
@@ -395,7 +415,7 @@ pub fn test_state_reproducibility_flush(
     drop(plugin);
 
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance a second time")?;
     plugin
         .init()
@@ -407,6 +427,7 @@ pub fn test_state_reproducibility_flush(
             .context("Error while querying 'audio-ports' IO configuration")?,
         None => AudioPortConfig::default(),
     };
+
     let params = match plugin.get_extension::<Params>() {
         Some(params) => params,
         None => {
@@ -418,6 +439,7 @@ pub fn test_state_reproducibility_flush(
             });
         }
     };
+
     let state = match plugin.get_extension::<State>() {
         Some(state) => state,
         None => {
@@ -428,7 +450,10 @@ pub fn test_state_reproducibility_flush(
             });
         }
     };
-    host.handle_callbacks_once();
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     // NOTE: We can reuse random parameter set events, except that the cookie pointers may be
     //       different if the plugin uses those. So we need to update these cookies first.
@@ -487,10 +512,11 @@ pub fn test_state_reproducibility_flush(
     }
 
     let actual_state = state.save()?;
-    host.handle_callbacks_once();
 
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
+
     if actual_state == expected_state {
         Ok(TestStatus::Success { details: None })
     } else {
@@ -519,9 +545,8 @@ pub fn test_state_reproducibility_flush(
 pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
 
-    let host = Host::new();
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
 
     let (expected_state, expected_param_values) = {
@@ -577,10 +602,13 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
             .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
         // This state file is saved without buffered writes. It's expected that the plugin
-        // implementsq this correctly, so we can check if it handles buffered streams correctly by
+        // implements this correctly, so we can check if it handles buffered streams correctly by
         // treating this as the ground truth.
         let expected_state = state.save()?;
-        host.handle_callbacks_once();
+
+        plugin
+            .handle_callback()
+            .context("An error occured during a callback")?;
 
         (expected_state, expected_param_values)
     };
@@ -590,11 +618,12 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
     drop(plugin);
 
     let plugin = library
-        .create_plugin(plugin_id, host.clone())
+        .create_plugin(plugin_id)
         .context("Could not create the plugin instance a second time")?;
     plugin
         .init()
         .context("Error while initializing the second plugin instance")?;
+
     let params = match plugin.get_extension::<Params>() {
         Some(params) => params,
         None => {
@@ -605,6 +634,7 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
             });
         }
     };
+
     let state = match plugin.get_extension::<State>() {
         Some(state) => state,
         None => {
@@ -615,12 +645,17 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
             });
         }
     };
-    host.handle_callbacks_once();
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     // This is a buffered load that only loads 17 bytes at a time. Why 17? Because.
     const BUFFERED_LOAD_MAX_BYTES: usize = 17;
     state.load_buffered(&expected_state, BUFFERED_LOAD_MAX_BYTES)?;
-    host.handle_callbacks_once();
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     let actual_param_values: BTreeMap<clap_id, f64> = expected_param_values
         .keys()
@@ -645,9 +680,10 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
     // Because we're mean, we'll use a different prime number for the saving
     const BUFFERED_SAVE_MAX_BYTES: usize = 23;
     let actual_state = state.save_buffered(BUFFERED_SAVE_MAX_BYTES)?;
-    host.handle_callbacks_once();
-    host.callback_error_check()
-        .context("An error occured during a host callback")?;
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
 
     if actual_state == expected_state {
         Ok(TestStatus::Success { details: None })

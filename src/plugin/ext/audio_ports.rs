@@ -12,6 +12,8 @@ use std::collections::HashMap;
 use std::ffi::CStr;
 use std::ptr::NonNull;
 
+use crate::plugin::ext::ambisonic::Ambisonic;
+use crate::plugin::ext::surround::Surround;
 use crate::plugin::instance::Plugin;
 use crate::util::unsafe_clap_call;
 
@@ -65,6 +67,9 @@ impl AudioPorts<'_> {
     pub fn config(&self) -> Result<AudioPortConfig> {
         let mut config = AudioPortConfig::default();
 
+        let has_ambisonic = self.plugin.get_extension::<Ambisonic>().is_some();
+        let has_surround = self.plugin.get_extension::<Surround>().is_some();
+
         // TODO: Refactor this to reduce the duplication a little without hurting the human readable error messages
         let audio_ports = self.audio_ports.as_ptr();
         let plugin = self.plugin.as_ptr();
@@ -90,12 +95,14 @@ impl AudioPorts<'_> {
                 );
             }
 
-            is_audio_port_type_consistent(&info).with_context(|| {
-                format!(
-                    "Inconsistent channel count for output port {i} ({num_outputs} total output \
-                     ports)"
-                )
-            })?;
+            is_audio_port_type_consistent(&info, has_ambisonic, has_surround).with_context(
+                || {
+                    format!(
+                        "Inconsistent channel count for output port {i} ({num_outputs} total \
+                         output ports)"
+                    )
+                },
+            )?;
 
             // We'll convert these stable IDs to vector indices later
             if input_stable_index_pairs.contains_key(&info.id) {
@@ -135,12 +142,14 @@ impl AudioPorts<'_> {
                 );
             }
 
-            is_audio_port_type_consistent(&info).with_context(|| {
-                format!(
-                    "Inconsistent channel count for output port {i} ({num_outputs} total output \
-                     ports)"
-                )
-            })?;
+            is_audio_port_type_consistent(&info, has_ambisonic, has_surround).with_context(
+                || {
+                    format!(
+                        "Inconsistent channel count for output port {i} ({num_outputs} total \
+                         output ports)"
+                    )
+                },
+            )?;
 
             if output_stable_index_pairs.contains_key(&info.id) {
                 anyhow::bail!(
@@ -246,7 +255,11 @@ impl AudioPorts<'_> {
 
 /// Check whether the number of channels matches an audio port's type string, if that is set.
 /// Returns an error if the port type is not consistent
-fn is_audio_port_type_consistent(info: &clap_audio_port_info) -> Result<()> {
+fn is_audio_port_type_consistent(
+    info: &clap_audio_port_info,
+    has_ambisonic: bool,
+    has_surround: bool,
+) -> Result<()> {
     if info.port_type.is_null() {
         return Ok(());
     }
@@ -270,11 +283,26 @@ fn is_audio_port_type_consistent(info: &clap_audio_port_info) -> Result<()> {
                 info.channel_count
             );
         }
-    } else if port_type == CLAP_PORT_SURROUND || port_type == CLAP_PORT_AMBISONIC {
-        // TODO: Test the channel counts by querying those extensions
+    } else if port_type == CLAP_PORT_SURROUND {
+        if !has_surround {
+            anyhow::bail!(
+                "Audio port type is 'surround', but the plugin does not implement the 'surround' \
+                 extension."
+            );
+        }
+
+        Ok(())
+    } else if port_type == CLAP_PORT_AMBISONIC {
+        if !has_ambisonic {
+            anyhow::bail!(
+                "Audio port type is 'ambisonic', but the plugin does not implement the \
+                 'ambisonic' extension."
+            );
+        }
+
         Ok(())
     } else {
-        log::debug!("TODO: Unknown audio port type '{port_type:?}'");
+        log::warn!("Unknown audio port type '{port_type:?}'");
         Ok(())
     }
 }

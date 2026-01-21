@@ -295,6 +295,14 @@ fn is_audio_port_type_consistent(
             );
         }
 
+        if info.channel_count.isqrt().pow(2) != info.channel_count {
+            anyhow::bail!(
+                "Expected a perfect square (1, 4, 9, ...) number of channels for ambisonic audio \
+                 port, but the audio port has {} channels.",
+                info.channel_count
+            );
+        }
+
         Ok(())
     } else {
         log::warn!("Unknown audio port type '{port_type:?}'");

@@ -25,9 +25,9 @@ jobs:
       matrix:
         include:
           - { name: ubuntu-22.04,     os: ubuntu-22.04,   cross-target: '' }
-          - { name: macos-12-x86_64,  os: macos-12,       cross-target: '' }
-          - { name: macos-12-aarch64, os: macos-12,       cross-target: aarch64-apple-darwin }
           - { name: windows,          os: windows-latest, cross-target: '' }
+          - { name: macos-15-aarch64, os: macos-15,       cross-target: '' }
+          - { name: macos-15-x86_64,  os: macos-15,       cross-target: x86_64-apple-darwin }
     name: Build binary
     runs-on: ${{ matrix.os }}
     steps:
@@ -92,7 +92,7 @@ jobs:
 
   universal-binary:
     name: Build a universal macOS binary
-    runs-on: macos-12
+    runs-on: macos-15
     needs: package
     steps:
       - uses: actions/checkout@v4

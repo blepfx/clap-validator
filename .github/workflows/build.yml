@@ -101,8 +101,8 @@ jobs:
 
       - name: Determine the previously build archive names
         run: |
-          echo "X86_64_ARCHIVE_NAME=clap-validator-$(git describe --always)-macos-12-x86_64" >> "$GITHUB_ENV"
-          echo "AARCH64_ARCHIVE_NAME=clap-validator-$(git describe --always)-macos-12-aarch64" >> "$GITHUB_ENV"
+          echo "X86_64_ARCHIVE_NAME=clap-validator-$(git describe --always)-macos-15-x86_64" >> "$GITHUB_ENV"
+          echo "AARCH64_ARCHIVE_NAME=clap-validator-$(git describe --always)-macos-15-aarch64" >> "$GITHUB_ENV"
 
       - name: Determine archive name for the universal binary
         run: |

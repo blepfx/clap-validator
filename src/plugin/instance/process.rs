@@ -303,7 +303,8 @@ impl<'a> ProcessData<'a> {
 
                     // Restart processing as necessary
                     if plugin
-                        .state()
+                        .plugin
+                        .state
                         .requested_restart
                         .compare_exchange(true, false)
                         .is_ok()

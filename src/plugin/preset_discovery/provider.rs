@@ -12,7 +12,7 @@ use walkdir::WalkDir;
 use super::indexer::{Indexer, IndexerResults};
 use super::metadata_receiver::{MetadataReceiver, PresetFile};
 use super::{Location, LocationValue, PresetDiscoveryFactory, ProviderMetadata};
-use crate::util::unsafe_clap_call;
+use crate::util::clap_call;
 
 /// A preset discovery provider created from a preset discovery factory. The provider is initialized
 /// and the declared contents are read when the object is created, and the provider is destroyed
@@ -50,13 +50,16 @@ impl<'a> Provider<'a> {
             CString::new(provider_id).expect("The provider ID contained internal null bytes");
         let provider = {
             let factory = factory.as_ptr();
-            let provider = unsafe_clap_call! {
-                factory=>create(
-                    factory,
-                    indexer.clap_preset_discovery_indexer_ptr(),
-                    provider_id_cstring.as_ptr()
-                )
+            let provider = unsafe {
+                clap_call! {
+                    factory=>create(
+                        factory,
+                        indexer.clap_preset_discovery_indexer_ptr(),
+                        provider_id_cstring.as_ptr()
+                    )
+                }
             };
+
             match NonNull::new(provider as *mut clap_preset_discovery_provider) {
                 Some(provider) => provider,
                 None => anyhow::bail!(
@@ -68,7 +71,11 @@ impl<'a> Provider<'a> {
 
         let declared_data = {
             let provider = provider.as_ptr();
-            if !unsafe_clap_call! { provider=>init(provider) } {
+            let result = unsafe {
+                clap_call! { provider=>init(provider) }
+            };
+
+            if !result {
                 anyhow::bail!(
                     "'clap_preset_discovery_factory::init()' returned false for the provider with \
                      ID '{provider_id}'."
@@ -146,14 +153,17 @@ impl<'a> Provider<'a> {
                     MetadataReceiver::new(&mut result, &location, location_flags);
 
                 let provider = self.as_ptr();
-                let success = unsafe_clap_call! {
-                    provider=>get_metadata(
-                        provider,
-                        location_kind,
-                        location_ptr,
-                        metadata_receiver.clap_preset_discovery_metadata_receiver_ptr()
-                    )
+                let success = unsafe {
+                    clap_call! {
+                        provider=>get_metadata(
+                            provider,
+                            location_kind,
+                            location_ptr,
+                            metadata_receiver.clap_preset_discovery_metadata_receiver_ptr()
+                        )
+                    }
                 };
+
                 if !success {
                     // TODO: Is the plugin allowed to return false here? If it doesn't have any
                     //       presets it should just not declare any, right?

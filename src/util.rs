@@ -8,8 +8,6 @@ use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::path::PathBuf;
 
-// TODO: Remove these attributes once we start implementing host interfaces
-
 /// Assert that the specified pointers are non-null. Panics if this is not the case.
 macro_rules! check_null_ptr {
     ($ptr:expr) => {
@@ -41,14 +39,7 @@ macro_rules! clap_call {
     }
 }
 
-/// [`clap_call!()`], wrapped in an unsafe block.
-macro_rules! unsafe_clap_call {
-    { $($args:tt)* } => {
-        unsafe { $crate::util::clap_call! { $($args)* } }
-    }
-}
-
-pub(crate) use {check_null_ptr, clap_call, unsafe_clap_call};
+pub(crate) use {check_null_ptr, clap_call};
 
 /// Similar to, [`std::any::type_name_of_val()`], but on stable Rust, and stripping away the pointer
 /// part.

@@ -5,11 +5,10 @@ use clap_sys::ext::preset_load::{CLAP_EXT_PRESET_LOAD, clap_plugin_preset_load};
 use std::ffi::{CStr, CString};
 use std::ptr::NonNull;
 
+use super::Extension;
 use crate::plugin::instance::Plugin;
 use crate::plugin::preset_discovery::LocationValue;
-use crate::util::unsafe_clap_call;
-
-use super::Extension;
+use crate::util::clap_call;
 
 /// Abstraction for the `preset-load` extension covering the main thread functionality.
 pub struct PresetLoad<'a> {
@@ -47,17 +46,20 @@ impl PresetLoad<'_> {
 
         let preset_load = self.preset_load.as_ptr();
         let plugin = self.plugin.as_ptr();
-        let success = unsafe_clap_call! {
-            preset_load=>from_location(
-                plugin,
-                location_kind,
-                location_ptr,
-                match load_key_cstring.as_ref() {
-                    Some(load_key_cstring) => load_key_cstring.as_ptr(),
-                    None => std::ptr::null(),
-                }
-            )
+        let success = unsafe {
+            clap_call! {
+                preset_load=>from_location(
+                    plugin,
+                    location_kind,
+                    location_ptr,
+                    match load_key_cstring.as_ref() {
+                        Some(load_key_cstring) => load_key_cstring.as_ptr(),
+                        None => std::ptr::null(),
+                    }
+                )
+            }
         };
+
         if success {
             Ok(())
         } else {

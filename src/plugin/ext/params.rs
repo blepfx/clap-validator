@@ -21,7 +21,7 @@ use std::ptr::NonNull;
 use super::Extension;
 use crate::plugin::instance::process::EventQueue;
 use crate::plugin::instance::{Plugin, PluginStatus};
-use crate::util::{self, c_char_slice_to_string, unsafe_clap_call};
+use crate::util::{self, c_char_slice_to_string, clap_call};
 
 pub type ParamInfo = BTreeMap<clap_id, Param>;
 
@@ -73,7 +73,11 @@ impl Params<'_> {
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();
         let mut value = 0.0f64;
-        if unsafe_clap_call! { params=>get_value(plugin, param_id, &mut value) } {
+        let result = unsafe {
+            clap_call! { params=>get_value(plugin, param_id, &mut value) }
+        };
+
+        if result {
             Ok(value)
         } else {
             anyhow::bail!(
@@ -89,15 +93,19 @@ impl Params<'_> {
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();
         let mut string_buffer = [0; CLAP_NAME_SIZE];
-        if unsafe_clap_call! {
-            params=>value_to_text(
-                plugin,
-                param_id,
-                value,
-                string_buffer.as_mut_ptr(),
-                string_buffer.len() as u32,
-            )
-        } {
+        let result = unsafe {
+            clap_call! {
+                params=>value_to_text(
+                    plugin,
+                    param_id,
+                    value,
+                    string_buffer.as_mut_ptr(),
+                    string_buffer.len() as u32,
+                )
+            }
+        };
+
+        if result {
             c_char_slice_to_string(&string_buffer)
                 .map(Some)
                 .with_context(|| {
@@ -119,18 +127,18 @@ impl Params<'_> {
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();
         let mut value = 0.0f64;
-        if unsafe_clap_call! {
-            params=>text_to_value(
-                plugin,
-                param_id,
-                text_cstring.as_ptr(),
-                &mut value,
-            )
-        } {
-            Ok(Some(value))
-        } else {
-            Ok(None)
-        }
+        let result = unsafe {
+            clap_call! {
+                params=>text_to_value(
+                    plugin,
+                    param_id,
+                    text_cstring.as_ptr(),
+                    &mut value,
+                )
+            }
+        };
+
+        if result { Ok(Some(value)) } else { Ok(None) }
     }
 
     /// Get information about all of the plugin's parameters. Returns an error if the plugin's
@@ -142,13 +150,18 @@ impl Params<'_> {
 
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();
-        let num_params = unsafe_clap_call! { params=>count(plugin) };
+        let num_params = unsafe {
+            clap_call! { params=>count(plugin) }
+        };
 
         // Right now this is only used to make sure the plugin doesn't have multiple bypass parameters
         let mut bypass_parameter_id = None;
         for i in 0..num_params {
             let mut info: clap_param_info = unsafe { std::mem::zeroed() };
-            let success = unsafe_clap_call! { params=>get_info(plugin, i, &mut info) };
+            let success = unsafe {
+                clap_call! { params=>get_info(plugin, i, &mut info) }
+            };
+
             if !success {
                 anyhow::bail!(
                     "Plugin returned an error when querying parameter {i} ({num_params} total \
@@ -334,13 +347,15 @@ impl Params<'_> {
 
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();
-        unsafe_clap_call! {
-            params=>flush(
-                plugin,
-                input_events.vtable_input(),
-                output_events.vtable_output(),
-            )
-        };
+        unsafe {
+            clap_call! {
+                params=>flush(
+                    plugin,
+                    input_events.vtable_input(),
+                    output_events.vtable_output(),
+                )
+            };
+        }
     }
 }
 

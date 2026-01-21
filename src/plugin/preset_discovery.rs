@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::ptr::NonNull;
 
 use super::library::PluginLibrary;
-use crate::util::{self, unsafe_clap_call};
+use crate::util::{self, clap_call};
 
 mod indexer;
 mod metadata_receiver;
@@ -101,11 +101,16 @@ impl<'lib> PresetDiscoveryFactory<'lib> {
     /// [`create()`][Self::create()].
     pub fn metadata(&self) -> Result<Vec<ProviderMetadata>> {
         let factory = self.as_ptr();
-        let num_providers = unsafe_clap_call! { factory=>count(factory) };
+        let num_providers = unsafe {
+            clap_call! { factory=>count(factory) }
+        };
 
         let mut metadata = Vec::with_capacity(num_providers as usize);
         for i in 0..num_providers {
-            let descriptor = unsafe_clap_call! { factory=>get_descriptor(factory, i) };
+            let descriptor = unsafe {
+                clap_call! { factory=>get_descriptor(factory, i) }
+            };
+
             if descriptor.is_null() {
                 anyhow::bail!(
                     "The preset discovery factory returned a null pointer for the descriptor at \

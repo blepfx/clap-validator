@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::Extension;
 use crate::plugin::instance::Plugin;
-use crate::util::{check_null_ptr, unsafe_clap_call};
+use crate::util::{check_null_ptr, clap_call};
 
 /// Abstraction for the `state` extension covering the main thread functionality.
 pub struct State<'a> {
@@ -71,7 +71,11 @@ impl State<'_> {
 
         let state = self.state.as_ptr();
         let plugin = self.plugin.as_ptr();
-        if unsafe_clap_call! { state=>save(plugin, &stream.vtable) } {
+        let result = unsafe {
+            clap_call! { state=>save(plugin, &stream.vtable) }
+        };
+
+        if result {
             Ok(stream.into_vec())
         } else {
             anyhow::bail!("'clap_plugin_state::save()' returned false.");
@@ -85,7 +89,11 @@ impl State<'_> {
 
         let state = self.state.as_ptr();
         let plugin = self.plugin.as_ptr();
-        if unsafe_clap_call! { state=>save(plugin, stream.vtable()) } {
+        let result = unsafe {
+            clap_call! { state=>save(plugin, stream.vtable()) }
+        };
+
+        if result {
             Ok(stream.into_vec())
         } else {
             anyhow::bail!(
@@ -101,7 +109,11 @@ impl State<'_> {
 
         let state = self.state.as_ptr();
         let plugin = self.plugin.as_ptr();
-        if unsafe_clap_call! { state=>load(plugin, stream.vtable()) } {
+        let result = unsafe {
+            clap_call! { state=>load(plugin, stream.vtable()) }
+        };
+
+        if result {
             Ok(())
         } else {
             anyhow::bail!("'clap_plugin_state::load()' returned false.");
@@ -115,7 +127,11 @@ impl State<'_> {
 
         let state = self.state.as_ptr();
         let plugin = self.plugin.as_ptr();
-        if unsafe_clap_call! { state=>load(plugin, &stream.vtable) } {
+        let result = unsafe {
+            clap_call! { state=>load(plugin, &stream.vtable) }
+        };
+
+        if result {
             Ok(())
         } else {
             anyhow::bail!(

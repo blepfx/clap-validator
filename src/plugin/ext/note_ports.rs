@@ -2,7 +2,7 @@
 
 use super::Extension;
 use crate::plugin::instance::Plugin;
-use crate::util::unsafe_clap_call;
+use crate::util::clap_call;
 use anyhow::Result;
 use clap_sys::ext::note_ports::{
     CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI,
@@ -60,8 +60,12 @@ impl NotePorts<'_> {
 
         let note_ports = self.note_ports.as_ptr();
         let plugin = self.plugin.as_ptr();
-        let num_inputs = unsafe_clap_call! { note_ports=>count(plugin, true) };
-        let num_outputs = unsafe_clap_call! { note_ports=>count(plugin, false) };
+        let num_inputs = unsafe {
+            clap_call! { note_ports=>count(plugin, true) }
+        };
+        let num_outputs = unsafe {
+            clap_call! { note_ports=>count(plugin, false) }
+        };
 
         // We don't need the port's stable IDs, but we'll still verify that they're unique
         let mut input_stable_indices: HashSet<u32> = HashSet::new();
@@ -69,7 +73,9 @@ impl NotePorts<'_> {
 
         for i in 0..num_inputs {
             let mut info: clap_note_port_info = unsafe { std::mem::zeroed() };
-            let success = unsafe_clap_call! { note_ports=>get(plugin, i, true, &mut info) };
+            let success = unsafe {
+                clap_call! { note_ports=>get(plugin, i, true, &mut info) }
+            };
             if !success {
                 anyhow::bail!(
                     "Plugin returned an error when querying input note port {i} ({num_inputs} \
@@ -111,7 +117,9 @@ impl NotePorts<'_> {
 
         for i in 0..num_outputs {
             let mut info: clap_note_port_info = unsafe { std::mem::zeroed() };
-            let success = unsafe_clap_call! { note_ports=>get(plugin, i, false, &mut info) };
+            let success = unsafe {
+                clap_call! { note_ports=>get(plugin, i, false, &mut info) }
+            };
             if !success {
                 anyhow::bail!(
                     "Plugin returned an error when querying output note port {i} ({num_outputs} \

@@ -732,12 +732,12 @@ fn generate_param_diff(
                 .value_to_text(param_id, actual_value)
                 .ok()
                 .flatten()
-                .unwrap_or("<unrepresentable>".to_string());
+                .unwrap_or("<error>".to_string());
             let string_expected = params
                 .value_to_text(param_id, expected_value)
                 .ok()
                 .flatten()
-                .unwrap_or("<unrepresentable>".to_string());
+                .unwrap_or("<error>".to_string());
 
             Some(format!(
                 "{}, {:?}, {:?}, {:.4}, {:?}, {:.4}",

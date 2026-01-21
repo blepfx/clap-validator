@@ -2,7 +2,7 @@
 
 use super::instance::Plugin;
 use super::preset_discovery::PresetDiscoveryFactory;
-use crate::util::{self, unsafe_clap_call};
+use crate::util::{self, clap_call};
 use anyhow::{Context, Result};
 use clap_sys::entry::clap_plugin_entry;
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
@@ -81,7 +81,10 @@ impl Drop for PluginLibrary {
         // plugin here
         let entry_point = get_clap_entry_point(&self.library)
             .expect("A Plugin was constructed for a plugin with no entry point");
-        unsafe_clap_call! { entry_point=>deinit() };
+
+        unsafe {
+            clap_call! { entry_point=>deinit() };
+        }
     }
 }
 
@@ -142,7 +145,11 @@ impl PluginLibrary {
         // The entry point needs to be initialized before it can be used. It will be deinitialized
         // when the `Plugin` object is dropped.
         let entry_point = get_clap_entry_point(&library)?;
-        if !unsafe_clap_call! { entry_point=>init(path_cstring.as_ptr()) } {
+        let result = unsafe {
+            clap_call! { entry_point=>init(path_cstring.as_ptr()) }
+        };
+
+        if !result {
             anyhow::bail!("'clap_plugin_entry::init({path_cstring:?})' returned false.");
         }
 
@@ -161,8 +168,9 @@ impl PluginLibrary {
     pub fn metadata(&self) -> Result<PluginLibraryMetadata> {
         let entry_point = get_clap_entry_point(&self.library)
             .expect("A Plugin was constructed for a plugin with no entry point");
-        let plugin_factory = unsafe_clap_call! { entry_point=>get_factory(CLAP_PLUGIN_FACTORY_ID.as_ptr()) }
-            as *const clap_plugin_factory;
+        let plugin_factory = unsafe {
+            clap_call! { entry_point=>get_factory(CLAP_PLUGIN_FACTORY_ID.as_ptr()) }
+        } as *const clap_plugin_factory;
 
         let mut metadata = PluginLibraryMetadata {
             version: (
@@ -177,10 +185,15 @@ impl PluginLibrary {
             return Ok(metadata);
         }
 
-        let num_plugins = unsafe_clap_call! { plugin_factory=>get_plugin_count(plugin_factory) };
+        let num_plugins = unsafe {
+            clap_call! { plugin_factory=>get_plugin_count(plugin_factory) }
+        };
+
         for i in 0..num_plugins {
-            let descriptor =
-                unsafe_clap_call! { plugin_factory=>get_plugin_descriptor(plugin_factory, i) };
+            let descriptor = unsafe {
+                clap_call! { plugin_factory=>get_plugin_descriptor(plugin_factory, i) }
+            };
+
             if descriptor.is_null() {
                 anyhow::bail!(
                     "The plugin returned a null plugin descriptor for plugin index {i} (expected \
@@ -215,8 +228,9 @@ impl PluginLibrary {
 
         let entry_point = get_clap_entry_point(&self.library)
             .expect("A Plugin was constructed for a plugin with no entry point");
-        let factory_pointer =
-            unsafe_clap_call! { entry_point=>get_factory(factory_id_cstring.as_ptr()) };
+        let factory_pointer = unsafe {
+            clap_call! { entry_point=>get_factory(factory_id_cstring.as_ptr()) }
+        };
 
         !factory_pointer.is_null()
     }
@@ -228,8 +242,11 @@ impl PluginLibrary {
     pub fn create_plugin(&self, id: &str) -> Result<Plugin<'_>> {
         let entry_point = get_clap_entry_point(&self.library)
             .expect("A Plugin was constructed for a plugin with no entry point");
-        let plugin_factory = unsafe_clap_call! { entry_point=>get_factory(CLAP_PLUGIN_FACTORY_ID.as_ptr()) }
-            as *const clap_plugin_factory;
+
+        let plugin_factory = unsafe {
+            clap_call! { entry_point=>get_factory(CLAP_PLUGIN_FACTORY_ID.as_ptr()) }
+        } as *const clap_plugin_factory;
+
         if plugin_factory.is_null() {
             anyhow::bail!(
                 "The plugin does not support the '{}' factory.",
@@ -245,8 +262,10 @@ impl PluginLibrary {
     pub fn preset_discovery_factory(&self) -> Result<PresetDiscoveryFactory<'_>> {
         let entry_point = get_clap_entry_point(&self.library)
             .expect("A Plugin was constructed for a plugin with no entry point");
-        let preset_discovery_factory = unsafe_clap_call! {
-            entry_point=>get_factory(CLAP_PRESET_DISCOVERY_FACTORY_ID.as_ptr())
+        let preset_discovery_factory = unsafe {
+            clap_call! {
+                entry_point=>get_factory(CLAP_PRESET_DISCOVERY_FACTORY_ID.as_ptr())
+            }
         } as *mut clap_preset_discovery_factory;
 
         match NonNull::new(preset_discovery_factory) {

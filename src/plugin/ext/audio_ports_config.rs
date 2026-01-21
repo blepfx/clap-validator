@@ -1,6 +1,6 @@
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
-use crate::util::{c_char_slice_to_string, clap_call, unsafe_clap_call};
+use crate::util::{c_char_slice_to_string, clap_call};
 use anyhow::Result;
 use clap_sys::ext::audio_ports_config::{
     CLAP_EXT_AUDIO_PORTS_CONFIG, CLAP_EXT_AUDIO_PORTS_CONFIG_INFO,
@@ -68,7 +68,9 @@ impl AudioPortsConfig<'_> {
     pub fn enumerate(&self) -> Result<Vec<AudioPortsConfigConfig>> {
         let audio_ports_config = self.audio_ports_config.as_ptr();
         let plugin = self.plugin.as_ptr();
-        let count = unsafe_clap_call! { audio_ports_config=>count(plugin) };
+        let count = unsafe {
+            clap_call! { audio_ports_config=>count(plugin) }
+        };
 
         (0..count)
             .map(|i| unsafe {
@@ -97,7 +99,10 @@ impl AudioPortsConfig<'_> {
     pub fn select(&self, config_id: clap_id) -> Result<()> {
         let audio_ports_config = self.audio_ports_config.as_ptr();
         let plugin = self.plugin.as_ptr();
-        let result = unsafe_clap_call! { audio_ports_config=>select(plugin, config_id) };
+        let result = unsafe {
+            clap_call! { audio_ports_config=>select(plugin, config_id) }
+        };
+
         if !result {
             anyhow::bail!("audio_ports_config::select() returned false");
         }
@@ -110,7 +115,10 @@ impl AudioPortsConfigInfo<'_> {
     pub fn current(&self) -> clap_id {
         let audio_ports_config_info = self.audio_ports_config_info.as_ptr();
         let plugin = self.plugin.as_ptr();
-        unsafe_clap_call! { audio_ports_config_info=>current_config(plugin) }
+
+        unsafe {
+            clap_call! { audio_ports_config_info=>current_config(plugin) }
+        }
     }
 
     // TODO:

@@ -1,6 +1,6 @@
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
-use crate::util::unsafe_clap_call;
+use crate::util::clap_call;
 use clap_sys::ext::audio_ports::{CLAP_PORT_MONO, CLAP_PORT_STEREO};
 use clap_sys::ext::configurable_audio_ports::{
     CLAP_EXT_CONFIGURABLE_AUDIO_PORTS, CLAP_EXT_CONFIGURABLE_AUDIO_PORTS_COMPAT,
@@ -63,11 +63,13 @@ impl<'a> ConfigurableAudioPorts<'a> {
         let plugin = self.plugin.as_ptr();
         let ext = self.configurable_audio_ports.as_ptr();
 
-        unsafe_clap_call! { ext=>can_apply_configuration(
-            plugin,
-            requests.as_ptr(),
-            requests.len() as u32
-        )}
+        unsafe {
+            clap_call! { ext=>can_apply_configuration(
+                plugin,
+                requests.as_ptr(),
+                requests.len() as u32
+            )}
+        }
     }
 
     pub fn apply_configuration(
@@ -94,10 +96,12 @@ impl<'a> ConfigurableAudioPorts<'a> {
         let plugin = self.plugin.as_ptr();
         let ext = self.configurable_audio_ports.as_ptr();
 
-        unsafe_clap_call! { ext=>apply_configuration(
-            plugin,
-            requests.as_ptr(),
-            requests.len() as u32
-        )}
+        unsafe {
+            clap_call! { ext=>apply_configuration(
+                plugin,
+                requests.as_ptr(),
+                requests.len() as u32
+            )}
+        }
     }
 }

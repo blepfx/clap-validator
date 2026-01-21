@@ -3,7 +3,7 @@
 use super::ext::Extension;
 use super::library::{PluginLibrary, PluginMetadata};
 use crate::plugin::preset_discovery::LocationValue;
-use crate::util::{self, check_null_ptr, unsafe_clap_call};
+use crate::util::{self, check_null_ptr, clap_call};
 use anyhow::{Context, Result};
 use audio_thread::PluginAudioThread;
 use clap_sys::ext::audio_ports::{
@@ -32,12 +32,12 @@ use clap_sys::plugin::clap_plugin;
 use clap_sys::version::CLAP_VERSION;
 use crossbeam::atomic::AtomicCell;
 use crossbeam::queue::SegQueue;
-use std::ffi::{CStr, c_char, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::marker::PhantomData;
 use std::panic::resume_unwind;
 use std::pin::Pin;
 use std::ptr::NonNull;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::thread::ThreadId;
 
 pub mod audio_thread;
@@ -166,10 +166,12 @@ impl Drop for Plugin<'_> {
             ),
         }
 
-        // TODO: We can't handle host callbacks that happen in between these two functions, but the
-        //       plugin really shouldn't be making callbacks in deactivate()
+        self.handle_callback_unchecked();
+
         let plugin = self.as_ptr();
-        unsafe_clap_call! { plugin=>destroy(plugin) };
+        unsafe {
+            clap_call! { plugin=>destroy(plugin) }
+        }
     }
 }
 
@@ -177,14 +179,16 @@ impl<'lib> Plugin<'lib> {
     /// Create a plugin instance and return the still uninitialized plugin. Returns an error if the
     /// plugin could not be created. The plugin instance will be registered with the host, and
     /// unregistered when this object is dropped again.
-    pub fn new(
+    pub(crate) fn new(
         library: &'lib PluginLibrary,
         factory: &clap_plugin_factory,
         plugin_id: &CStr,
     ) -> Result<Self> {
         let state = InstanceState::new();
-        let plugin = unsafe_clap_call! {
-            factory=>create_plugin(factory, state.clap_host_ptr(), plugin_id.as_ptr())
+        let plugin = unsafe {
+            clap_call! {
+                factory=>create_plugin(factory, state.clap_host_ptr(), plugin_id.as_ptr())
+            }
         };
 
         if plugin.is_null() {
@@ -219,11 +223,6 @@ impl<'lib> Plugin<'lib> {
         PluginMetadata::from_descriptor(unsafe { &*descriptor })
     }
 
-    /// Get the reference to a thread-safe object containing information about this plugin instance.
-    pub fn state(&self) -> &InstanceState {
-        &self.state
-    }
-
     /// The plugin's current initialization status.
     pub fn status(&self) -> PluginStatus {
         self.state.status.load()
@@ -232,13 +231,14 @@ impl<'lib> Plugin<'lib> {
     /// Handle any pending main-thread callbacks for this plugin.
     /// Returns an error if there is a callback error pending.
     pub fn handle_callback(&self) -> Result<()> {
-        if self.state.requested_callback.swap(false) {
-            let plugin = self.as_ptr();
-            unsafe_clap_call! { plugin=>on_main_thread(plugin) };
-        }
+        self.handle_callback_unchecked();
 
         if let Some(error) = self.state.callback_error.take() {
             anyhow::bail!(error);
+        }
+
+        while let Some(event) = self.state.callback_events.pop() {
+            println!("{:?}", event);
         }
 
         Ok(())
@@ -252,7 +252,9 @@ impl<'lib> Plugin<'lib> {
 
         let plugin = self.as_ptr();
         for id in T::IDS {
-            let extension_ptr = unsafe_clap_call! { plugin=>get_extension(plugin, id.as_ptr()) };
+            let extension_ptr = unsafe {
+                clap_call! { plugin=>get_extension(plugin, id.as_ptr()) }
+            };
 
             if !extension_ptr.is_null() {
                 return unsafe {
@@ -326,13 +328,11 @@ impl<'lib> Plugin<'lib> {
 
             // Handle callbacks requests on the main thread while the audio thread is running
             while is_running.load() {
-                if self.state.requested_callback.swap(false) {
-                    let plugin = self.as_ptr();
-                    unsafe_clap_call! { plugin=>on_main_thread(plugin) };
-                }
-
-                std::thread::sleep(std::time::Duration::from_millis(1));
+                self.handle_callback_unchecked();
+                std::thread::sleep(std::time::Duration::from_millis(5));
             }
+
+            self.handle_callback_unchecked();
 
             audio_thread
                 .join()
@@ -346,7 +346,11 @@ impl<'lib> Plugin<'lib> {
         self.status().assert_is(PluginStatus::Uninitialized);
 
         let plugin = self.as_ptr();
-        if unsafe_clap_call! { plugin=>init(plugin) } {
+        let result = unsafe {
+            clap_call! { plugin=>init(plugin) }
+        };
+
+        if result {
             // If the plugin never calls `request_callback`, the validator won't catch this
             anyhow::ensure!(
                 unsafe { (*plugin).on_main_thread.is_some() },
@@ -379,9 +383,11 @@ impl<'lib> Plugin<'lib> {
         self.state.status.store(PluginStatus::Activating);
 
         let plugin = self.as_ptr();
-        if unsafe_clap_call! {
-            plugin=>activate(plugin, sample_rate, min_buffer_size as u32, max_buffer_size as u32)
-        } {
+        let result = unsafe {
+            clap_call! { plugin=>activate(plugin, sample_rate, min_buffer_size as u32, max_buffer_size as u32) }
+        };
+
+        if result {
             self.state.status.store(PluginStatus::Activated);
             Ok(())
         } else {
@@ -397,16 +403,27 @@ impl<'lib> Plugin<'lib> {
         self.status().assert_is(PluginStatus::Activated);
 
         let plugin = self.as_ptr();
-        unsafe_clap_call! { plugin=>deactivate(plugin) };
+        unsafe {
+            clap_call! { plugin=>deactivate(plugin) }
+        }
 
         self.state.status.store(PluginStatus::Deactivated);
+    }
+
+    fn handle_callback_unchecked(&self) {
+        if self.state.requested_callback.swap(false) {
+            let plugin = self.as_ptr();
+            unsafe {
+                clap_call! { plugin=>on_main_thread(plugin) }
+            };
+        }
     }
 }
 
 /// Runtime information about a plugin instance. This keeps track of pending callbacks and things
 /// like audio threads. It also contains the plugin's unique `clap_host` struct so host callbacks
 /// can be linked back to this specific plugin instance.
-pub struct InstanceState {
+struct InstanceState {
     pub callback_events: SegQueue<CallbackEvent>,
     pub callback_error: AtomicCell<Option<String>>,
 
@@ -441,6 +458,8 @@ pub struct InstanceState {
 
 impl InstanceState {
     pub fn new() -> Pin<Arc<Self>> {
+        static VERSION: OnceLock<CString> = OnceLock::new();
+
         let main_thread = std::thread::current().id();
         let instance = Arc::pin(InstanceState {
             callback_events: SegQueue::new(),
@@ -459,7 +478,9 @@ impl InstanceState {
                 name: c"clap-validator".as_ptr(),
                 vendor: c"Robbert van der Helm".as_ptr(),
                 url: c"https://github.com/free-audio/clap-validator".as_ptr(),
-                version: c"0.1.0".as_ptr(), //TODO: use crate version
+                version: VERSION
+                    .get_or_init(|| CString::new(env!("CARGO_PKG_VERSION")).unwrap())
+                    .as_ptr(),
                 get_extension: Some(Self::get_extension),
                 request_restart: Some(Self::request_restart),
                 request_process: Some(Self::request_process),

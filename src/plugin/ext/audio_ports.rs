@@ -1,5 +1,10 @@
 //! Abstractions for interacting with the `audio-ports` extension.
 
+use super::Extension;
+use crate::plugin::ext::ambisonic::Ambisonic;
+use crate::plugin::ext::surround::Surround;
+use crate::plugin::instance::Plugin;
+use crate::util::clap_call;
 use anyhow::{Context, Result};
 use clap_sys::ext::ambisonic::CLAP_PORT_AMBISONIC;
 use clap_sys::ext::audio_ports::{
@@ -11,13 +16,6 @@ use clap_sys::id::CLAP_INVALID_ID;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::ptr::NonNull;
-
-use crate::plugin::ext::ambisonic::Ambisonic;
-use crate::plugin::ext::surround::Surround;
-use crate::plugin::instance::Plugin;
-use crate::util::unsafe_clap_call;
-
-use super::Extension;
 
 /// Abstraction for the `audio-ports` extension covering the main thread functionality.
 pub struct AudioPorts<'a> {
@@ -72,8 +70,12 @@ impl AudioPorts<'_> {
         // TODO: Refactor this to reduce the duplication a little without hurting the human readable error messages
         let audio_ports = self.audio_ports.as_ptr();
         let plugin = self.plugin.as_ptr();
-        let num_inputs = unsafe_clap_call! { audio_ports=>count(plugin, true) };
-        let num_outputs = unsafe_clap_call! { audio_ports=>count(plugin, false) };
+        let num_inputs = unsafe {
+            clap_call! { audio_ports=>count(plugin, true) }
+        };
+        let num_outputs = unsafe {
+            clap_call! { audio_ports=>count(plugin, false) }
+        };
 
         // Audio ports have a stable ID attribute that can be used to connect input and output ports
         // so the host can do in-place processing. This uses stable IDs rather than the indices in
@@ -86,7 +88,10 @@ impl AudioPorts<'_> {
 
         for i in 0..num_inputs {
             let mut info: clap_audio_port_info = unsafe { std::mem::zeroed() };
-            let success = unsafe_clap_call! { audio_ports=>get(plugin, i, true, &mut info) };
+            let success = unsafe {
+                clap_call! { audio_ports=>get(plugin, i, true, &mut info) }
+            };
+
             if !success {
                 anyhow::bail!(
                     "Plugin returned an error when querying input audio port {i} ({num_inputs} \
@@ -94,14 +99,8 @@ impl AudioPorts<'_> {
                 );
             }
 
-            is_audio_port_type_consistent(&info, has_ambisonic, has_surround).with_context(
-                || {
-                    format!(
-                        "Inconsistent channel count for output port {i} ({num_outputs} total \
-                         output ports)"
-                    )
-                },
-            )?;
+            is_audio_port_type_consistent(&info, has_ambisonic, has_surround)
+                .with_context(|| format!("Inconsistent type for output port {i}"))?;
 
             // We'll convert these stable IDs to vector indices later
             if input_stable_index_pairs.contains_key(&info.id) {
@@ -133,7 +132,10 @@ impl AudioPorts<'_> {
 
         for i in 0..num_outputs {
             let mut info: clap_audio_port_info = unsafe { std::mem::zeroed() };
-            let success = unsafe_clap_call! { audio_ports=>get(plugin, i, false, &mut info) };
+            let success = unsafe {
+                clap_call! { audio_ports=>get(plugin, i, false, &mut info) }
+            };
+
             if !success {
                 anyhow::bail!(
                     "Plugin returned an error when querying output audio port {i} ({num_outputs} \
@@ -141,14 +143,8 @@ impl AudioPorts<'_> {
                 );
             }
 
-            is_audio_port_type_consistent(&info, has_ambisonic, has_surround).with_context(
-                || {
-                    format!(
-                        "Inconsistent channel count for output port {i} ({num_outputs} total \
-                         output ports)"
-                    )
-                },
-            )?;
+            is_audio_port_type_consistent(&info, has_ambisonic, has_surround)
+                .with_context(|| format!("Inconsistent channel count for output port {i}"))?;
 
             if output_stable_index_pairs.contains_key(&info.id) {
                 anyhow::bail!(

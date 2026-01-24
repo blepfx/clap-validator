@@ -292,7 +292,7 @@ pub fn test_layout_configurable_audio_ports(
     let mut checks_total = 0;
     let mut checks_passed = 0;
 
-    while checks_total < 100 && checks_passed < 10 {
+    while checks_total < 200 && checks_passed < 20 {
         let requests = random_layout_requests(&mut prng, &config_audio_ports);
         let can_apply = configurable_audio_ports.can_apply_configuration(requests.iter().cloned());
         let has_applied = configurable_audio_ports.apply_configuration(requests.iter().cloned());
@@ -344,6 +344,14 @@ pub fn test_layout_configurable_audio_ports(
     plugin
         .handle_callback()
         .context("An error occured during a callback")?;
+
+    if checks_passed == 0 {
+        return Ok(TestStatus::Skipped {
+            details: Some(String::from(
+                "Tried 200 random audio port layouts, but none was accepted.",
+            )),
+        });
+    }
 
     Ok(TestStatus::Success { details: None })
 }

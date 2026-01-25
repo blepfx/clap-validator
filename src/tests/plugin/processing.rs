@@ -455,6 +455,14 @@ pub fn test_process_audio_constant_mask(
         }
     };
 
+    if audio_ports_config.inputs.is_empty() {
+        return Ok(TestStatus::Skipped {
+            details: Some(String::from(
+                "The plugin does not have any audio input ports.",
+            )),
+        });
+    }
+
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
     let mut original_buffers = audio_buffers.clone();
     let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());

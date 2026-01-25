@@ -106,6 +106,55 @@ pub fn test_process_audio_basic(
     Ok(TestStatus::Success { details: None })
 }
 
+// The test for `PluginTestCase::ProcessAudioOutOfPlaceDouble`.
+pub fn test_process_audio_double(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+    let mut prng = new_prng();
+
+    let plugin = library
+        .create_plugin(plugin_id)
+        .context("Could not create the plugin instance")?;
+    plugin.init().context("Error during initialization")?;
+
+    let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
+        Some(audio_ports) => audio_ports
+            .config()
+            .context("Error while querying 'audio-ports' IO configuration")?,
+        None => {
+            return Ok(TestStatus::Skipped {
+                details: Some(String::from(
+                    "The plugin does not implement the 'audio-ports' extension.",
+                )),
+            });
+        }
+    };
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
+
+    let Some(mut audio_buffers) =
+        AudioBuffers::new_out_of_place_f64(&audio_ports_config, BUFFER_SIZE)
+    else {
+        return Ok(TestStatus::Skipped {
+            details: Some(String::from(
+                "The plugin does not support 64-bit floating point audio.",
+            )),
+        });
+    };
+
+    let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
+    run_simple(&plugin, &mut process_data, 5, |process_data| {
+        process_data.buffers.randomize(&mut prng);
+        Ok(())
+    })?;
+
+    plugin
+        .handle_callback()
+        .context("An error occured during a callback")?;
+
+    Ok(TestStatus::Success { details: None })
+}
+
 /// The test for `PluginTestCase::ProcessNoteOutOfPlaceBasic` and `PluginTestCase::ProcessNoteInconsistent`. This test is very similar to
 /// `ProcessAudioOutOfPlaceBasic`, but it requires the `note-ports` extension, sends notes and/or
 /// MIDI to the plugin, and doesn't require the `audio-ports` extension.

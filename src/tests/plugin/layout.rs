@@ -346,7 +346,7 @@ pub fn test_layout_configurable_audio_ports(
         .context("An error occured during a callback")?;
 
     if checks_passed == 0 {
-        return Ok(TestStatus::Skipped {
+        return Ok(TestStatus::Warning {
             details: Some(String::from(
                 "Tried 200 random audio port layouts, but none was accepted.",
             )),

@@ -30,6 +30,8 @@ pub enum PluginTestCase {
     ProcessAudioOutOfPlaceBasic,
     #[strum(serialize = "process-audio-in-place-basic")]
     ProcessAudioInPlaceBasic,
+    #[strum(serialize = "process-audio-out-of-place-double")]
+    ProcessAudioOutOfPlaceDouble,
     #[strum(serialize = "process-audio-constant-mask")]
     ProcessAudioConstantMask,
     #[strum(serialize = "process-audio-reset-determinism")]
@@ -98,6 +100,11 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 "Processes random audio through the plugin with its default parameter values and \
                  tests whether the output does not contain any non-finite or subnormal values. \
                  Uses in-place audio processing for buses that support it.",
+            ),
+            PluginTestCase::ProcessAudioOutOfPlaceDouble => format!(
+                "Same as {}, but uses 64-bit floating point audio buffers instead of 32-bit ones \
+                 for ports that support it.",
+                PluginTestCase::ProcessAudioOutOfPlaceBasic,
             ),
             PluginTestCase::LayoutConfigurableAudioPorts => format!(
                 "Performs the same test as {}, but this time it tries random configurations \
@@ -247,6 +254,9 @@ impl<'a> TestCase<'a> for PluginTestCase {
             }
             PluginTestCase::ProcessAudioInPlaceBasic => {
                 processing::test_process_audio_basic(library, plugin_id, true)
+            }
+            PluginTestCase::ProcessAudioOutOfPlaceDouble => {
+                processing::test_process_audio_double(library, plugin_id)
             }
             PluginTestCase::ProcessAudioConstantMask => {
                 processing::test_process_audio_constant_mask(library, plugin_id)

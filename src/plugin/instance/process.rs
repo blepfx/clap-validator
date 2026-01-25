@@ -461,17 +461,23 @@ impl AudioBuffers {
                 .inputs
                 .iter()
                 .enumerate()
-                .map(|(index, port)| AudioBuffer::Float32 {
-                    input: Some(index),
-                    output: None,
-                    data: vec![vec![0.0f32; num_samples]; port.num_channels as usize],
+                .map(|(index, port)| {
+                    AudioBuffer::new_out_of_place(
+                        index,
+                        true,
+                        false,
+                        port.num_channels as usize,
+                        num_samples,
+                    )
                 })
                 .chain(config.outputs.iter().enumerate().map(|(index, port)| {
-                    AudioBuffer::Float32 {
-                        input: None,
-                        output: Some(index),
-                        data: vec![vec![0.0f32; num_samples]; port.num_channels as usize],
-                    }
+                    AudioBuffer::new_out_of_place(
+                        index,
+                        false,
+                        false,
+                        port.num_channels as usize,
+                        num_samples,
+                    )
                 }))
                 .collect(),
             num_samples,
@@ -510,6 +516,44 @@ impl AudioBuffers {
         }
 
         Self::new(buffers, num_samples)
+    }
+
+    pub fn new_out_of_place_f64(config: &AudioPortConfig, num_samples: usize) -> Option<Self> {
+        if !config
+            .inputs
+            .iter()
+            .chain(config.outputs.iter())
+            .any(|port| port.supports_double_sample_size)
+        {
+            return None;
+        }
+
+        Some(Self::new(
+            config
+                .inputs
+                .iter()
+                .enumerate()
+                .map(|(index, port)| {
+                    AudioBuffer::new_out_of_place(
+                        index,
+                        true,
+                        port.supports_double_sample_size,
+                        port.num_channels as usize,
+                        num_samples,
+                    )
+                })
+                .chain(config.outputs.iter().enumerate().map(|(index, port)| {
+                    AudioBuffer::new_out_of_place(
+                        index,
+                        false,
+                        port.supports_double_sample_size,
+                        port.num_channels as usize,
+                        num_samples,
+                    )
+                }))
+                .collect(),
+            num_samples,
+        ))
     }
 
     /// The number of samples in the buffer.
@@ -671,6 +715,31 @@ impl AudioBuffers {
 }
 
 impl AudioBuffer {
+    pub fn new_out_of_place(
+        port_index: usize,
+        is_input: bool,
+        is_double: bool,
+        num_channels: usize,
+        num_samples: usize,
+    ) -> Self {
+        let input = is_input.then_some(port_index);
+        let output = (!is_input).then_some(port_index);
+
+        if is_double {
+            AudioBuffer::Float64 {
+                input,
+                output,
+                data: vec![vec![0.0f64; num_samples]; num_channels],
+            }
+        } else {
+            AudioBuffer::Float32 {
+                input,
+                output,
+                data: vec![vec![0.0f32; num_samples]; num_channels],
+            }
+        }
+    }
+
     /// Get the index of the input bus for this buffer.
     pub fn input(&self) -> Option<usize> {
         match self {

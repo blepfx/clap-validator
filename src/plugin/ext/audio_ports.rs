@@ -8,8 +8,10 @@ use crate::util::clap_call;
 use anyhow::{Context, Result};
 use clap_sys::ext::ambisonic::CLAP_PORT_AMBISONIC;
 use clap_sys::ext::audio_ports::{
-    CLAP_AUDIO_PORT_IS_MAIN, CLAP_EXT_AUDIO_PORTS, CLAP_PORT_MONO, CLAP_PORT_STEREO,
-    clap_audio_port_info, clap_plugin_audio_ports,
+    CLAP_AUDIO_PORT_IS_MAIN, CLAP_AUDIO_PORT_PREFERS_64BITS,
+    CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE, CLAP_AUDIO_PORT_SUPPORTS_64BITS,
+    CLAP_EXT_AUDIO_PORTS, CLAP_PORT_MONO, CLAP_PORT_STEREO, clap_audio_port_info,
+    clap_plugin_audio_ports,
 };
 use clap_sys::ext::surround::CLAP_PORT_SURROUND;
 use clap_sys::id::CLAP_INVALID_ID;
@@ -40,9 +42,17 @@ pub struct AudioPort {
 
     /// The number of channels for an audio port.
     pub num_channels: u32,
+
     /// The index if the output/input port this input/output port should be connected to. This is
     /// the index in the other **port list**, not a stable ID (which have already been translated).
     pub in_place_pair_idx: Option<usize>,
+
+    /// Supports 64 bit processing
+    pub supports_double_sample_size: bool,
+
+    /// All ports with this flag require common sample size
+    #[allow(unused)] // TODO: use for future mixed precision processing tests
+    pub requires_common_sample_size: bool,
 }
 
 impl<'a> Extension<&'a Plugin<'a>> for AudioPorts<'a> {
@@ -86,6 +96,9 @@ impl AudioPorts<'_> {
         let mut input_stable_index_pairs: HashMap<u32, (usize, u32)> = HashMap::new();
         let mut output_stable_index_pairs: HashMap<u32, (usize, u32)> = HashMap::new();
 
+        let mut has_single_precision_requires_common_port = false;
+        let mut has_double_precision_requires_common_port = false;
+
         for i in 0..num_inputs {
             let mut info: clap_audio_port_info = unsafe { std::mem::zeroed() };
             let success = unsafe {
@@ -121,12 +134,36 @@ impl AudioPorts<'_> {
                 );
             }
 
+            let supports_double_sample_size = (info.flags & CLAP_AUDIO_PORT_SUPPORTS_64BITS) != 0;
+            let prefers_double_sample_size = (info.flags & CLAP_AUDIO_PORT_PREFERS_64BITS) != 0;
+            let requires_common_sample_size =
+                (info.flags & CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE) != 0;
+
+            if prefers_double_sample_size && !supports_double_sample_size {
+                anyhow::bail!(
+                    "Input audio port {i} (id={}) prefers 64-bit sample size, but does not \
+                     support it.",
+                    info.id
+                );
+            }
+
+            if requires_common_sample_size {
+                if supports_double_sample_size {
+                    has_double_precision_requires_common_port = true;
+                } else {
+                    has_single_precision_requires_common_port = true;
+                }
+            }
+
             config.inputs.push(AudioPort {
                 is_main,
                 num_channels: info.channel_count,
                 // These are reconstructed from `input_stable_index_pairs` and
                 // `output_stable_index_pairs` later
                 in_place_pair_idx: None,
+
+                supports_double_sample_size,
+                requires_common_sample_size,
             });
         }
 
@@ -163,11 +200,44 @@ impl AudioPorts<'_> {
                 );
             }
 
+            let supports_double_sample_size = (info.flags & CLAP_AUDIO_PORT_SUPPORTS_64BITS) != 0;
+            let prefers_double_sample_size = (info.flags & CLAP_AUDIO_PORT_PREFERS_64BITS) != 0;
+            let requires_common_sample_size =
+                (info.flags & CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE) != 0;
+
+            if prefers_double_sample_size && !supports_double_sample_size {
+                anyhow::bail!(
+                    "Output audio port {i} (id={}) prefers 64-bit sample size, but does not \
+                     support it.",
+                    info.id
+                );
+            }
+
+            if requires_common_sample_size {
+                if supports_double_sample_size {
+                    has_double_precision_requires_common_port = true;
+                } else {
+                    has_single_precision_requires_common_port = true;
+                }
+            }
+
             config.outputs.push(AudioPort {
                 is_main,
                 num_channels: info.channel_count,
                 in_place_pair_idx: None,
+
+                supports_double_sample_size,
+                requires_common_sample_size,
             });
+        }
+
+        // this implies that the common sample size requirement is useless (i.e. every port can only support
+        // 32bit sample size) and nullifies the 64 bit support of the other ports
+        if has_single_precision_requires_common_port && has_double_precision_requires_common_port {
+            anyhow::bail!(
+                "The plugin has audio ports that require common sample size, but some of these \
+                 ports only support 32-bit sample size while others support 64-bit sample size."
+            );
         }
 
         // Now we need to convert the stable in-place pair indices to vector indices
@@ -295,6 +365,7 @@ fn is_audio_port_type_consistent(
             );
         }
 
+        // ambisonic audio requires (N^2) channels where N is the ambisonics order
         if info.channel_count.isqrt().pow(2) != info.channel_count {
             anyhow::bail!(
                 "Expected a perfect square (1, 4, 9, ...) number of channels for ambisonic audio \

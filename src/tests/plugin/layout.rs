@@ -2,17 +2,16 @@ use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::audio_ports_config::{AudioPortsConfig, AudioPortsConfigInfo};
 use crate::plugin::ext::configurable_audio_ports::{AudioPortsRequest, ConfigurableAudioPorts};
 use crate::plugin::ext::note_ports::NotePorts;
-use crate::plugin::instance::process::{AudioBuffers, ProcessConfig, ProcessData};
 use crate::plugin::library::PluginLibrary;
+use crate::plugin::process::{AudioBuffers, ProcessScope};
 use crate::tests::TestStatus;
-use crate::tests::plugin::processing::run_simple;
 use crate::tests::rng::{NoteGenerator, new_prng};
 use anyhow::{Context, Result};
 use rand::Rng;
 use rand::seq::SliceRandom;
 use rand_pcg::Pcg32;
 
-const BUFFER_SIZE: usize = 512;
+const BUFFER_SIZE: u32 = 512;
 
 /// The test for `PluginTestCase::LayoutAudioPortsConfig`.
 pub fn test_layout_audio_ports_config(
@@ -175,26 +174,29 @@ pub fn test_layout_audio_ports_config(
             // TODO: check info
         }
 
-        let mut note_event_rng = NoteGenerator::new(&note_ports_config);
-        let mut audio_buffers = AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE);
-        let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
+        plugin
+            .on_audio_thread(|plugin| -> Result<()> {
+                let mut audio_buffers =
+                    AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE);
+                let mut note_rng = NoteGenerator::new(&note_ports_config);
+                let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
-        run_simple(&plugin, &mut process_data, 5, |process_data| {
-            process_data.buffers.randomize(&mut prng);
-            note_event_rng.fill_event_queue(
-                &mut prng,
-                &process_data.input_events,
-                process_data.block_size,
-            );
+                for _ in 0..5 {
+                    process.audio_buffers().randomize(&mut prng);
+                    process
+                        .input_queue()
+                        .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+                    process.run()?;
+                }
 
-            Ok(())
-        })
-        .with_context(|| {
-            format!(
-                "Error while processing audio with IO configuration '{}' ({})",
-                config_audio_ports_config.name, config_audio_ports_config.id,
-            )
-        })?;
+                Ok(())
+            })
+            .with_context(|| {
+                format!(
+                    "Error while processing audio with IO configuration '{}' ({})",
+                    config_audio_ports_config.name, config_audio_ports_config.id,
+                )
+            })?;
     }
 
     plugin
@@ -319,26 +321,29 @@ pub fn test_layout_configurable_audio_ports(
             .config()
             .context("Error while querying 'audio-ports' IO configuration")?;
 
-        let mut note_event_rng = NoteGenerator::new(&note_ports_config);
-        let mut audio_buffers = AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE);
-        let mut process_data = ProcessData::new(&mut audio_buffers, ProcessConfig::default());
+        plugin
+            .on_audio_thread(|plugin| -> Result<()> {
+                let mut audio_buffers =
+                    AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE);
+                let mut note_rng = NoteGenerator::new(&note_ports_config);
+                let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
-        run_simple(&plugin, &mut process_data, 5, |process_data| {
-            process_data.buffers.randomize(&mut prng);
-            note_event_rng.fill_event_queue(
-                &mut prng,
-                &process_data.input_events,
-                process_data.block_size,
-            );
+                for _ in 0..5 {
+                    process.audio_buffers().randomize(&mut prng);
+                    process
+                        .input_queue()
+                        .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+                    process.run()?;
+                }
 
-            Ok(())
-        })
-        .with_context(|| {
-            format!(
-                "Error while processing audio with the following configuration: {}",
-                print_layout_requests(&requests)
-            )
-        })?;
+                Ok(())
+            })
+            .with_context(|| {
+                format!(
+                    "Error while processing audio with the following configuration: {}",
+                    print_layout_requests(&requests)
+                )
+            })?;
     }
 
     plugin

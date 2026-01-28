@@ -2,9 +2,9 @@
 
 use crate::plugin::ext::audio_ports::AudioPorts;
 use crate::plugin::ext::preset_load::PresetLoad;
-use crate::plugin::instance::process::{AudioBuffers, ProcessConfig, ProcessData};
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::preset_discovery::{LocationValue, PluginAbi, Preset, PresetFile};
+use crate::plugin::process::{AudioBuffers, ProcessScope};
 use crate::tests::TestStatus;
 use anyhow::{Context, Result};
 use clap_sys::factory::preset_discovery::CLAP_PRESET_DISCOVERY_FACTORY_ID;
@@ -173,10 +173,10 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
 
                 // We'll process a single buffer of silent audio just to make sure everything's
                 // settled in
-                ProcessData::new(&mut audio_buffers, ProcessConfig::default())
-                    .run_once(&plugin, move |plugin, data| {
-                        plugin.process(data)?;
-                        Ok(())
+                plugin
+                    .on_audio_thread(|plugin| {
+                        let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
+                        process.run()
                     })
                     .with_context(|| {
                         format!(

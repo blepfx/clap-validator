@@ -2,6 +2,8 @@
 //! querying metadata for a plugin's file. This is sort of like a state machine the plugin writes
 //! one or more presets to.
 
+use super::{Flags, LocationValue};
+use crate::util::{self, check_null_ptr};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap_sys::factory::preset_discovery::{
@@ -11,7 +13,6 @@ use clap_sys::factory::preset_discovery::{
 };
 use clap_sys::timestamp::clap_timestamp;
 use clap_sys::universal_plugin_id::clap_universal_plugin_id;
-use parking_lot::Mutex;
 use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -19,9 +20,6 @@ use std::ffi::{c_char, c_void};
 use std::fmt::Display;
 use std::pin::Pin;
 use std::thread::ThreadId;
-
-use super::{Flags, LocationValue};
-use crate::util::{self, check_null_ptr};
 
 /// An implementation of the preset discovery's metadata receiver. This borrows a
 /// `Result<PresetFile>` because the important work is done when this object is dropped. When this
@@ -73,7 +71,7 @@ pub struct MetadataReceiver<'a> {
 
     /// The vtable that's passed to the provider. The `receiver_data` field is populated with a
     /// pointer to this object.
-    clap_preset_discovery_metadata_receiver: Mutex<clap_preset_discovery_metadata_receiver>,
+    clap_preset_discovery_metadata_receiver: clap_preset_discovery_metadata_receiver,
 }
 
 /// One or more presets declared by the plugin through a preset provider metadata receiver.
@@ -276,7 +274,7 @@ impl<'a> MetadataReceiver<'a> {
         // written to it in the `Drop` implementation
         *result = None;
 
-        let metadata_receiver = Box::pin(Self {
+        let mut metadata_receiver = Box::pin(Self {
             expected_thread_id: std::thread::current().id(),
 
             location,
@@ -285,27 +283,24 @@ impl<'a> MetadataReceiver<'a> {
             next_preset_data: RefCell::new(None),
             next_load_key: RefCell::new(None),
 
-            clap_preset_discovery_metadata_receiver: Mutex::new(
-                clap_preset_discovery_metadata_receiver {
-                    // This is set to a pointer to this pinned data structure later
-                    receiver_data: std::ptr::null_mut(),
-                    on_error: Some(Self::on_error),
-                    begin_preset: Some(Self::begin_preset),
-                    add_plugin_id: Some(Self::add_plugin_id),
-                    set_soundpack_id: Some(Self::set_soundpack_id),
-                    set_flags: Some(Self::set_flags),
-                    add_creator: Some(Self::add_creator),
-                    set_description: Some(Self::set_description),
-                    set_timestamps: Some(Self::set_timestamps),
-                    add_feature: Some(Self::add_feature),
-                    add_extra_info: Some(Self::add_extra_info),
-                },
-            ),
+            clap_preset_discovery_metadata_receiver: clap_preset_discovery_metadata_receiver {
+                // This is set to a pointer to this pinned data structure later
+                receiver_data: std::ptr::null_mut(),
+                on_error: Some(Self::on_error),
+                begin_preset: Some(Self::begin_preset),
+                add_plugin_id: Some(Self::add_plugin_id),
+                set_soundpack_id: Some(Self::set_soundpack_id),
+                set_flags: Some(Self::set_flags),
+                add_creator: Some(Self::add_creator),
+                set_description: Some(Self::set_description),
+                set_timestamps: Some(Self::set_timestamps),
+                add_feature: Some(Self::add_feature),
+                add_extra_info: Some(Self::add_extra_info),
+            },
         });
 
         metadata_receiver
             .clap_preset_discovery_metadata_receiver
-            .lock()
             .receiver_data = &*metadata_receiver as *const Self as *mut c_void;
 
         metadata_receiver
@@ -316,7 +311,7 @@ impl<'a> MetadataReceiver<'a> {
     pub fn clap_preset_discovery_metadata_receiver_ptr(
         self: &Pin<Box<Self>>,
     ) -> *const clap_preset_discovery_metadata_receiver {
-        self.clap_preset_discovery_metadata_receiver.data_ptr()
+        &self.clap_preset_discovery_metadata_receiver
     }
 
     /// Checks that this function is called from the same thread the indexer was created on. If it

@@ -1,16 +1,9 @@
 //! The indexer abstraction for a CLAP plugin's preset discovery factory. During initialization the
 //! plugin fills this object with its supported locations, file types, and sound packs.
 
+use crate::util::{self, check_null_ptr, validator_version};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use serde::Serialize;
-use std::cell::RefCell;
-use std::ffi::{CStr, CString, c_char, c_void};
-use std::fmt::Display;
-use std::path::Path;
-use std::pin::Pin;
-use std::thread::ThreadId;
-
 use clap_sys::factory::preset_discovery::{
     CLAP_PRESET_DISCOVERY_IS_DEMO_CONTENT, CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT,
     CLAP_PRESET_DISCOVERY_IS_FAVORITE, CLAP_PRESET_DISCOVERY_IS_USER_CONTENT,
@@ -19,9 +12,13 @@ use clap_sys::factory::preset_discovery::{
     clap_preset_discovery_location_kind, clap_preset_discovery_soundpack,
 };
 use clap_sys::version::CLAP_VERSION;
-use parking_lot::Mutex;
-
-use crate::util::{self, check_null_ptr};
+use serde::Serialize;
+use std::cell::RefCell;
+use std::ffi::{CStr, CString, c_char, c_void};
+use std::fmt::Display;
+use std::path::Path;
+use std::pin::Pin;
+use std::thread::ThreadId;
 
 #[derive(Debug)]
 pub struct Indexer {
@@ -36,11 +33,9 @@ pub struct Indexer {
     /// The data written to this object by the plugin.
     results: RefCell<IndexerResults>,
 
-    /// The validator's version, reported in the `clap_preset_discovery_indexer` struct.
-    _clap_validator_version: CString,
     /// The vtable that's passed to the provider. The `indexer_data` field is populated with a
     /// pointer to this object.
-    clap_preset_discovery_indexer: Mutex<clap_preset_discovery_indexer>,
+    clap_preset_discovery_indexer: clap_preset_discovery_indexer,
 }
 
 /// The data written to the indexer by the plugin during the
@@ -368,31 +363,28 @@ impl Drop for Indexer {
 
 impl Indexer {
     pub fn new() -> Pin<Box<Self>> {
-        let clap_validator_version =
-            CString::new(env!("CARGO_PKG_VERSION")).expect("Invalid bytes in crate version");
-        let indexer = Box::pin(Self {
+        let mut indexer = Box::pin(Self {
             expected_thread_id: std::thread::current().id(),
             callback_error: RefCell::new(None),
 
             results: RefCell::default(),
 
-            clap_preset_discovery_indexer: Mutex::new(clap_preset_discovery_indexer {
+            clap_preset_discovery_indexer: clap_preset_discovery_indexer {
                 clap_version: CLAP_VERSION,
                 name: c"clap-validator".as_ptr(),
                 vendor: c"Robbert van der Helm".as_ptr(),
                 url: c"https://github.com/free-audio/clap-validator".as_ptr(),
-                version: clap_validator_version.as_ptr(),
+                version: validator_version().as_ptr(),
                 // This is filled with a pointer to this struct after the `Box` has been allocated
                 indexer_data: std::ptr::null_mut(),
                 declare_filetype: Some(Self::declare_filetype),
                 declare_location: Some(Self::declare_location),
                 declare_soundpack: Some(Self::declare_soundpack),
                 get_extension: Some(Self::get_extension),
-            }),
-            _clap_validator_version: clap_validator_version,
+            },
         });
 
-        indexer.clap_preset_discovery_indexer.lock().indexer_data =
+        indexer.clap_preset_discovery_indexer.indexer_data =
             &*indexer as *const Self as *mut c_void;
 
         indexer
@@ -403,7 +395,7 @@ impl Indexer {
     pub fn clap_preset_discovery_indexer_ptr(
         self: &Pin<Box<Self>>,
     ) -> *const clap_preset_discovery_indexer {
-        self.clap_preset_discovery_indexer.data_ptr()
+        &self.clap_preset_discovery_indexer
     }
 
     /// Get the values written to this indexer by the plugin during the

@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::process::ExitCode;
 
+use crate::plugin::library::mark_current_thread_as_os_main_thread;
+
 mod commands;
 mod index;
 mod plugin;
@@ -51,6 +53,8 @@ enum Command {
 }
 
 fn main() -> ExitCode {
+    mark_current_thread_as_os_main_thread();
+
     let cli = Cli::parse();
 
     // For now logging everything to the terminal is fine. In the future it may be useful to have

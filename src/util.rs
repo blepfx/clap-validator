@@ -4,9 +4,10 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
 use clap_sys::timestamp::{CLAP_TIMESTAMP_UNKNOWN, clap_timestamp};
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use std::ffi::CStr;
+use std::ffi::CString;
 use std::os::raw::c_char;
 use std::path::PathBuf;
+use std::{ffi::CStr, sync::OnceLock};
 
 /// Assert that the specified pointers are non-null. Panics if this is not the case.
 macro_rules! check_null_ptr {
@@ -161,8 +162,33 @@ pub fn validator_temp_dir() -> PathBuf {
     temp_dir().join("clap-validator")
 }
 
+pub fn validator_version() -> &'static CStr {
+    static VERSION: OnceLock<CString> = OnceLock::new();
+    VERSION
+        .get_or_init(|| CString::new(env!("CARGO_PKG_VERSION")).unwrap())
+        .as_c_str()
+}
+
+/// A helper struct used to send stuff across thread boundary.
+pub struct AssertSendSync<T>(T);
+
+impl<T> AssertSendSync<T> {
+    pub unsafe fn new(value: T) -> Self {
+        AssertSendSync(value)
+    }
+
+    pub fn get(self) -> T {
+        self.0
+    }
+}
+
+unsafe impl<T> Send for AssertSendSync<T> {}
+unsafe impl<T> Sync for AssertSendSync<T> {}
+
 impl<T: ?Sized> IteratorExt for T where T: Iterator {}
 pub trait IteratorExt: Iterator {
+    /// Map the iterator in parallel if `parallel` is `true`, or sequentially if it is `false`.
+    /// Returns an iterator over the mapped values, in arbitrary order.
     fn map_parallel<R: Send>(
         self,
         parallel: bool,

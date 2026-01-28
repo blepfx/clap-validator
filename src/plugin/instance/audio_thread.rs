@@ -1,17 +1,19 @@
 //! Abstractions for single CLAP plugin instances for audio thread interactions.
 
-use super::process::ProcessData;
 use super::{Plugin, PluginStatus};
 use crate::plugin::ext::Extension;
-use crate::util::clap_call;
+use crate::plugin::instance::{InstanceShared, MainThreadTask};
+use crate::util::{AssertSendSync, clap_call};
 use anyhow::Result;
 use clap_sys::plugin::clap_plugin;
 use clap_sys::process::{
-    CLAP_PROCESS_CONTINUE, CLAP_PROCESS_CONTINUE_IF_NOT_QUIET, CLAP_PROCESS_ERROR,
-    CLAP_PROCESS_SLEEP, CLAP_PROCESS_TAIL,
+    CLAP_PROCESS_CONTINUE, CLAP_PROCESS_CONTINUE_IF_NOT_QUIET, CLAP_PROCESS_ERROR, CLAP_PROCESS_SLEEP,
+    CLAP_PROCESS_TAIL, clap_process,
 };
 use std::marker::PhantomData;
+use std::pin::Pin;
 use std::ptr::NonNull;
+use std::sync::{Arc, Condvar, Mutex};
 
 /// An audio thread equivalent to [`Plugin`]. This version only allows audio thread functions to be
 /// called. It can be constructed using [`Plugin::on_audio_thread()`].
@@ -20,8 +22,9 @@ pub struct PluginAudioThread<'a> {
     /// thread instance cannot outlive the plugin instance (which cannot outlive the plugin
     /// library). This `Plugin` also contains a reference to the plugin instance's state.
     pub(super) plugin: &'a Plugin<'a>,
-    /// To honor CLAP's thread safety guidelines, this audio thread abstraction cannot be shared
-    /// with or sent to other threads.
+
+    /// To honor CLAP's thread safety guidelines, the thread this object was created from is
+    /// designated the 'audio thread', and this object cannot be shared with other threads.
     _send_sync_marker: PhantomData<*const ()>,
 }
 
@@ -37,20 +40,20 @@ pub enum ProcessStatus {
 
 impl Drop for PluginAudioThread<'_> {
     fn drop(&mut self) {
-        match self.status() {
-            PluginStatus::Processing => self.stop_processing(),
-            PluginStatus::Activated => (),
-            state => panic!(
-                "The plugin was in an invalid state '{state:?}' when the audio thread got \
-                 dropped, this is a clap-validator bug"
-            ),
-        }
+        self.plugin.shared.audio_thread_id.store(None);
+        self.plugin
+            .shared
+            .task_sender
+            .send(MainThreadTask::StopAudioThread)
+            .unwrap();
     }
 }
 
 impl<'a> PluginAudioThread<'a> {
-    pub fn new(plugin: &'a Plugin) -> Self {
-        PluginAudioThread {
+    pub(crate) fn new(plugin: &'a Plugin<'a>) -> Self {
+        plugin.shared.audio_thread_id.store(Some(std::thread::current().id()));
+
+        Self {
             plugin,
             _send_sync_marker: PhantomData,
         }
@@ -66,11 +69,14 @@ impl<'a> PluginAudioThread<'a> {
         self.plugin.status()
     }
 
+    /// Get a reference to the plugin's shared state.
+    pub fn shared(&self) -> &Pin<Arc<InstanceShared>> {
+        &self.plugin.shared
+    }
+
     /// Get the _audio thread_ extension abstraction for the extension `T`, if the plugin supports
     /// this extension. Returns `None` if it does not. The plugin needs to be initialized using
     /// [`init()`][Self::init()] before this may be called.
-    //
-    // TODO: Remove this unused attribute once we implement audio thread extensions
     #[allow(unused)]
     pub fn get_extension<T: Extension<&'a Self>>(&'a self) -> Option<T> {
         self.status().assert_is_not(PluginStatus::Uninitialized);
@@ -82,16 +88,55 @@ impl<'a> PluginAudioThread<'a> {
             };
 
             if !extension_ptr.is_null() {
-                return unsafe {
-                    Some(T::new(
-                        self,
-                        NonNull::new(extension_ptr as *mut T::Struct).unwrap(),
-                    ))
-                };
+                return unsafe { Some(T::new(self, NonNull::new(extension_ptr as *mut T::Struct).unwrap())) };
             }
         }
 
         None
+    }
+
+    /// Dispatch a task to be executed on the main thread. This is a blocking call that will wait
+    /// for the task to complete and return its result.
+    pub fn send_main_thread<F: FnOnce(&Plugin) -> T + Send, T: Send>(&self, callback: F) -> T {
+        struct Scope<'a, F, O> {
+            condvar: &'a Condvar,
+            output: &'a Mutex<Option<O>>,
+            callback: F,
+        }
+
+        let output = Mutex::new(None);
+        let condvar = Condvar::new();
+        let scope = Scope {
+            condvar: &condvar,
+            output: &output,
+            callback,
+        };
+
+        let scope_ptr = unsafe { AssertSendSync::new(&scope as *const Scope<F, T> as *const ()) };
+
+        self.post_main_thread(move |plugin| unsafe {
+            let scope = (scope_ptr.get() as *const Scope<F, T>).read();
+            let result = (scope.callback)(plugin);
+            scope.output.lock().unwrap().replace(result);
+            scope.condvar.notify_one();
+        });
+
+        scope
+            .condvar
+            .wait_while(scope.output.lock().unwrap(), |v| v.is_none())
+            .unwrap()
+            .take()
+            .unwrap()
+    }
+
+    /// Post a task to be executed on the main thread. This is a non-blocking call that does not
+    /// wait for the task to complete and does not return a result.
+    pub fn post_main_thread(&self, task: impl FnOnce(&Plugin) + Send + 'static) {
+        self.plugin
+            .shared
+            .task_sender
+            .send(MainThreadTask::Closure(Box::new(task)))
+            .unwrap();
     }
 
     /// Prepare for audio processing. Returns an error if the plugin returned `false`. See
@@ -106,7 +151,7 @@ impl<'a> PluginAudioThread<'a> {
         };
 
         if result {
-            self.plugin.state.status.store(PluginStatus::Processing);
+            self.plugin.shared.status.store(PluginStatus::Processing);
             Ok(())
         } else {
             anyhow::bail!("'clap_plugin::start_processing()' returned false.")
@@ -117,25 +162,24 @@ impl<'a> PluginAudioThread<'a> {
     /// status code, then this will return an error. See
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
-    pub fn process(&self, process_data: &mut ProcessData) -> Result<ProcessStatus> {
+    pub fn process(&self, process_data: &clap_process) -> Result<ProcessStatus> {
         self.status().assert_is(PluginStatus::Processing);
 
         let plugin = self.as_ptr();
-        let result = process_data.with_clap_process_data(|clap_process_data| unsafe {
-            clap_call! { plugin=>process(plugin, &clap_process_data) }
-        });
+        let result = unsafe {
+            clap_call! { plugin=>process(plugin, process_data) }
+        };
 
         match result {
-            CLAP_PROCESS_ERROR => anyhow::bail!(
-                "The plugin returned 'CLAP_PROCESS_ERROR' from 'clap_plugin::process()'."
-            ),
+            CLAP_PROCESS_ERROR => {
+                anyhow::bail!("The plugin returned 'CLAP_PROCESS_ERROR' from 'clap_plugin::process()'.")
+            }
             CLAP_PROCESS_CONTINUE => Ok(ProcessStatus::Continue),
             CLAP_PROCESS_CONTINUE_IF_NOT_QUIET => Ok(ProcessStatus::ContinueIfNotQuiet),
             CLAP_PROCESS_TAIL => Ok(ProcessStatus::Tail),
             CLAP_PROCESS_SLEEP => Ok(ProcessStatus::Sleep),
             result => anyhow::bail!(
-                "The plugin returned an unknown 'clap_process_status' value {result} from \
-                 'clap_plugin::process()'."
+                "The plugin returned an unknown 'clap_process_status' value {result} from 'clap_plugin::process()'."
             ),
         }
     }
@@ -161,6 +205,6 @@ impl<'a> PluginAudioThread<'a> {
             clap_call! { plugin=>stop_processing(plugin) }
         };
 
-        self.plugin.state.status.store(PluginStatus::Activated);
+        self.plugin.shared.status.store(PluginStatus::Activated);
     }
 }

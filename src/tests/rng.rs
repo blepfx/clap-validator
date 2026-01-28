@@ -1,21 +1,14 @@
 //! Utilities for generating pseudo-random data.
 
-use clap_sys::events::{
-    CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_IS_LIVE, CLAP_EVENT_MIDI, CLAP_EVENT_NOTE_CHOKE,
-    CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_VALUE,
-    CLAP_NOTE_EXPRESSION_PRESSURE, CLAP_NOTE_EXPRESSION_TUNING, CLAP_NOTE_EXPRESSION_VOLUME,
-    clap_event_header, clap_event_midi, clap_event_note, clap_event_note_expression,
-    clap_event_param_value,
-};
+use crate::plugin::ext::note_ports::NotePortConfig;
+use crate::plugin::ext::params::{Param, ParamInfo};
+use crate::plugin::process::{Event, EventQueue};
+use clap_sys::events::*;
 use midi_consts::channel_event as midi;
 use rand::Rng;
 use rand::seq::IteratorRandom;
 use rand_pcg::Pcg32;
 use std::ops::RangeInclusive;
-
-use crate::plugin::ext::note_ports::NotePortConfig;
-use crate::plugin::ext::params::{Param, ParamInfo};
-use crate::plugin::instance::process::{Event, EventQueue};
 
 /// Create a new pseudo-random number generator with a fixed seed.
 pub fn new_prng() -> Pcg32 {
@@ -131,66 +124,26 @@ impl<'a> NoteGenerator<'a> {
     /// Fill an event queue with random events for the next `num_samples` samples. This does not
     /// clear the event queue. If the queue was not empty, then this will do a stable sort after
     /// inserting _all_ events.
-    pub fn fill_event_queue(&mut self, prng: &mut Pcg32, queue: &EventQueue, num_samples: u32) {
+    pub fn generate_events(&mut self, prng: &mut Pcg32, num_samples: u32) -> Vec<Event> {
         let mut events = vec![];
         let mut sample = prng.random_range(self.sample_offset_range.clone()).max(0) as u32;
+
         while sample < num_samples {
-            let Some(event) = self.generate(prng, sample) else {
-                return;
+            let Some(event) = self.generate_event(prng, sample) else {
+                break;
             };
 
             events.push(event);
             sample += prng.random_range(self.sample_offset_range.clone()).max(0) as u32;
         }
 
-        queue.add_events(events);
-    }
-
-    #[allow(unused)]
-    pub fn stop_all_voices(&mut self, queue: &EventQueue, time_offset: u32) {
-        let mut events = vec![];
-        for (note_port_idx, active_notes) in self.active_notes.drain(..).enumerate() {
-            let supports_clap = self.config.inputs[note_port_idx].supports_clap();
-
-            for note in active_notes {
-                if supports_clap {
-                    events.push(Event::Note(clap_event_note {
-                        header: clap_event_header {
-                            size: std::mem::size_of::<clap_event_note>() as u32,
-                            time: time_offset,
-                            space_id: CLAP_CORE_EVENT_SPACE_ID,
-                            type_: CLAP_EVENT_NOTE_OFF,
-                            flags: 0,
-                        },
-                        note_id: note.note_id,
-                        port_index: note_port_idx as i16,
-                        channel: note.channel,
-                        key: note.key,
-                        velocity: 0.0,
-                    }));
-                } else {
-                    events.push(Event::Midi(clap_event_midi {
-                        header: clap_event_header {
-                            size: std::mem::size_of::<clap_event_midi>() as u32,
-                            time: time_offset,
-                            space_id: CLAP_CORE_EVENT_SPACE_ID,
-                            type_: CLAP_EVENT_MIDI,
-                            flags: 0,
-                        },
-                        port_index: note_port_idx as u16,
-                        data: [midi::NOTE_OFF | note.channel as u8, note.key as u8, 0],
-                    }));
-                }
-            }
-        }
-
-        queue.add_events(events);
+        events
     }
 
     /// Generate a random note event for one of the plugin's note ports depending on the port's
     /// capabilities. Returns an error if the plugin doesn't have any note ports or if the note
     /// ports don't support either MIDI or CLAP note events.
-    pub fn generate(&mut self, prng: &mut Pcg32, time_offset: u32) -> Option<Event> {
+    pub fn generate_event(&mut self, prng: &mut Pcg32, time_offset: u32) -> Option<Event> {
         if self.config.inputs.is_empty() {
             return None;
         }
@@ -597,6 +550,48 @@ impl<'a> NoteGenerator<'a> {
         );
     }
 
+    #[allow(unused)]
+    pub fn stop_all_voices(&mut self, queue: &EventQueue, time_offset: u32) {
+        let mut events = vec![];
+        for (note_port_idx, active_notes) in self.active_notes.drain(..).enumerate() {
+            let supports_clap = self.config.inputs[note_port_idx].supports_clap();
+
+            for note in active_notes {
+                if supports_clap {
+                    events.push(Event::Note(clap_event_note {
+                        header: clap_event_header {
+                            size: std::mem::size_of::<clap_event_note>() as u32,
+                            time: time_offset,
+                            space_id: CLAP_CORE_EVENT_SPACE_ID,
+                            type_: CLAP_EVENT_NOTE_OFF,
+                            flags: 0,
+                        },
+                        note_id: note.note_id,
+                        port_index: note_port_idx as i16,
+                        channel: note.channel,
+                        key: note.key,
+                        velocity: 0.0,
+                    }));
+                } else {
+                    events.push(Event::Midi(clap_event_midi {
+                        header: clap_event_header {
+                            size: std::mem::size_of::<clap_event_midi>() as u32,
+                            time: time_offset,
+                            space_id: CLAP_CORE_EVENT_SPACE_ID,
+                            type_: CLAP_EVENT_MIDI,
+                            flags: 0,
+                        },
+                        port_index: note_port_idx as u16,
+                        data: [midi::NOTE_OFF | note.channel as u8, note.key as u8, 0],
+                    }));
+                }
+            }
+        }
+
+        queue.add_events(events);
+    }
+
+    #[allow(unused)]
     pub fn reset(&mut self) {
         self.next_note_id = 0;
         for active_notes in &mut self.active_notes {
@@ -672,7 +667,7 @@ impl<'a> ParamFuzzer<'a> {
         }
     }
 
-    pub fn with_snap_to_bounds(mut self) -> Self {
+    pub fn snap_to_bounds(mut self) -> Self {
         self.snap_to_bounds = true;
         self
     }
@@ -683,23 +678,23 @@ impl<'a> ParamFuzzer<'a> {
     ///
     /// Unlike [`ParamFuzzer::randomize_params_at`], this generates [`Event::ParamMod`] events as well as
     /// generating events at random irregular unsynchronized (between different parameters) intervals.
-    pub fn fill_event_queue(&'a self, prng: &'a mut Pcg32, queue: &EventQueue, num_samples: u32) {
+    pub fn generate_events(&self, prng: &mut Pcg32, num_samples: u32) -> Vec<Event> {
         let mut events = vec![];
         let mut sample = prng.random_range(self.sample_offset_range.clone()).max(0) as u32;
         while sample < num_samples {
-            let Some(event) = self.generate(prng) else {
-                return;
+            let Some(event) = self.generate_event(prng) else {
+                break;
             };
 
             events.push(event);
             sample += prng.random_range(self.sample_offset_range.clone()).max(0) as u32;
         }
 
-        queue.add_events(events);
+        events
     }
 
     /// Generate a single random parameter change event for one of the plugin's parameters.
-    pub fn generate(&'a self, prng: &'a mut Pcg32) -> Option<Event> {
+    pub fn generate_event(&self, prng: &mut Pcg32) -> Option<Event> {
         let (param_id, param_info) = self
             .params
             .iter()

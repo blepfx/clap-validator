@@ -1,0 +1,99 @@
+use clap_sys::{events::*, fixedpoint::*};
+
+/// The current transport state. This can be modified between process calls to simulate
+/// transport changes.
+#[derive(Debug, Clone, Default)]
+pub struct TransportState {
+    pub sample_pos: i64,
+
+    pub is_playing: bool,
+    pub is_recording: bool,
+
+    pub tempo: Option<(f64, f64)>,
+    pub time_signature: Option<(u16, u16)>,
+
+    pub position_beats: Option<f64>,
+    pub position_seconds: Option<f64>,
+}
+
+impl TransportState {
+    pub fn advance(&mut self, samples: u32, sample_rate: f64) {
+        self.sample_pos += samples as i64;
+
+        if let Some(position_seconds) = &mut self.position_seconds {
+            *position_seconds += samples as f64 / sample_rate;
+        }
+
+        if let Some((tempo, tempo_inc)) = &mut self.tempo {
+            let tempo_start = *tempo;
+            let tempo_end = tempo_start + (*tempo_inc * samples as f64);
+            *tempo = tempo_end;
+
+            if let Some(position_beats) = &mut self.position_beats {
+                // Integrate tempo over the sample block using the trapezoidal rule
+                *position_beats +=
+                    (samples as f64 * (tempo_end + tempo_start) / 60.0 * 0.5) / sample_rate;
+            }
+        }
+    }
+
+    pub fn as_clap_transport(&self, offset: u32) -> clap_event_transport {
+        let mut flags = 0;
+        flags |= self.is_playing as u32 * CLAP_TRANSPORT_IS_PLAYING;
+        flags |= self.is_recording as u32 * CLAP_TRANSPORT_IS_RECORDING;
+        flags |= self.position_beats.is_some() as u32 * CLAP_TRANSPORT_HAS_BEATS_TIMELINE;
+        flags |= self.position_seconds.is_some() as u32 * CLAP_TRANSPORT_HAS_SECONDS_TIMELINE;
+        flags |= self.tempo.is_some() as u32 * CLAP_TRANSPORT_HAS_TEMPO;
+        flags |= self.time_signature.is_some() as u32 * CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
+
+        clap_event_transport {
+            header: clap_event_header {
+                size: std::mem::size_of::<clap_event_transport>() as u32,
+                time: offset,
+                space_id: CLAP_CORE_EVENT_SPACE_ID,
+                type_: CLAP_EVENT_TRANSPORT,
+                flags: 0,
+            },
+            flags,
+
+            // sending intentional invalid values when the info is not available
+            // the plugin **must** check the flags to see what info is valid
+            song_pos_beats: self
+                .position_beats
+                .map(|b| (b * CLAP_BEATTIME_FACTOR as f64).round() as i64)
+                .unwrap_or(i64::MIN),
+            song_pos_seconds: self
+                .position_seconds
+                .map(|s| (s * CLAP_SECTIME_FACTOR as f64).round() as i64)
+                .unwrap_or(i64::MIN),
+            tempo: self.tempo.map(|(t, _)| t).unwrap_or(f64::NAN),
+            tempo_inc: self.tempo.map(|(_, ti)| ti).unwrap_or(f64::NAN),
+            loop_start_beats: i64::MAX,
+            loop_end_beats: i64::MIN,
+            loop_start_seconds: i64::MAX,
+            loop_end_seconds: i64::MIN,
+            bar_start: i64::MAX,
+            bar_number: i32::MIN,
+            tsig_num: self.time_signature.map(|(n, _)| n).unwrap_or(u16::MAX),
+            tsig_denom: self.time_signature.map(|(_, d)| d).unwrap_or(0),
+        }
+    }
+}
+
+/// A constant mask for audio processing. Each bit represents whether the corresponding audio channel
+/// is constant (1) or not (0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConstantMask(pub u64);
+
+impl ConstantMask {
+    pub const CONSTANT: Self = Self(u64::MAX);
+    pub const DYNAMIC: Self = Self(0);
+
+    pub fn is_channel_constant(&self, channel: u32) -> bool {
+        self.0 & 1u64.unbounded_shl(channel) != 0
+    }
+
+    pub fn are_channels_constant(&self, channels: u32) -> bool {
+        self.0 & 1u64.unbounded_shl(channels).wrapping_sub(1) == 0
+    }
+}

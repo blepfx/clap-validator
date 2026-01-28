@@ -6,14 +6,13 @@ use crate::util::{self, clap_call};
 use anyhow::{Context, Result};
 use clap_sys::entry::clap_plugin_entry;
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
-use clap_sys::factory::preset_discovery::{
-    CLAP_PRESET_DISCOVERY_FACTORY_ID, clap_preset_discovery_factory,
-};
+use clap_sys::factory::preset_discovery::{CLAP_PRESET_DISCOVERY_FACTORY_ID, clap_preset_discovery_factory};
 use clap_sys::plugin::clap_plugin_descriptor;
 use clap_sys::version::clap_version;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::ffi::CString;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 
@@ -25,8 +24,12 @@ pub struct PluginLibrary {
     /// contained within the bundle.
     plugin_path: PathBuf,
     /// The plugin's library. Its entry point has already been initialized, and it will
-    /// autoamtically be deinitialized when this object gets dropped.
+    /// automatically be deinitialized when this object gets dropped.
     library: libloading::Library,
+
+    /// To honor CLAP's thread safety guidelines, the thread this object was created from is
+    /// designated the 'main thread', and this object cannot be shared with other threads.
+    _thread: PhantomData<*const ()>,
 }
 
 /// Metadata for a CLAP plugin library, which may contain multiple plugins.
@@ -79,8 +82,8 @@ impl Drop for PluginLibrary {
     fn drop(&mut self) {
         // The `Plugin` only exists if `init()` returned true, so we ned to deinitialize the
         // plugin here
-        let entry_point = get_clap_entry_point(&self.library)
-            .expect("A Plugin was constructed for a plugin with no entry point");
+        let entry_point =
+            get_clap_entry_point(&self.library).expect("A Plugin was constructed for a plugin with no entry point");
 
         unsafe {
             clap_call! { entry_point=>deinit() };
@@ -91,18 +94,29 @@ impl Drop for PluginLibrary {
 impl PluginLibrary {
     /// Load a CLAP plugin from a path to a `.clap` file or bundle. This will return an error if the
     /// plugin could not be loaded.
+    ///
+    /// This MUST be called on the OS main thread (if applicable).
     pub fn load(path: impl AsRef<Path>) -> Result<PluginLibrary> {
-        Self::load_with(path, |path| {
-            unsafe { libloading::Library::new(path) }.context("Could not load the plugin library")
-        })
+        unsafe {
+            Self::load_with(path, |path| {
+                libloading::Library::new(path).context("Could not load the plugin library")
+            })
+        }
     }
 
     /// The same as [`load()`][`Self::load()`], but with a custom library loading function. Useful
     /// for testing different `dlopen()` options.
+    ///
+    /// This MUST be called on the OS main thread (if applicable).
     pub fn load_with(
         path: impl AsRef<Path>,
         load: impl FnOnce(&Path) -> Result<libloading::Library>,
     ) -> Result<PluginLibrary> {
+        // assert!(
+        //     IS_OS_MAIN_THREAD.with(|cell| cell.get()),
+        //     "PluginLibrary must be loaded from the OS main thread"
+        // );
+
         // NOTE: We'll always make sure `path` is either relative to the current directory or
         //       absolute. Otherwise the system libraries may be searched instead which would lead
         //       to unexpected behavior. Joining an absolute path to a relative directory gets you
@@ -113,12 +127,8 @@ impl PluginLibrary {
 
         // This is the path passed to `clap_entry::init()`. On macOS this should point to the
         // bundle, not the DSO.
-        let path_cstring = CString::new(
-            path.as_os_str()
-                .to_str()
-                .context("Path contains invalid UTF-8")?,
-        )
-        .context("Path contains null bytes")?;
+        let path_cstring = CString::new(path.as_os_str().to_str().context("Path contains invalid UTF-8")?)
+            .context("Path contains null bytes")?;
 
         // NOTE: Apple says you can dlopen() bundles. This is a lie.
         #[cfg(not(target_os = "macos"))]
@@ -128,9 +138,8 @@ impl PluginLibrary {
             use core_foundation::bundle::CFBundle;
             use core_foundation::url::CFURL;
 
-            let bundle =
-                CFBundle::new(CFURL::from_path(&path, true).context("Could not create CFURL")?)
-                    .context("Could not open bundle")?;
+            let bundle = CFBundle::new(CFURL::from_path(&path, true).context("Could not create CFURL")?)
+                .context("Could not open bundle")?;
             let executable = bundle
                 .executable_url()
                 .context("Could not get executable URL within bundle")?;
@@ -156,6 +165,7 @@ impl PluginLibrary {
         Ok(PluginLibrary {
             plugin_path: path,
             library,
+            _thread: PhantomData,
         })
     }
 
@@ -166,8 +176,8 @@ impl PluginLibrary {
     /// Get the metadata for all plugins stored in this plugin library. Most plugin libraries
     /// contain a single plugin, but this may return metadata for zero or more plugins.
     pub fn metadata(&self) -> Result<PluginLibraryMetadata> {
-        let entry_point = get_clap_entry_point(&self.library)
-            .expect("A Plugin was constructed for a plugin with no entry point");
+        let entry_point =
+            get_clap_entry_point(&self.library).expect("A Plugin was constructed for a plugin with no entry point");
         let plugin_factory = unsafe {
             clap_call! { entry_point=>get_factory(CLAP_PLUGIN_FACTORY_ID.as_ptr()) }
         } as *const clap_plugin_factory;
@@ -196,8 +206,8 @@ impl PluginLibrary {
 
             if descriptor.is_null() {
                 anyhow::bail!(
-                    "The plugin returned a null plugin descriptor for plugin index {i} (expected \
-                     {num_plugins} total plugins)."
+                    "The plugin returned a null plugin descriptor for plugin index {i} (expected {num_plugins} total \
+                     plugins)."
                 );
             }
 
@@ -223,11 +233,10 @@ impl PluginLibrary {
     /// assert that querying a factory with a non-existent ID returns a null pointer instead of
     /// always returning the plugin factory.
     pub fn factory_exists(&self, factory_id: &str) -> bool {
-        let factory_id_cstring =
-            CString::new(factory_id).expect("The factory ID contained internal null bytes");
+        let factory_id_cstring = CString::new(factory_id).expect("The factory ID contained internal null bytes");
 
-        let entry_point = get_clap_entry_point(&self.library)
-            .expect("A Plugin was constructed for a plugin with no entry point");
+        let entry_point =
+            get_clap_entry_point(&self.library).expect("A Plugin was constructed for a plugin with no entry point");
         let factory_pointer = unsafe {
             clap_call! { entry_point=>get_factory(factory_id_cstring.as_ptr()) }
         };
@@ -240,8 +249,8 @@ impl PluginLibrary {
     /// [`metadata()`][Self::metadata()]. The returned plugin has not yet been initialized, and
     /// `destroy()` will be called automatically when the object is dropped.
     pub fn create_plugin(&self, id: &str) -> Result<Plugin<'_>> {
-        let entry_point = get_clap_entry_point(&self.library)
-            .expect("A Plugin was constructed for a plugin with no entry point");
+        let entry_point =
+            get_clap_entry_point(&self.library).expect("A Plugin was constructed for a plugin with no entry point");
 
         let plugin_factory = unsafe {
             clap_call! { entry_point=>get_factory(CLAP_PLUGIN_FACTORY_ID.as_ptr()) }
@@ -255,13 +264,13 @@ impl PluginLibrary {
         }
 
         let id_cstring = CString::new(id).context("Plugin ID contained null bytes")?;
-        Plugin::new(self, unsafe { &*plugin_factory }, &id_cstring)
+        unsafe { Plugin::new(&*plugin_factory, &id_cstring) }
     }
 
     /// Returns the plugin's preset discovery factory, if it has one.
     pub fn preset_discovery_factory(&self) -> Result<PresetDiscoveryFactory<'_>> {
-        let entry_point = get_clap_entry_point(&self.library)
-            .expect("A Plugin was constructed for a plugin with no entry point");
+        let entry_point =
+            get_clap_entry_point(&self.library).expect("A Plugin was constructed for a plugin with no entry point");
         let preset_discovery_factory = unsafe {
             clap_call! {
                 entry_point=>get_factory(CLAP_PRESET_DISCOVERY_FACTORY_ID.as_ptr())
@@ -269,9 +278,7 @@ impl PluginLibrary {
         } as *mut clap_preset_discovery_factory;
 
         match NonNull::new(preset_discovery_factory) {
-            Some(preset_discovery_factory) => {
-                Ok(PresetDiscoveryFactory::new(self, preset_discovery_factory))
-            }
+            Some(preset_discovery_factory) => Ok(PresetDiscoveryFactory::new(self, preset_discovery_factory)),
             None => {
                 anyhow::bail!(
                     "The plugin does not support the '{}' factory.",
@@ -296,11 +303,20 @@ impl PluginLibraryMetadata {
 /// Get a plugin's entry point.
 fn get_clap_entry_point(library: &libloading::Library) -> Result<&clap_plugin_entry> {
     let entry_point: libloading::Symbol<*const clap_plugin_entry> =
-        unsafe { library.get(b"clap_entry") }
-            .context("The library does not expose a 'clap_entry' symbol")?;
+        unsafe { library.get(b"clap_entry") }.context("The library does not expose a 'clap_entry' symbol")?;
     if entry_point.is_null() {
         anyhow::bail!("'clap_entry' is a null pointer.");
     }
 
     Ok(unsafe { &**entry_point })
+}
+
+thread_local! {
+    static IS_OS_MAIN_THREAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub(crate) fn mark_current_thread_as_os_main_thread() {
+    IS_OS_MAIN_THREAD.with(|cell| {
+        cell.set(true);
+    });
 }

@@ -3,21 +3,17 @@
 use super::ext::Extension;
 use super::library::{PluginLibrary, PluginMetadata};
 use crate::plugin::preset_discovery::LocationValue;
-use crate::util::{self, check_null_ptr, clap_call};
+use crate::util::{self, AssertSendSync, check_null_ptr, clap_call, validator_version};
 use anyhow::{Context, Result};
-use audio_thread::PluginAudioThread;
-use clap_sys::ext::audio_ports::{
-    CLAP_AUDIO_PORTS_RESCAN_NAMES, CLAP_EXT_AUDIO_PORTS, clap_host_audio_ports,
-};
+use clap_sys::ext::audio_ports::{CLAP_AUDIO_PORTS_RESCAN_NAMES, CLAP_EXT_AUDIO_PORTS, clap_host_audio_ports};
 use clap_sys::ext::latency::{CLAP_EXT_LATENCY, clap_host_latency};
 use clap_sys::ext::note_ports::{
-    CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI,
-    CLAP_NOTE_DIALECT_MIDI_MPE, CLAP_NOTE_PORTS_RESCAN_ALL, CLAP_NOTE_PORTS_RESCAN_NAMES,
-    clap_host_note_ports, clap_note_dialect,
+    CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI, CLAP_NOTE_DIALECT_MIDI_MPE,
+    CLAP_NOTE_PORTS_RESCAN_ALL, CLAP_NOTE_PORTS_RESCAN_NAMES, clap_host_note_ports, clap_note_dialect,
 };
 use clap_sys::ext::params::{
-    CLAP_EXT_PARAMS, CLAP_PARAM_RESCAN_ALL, CLAP_PARAM_RESCAN_INFO, CLAP_PARAM_RESCAN_TEXT,
-    CLAP_PARAM_RESCAN_VALUES, clap_host_params, clap_param_clear_flags, clap_param_rescan_flags,
+    CLAP_EXT_PARAMS, CLAP_PARAM_RESCAN_ALL, CLAP_PARAM_RESCAN_INFO, CLAP_PARAM_RESCAN_TEXT, CLAP_PARAM_RESCAN_VALUES,
+    clap_host_params, clap_param_clear_flags, clap_param_rescan_flags,
 };
 use clap_sys::ext::preset_load::{CLAP_EXT_PRESET_LOAD, clap_host_preset_load};
 use clap_sys::ext::state::{CLAP_EXT_STATE, clap_host_state};
@@ -30,35 +26,38 @@ use clap_sys::host::clap_host;
 use clap_sys::id::clap_id;
 use clap_sys::plugin::clap_plugin;
 use clap_sys::version::CLAP_VERSION;
-use crossbeam::atomic::AtomicCell;
-use crossbeam::queue::SegQueue;
-use std::ffi::{CStr, CString, c_char, c_void};
+use crossbeam_utils::atomic::AtomicCell;
+use std::ffi::{CStr, c_char, c_void};
 use std::marker::PhantomData;
 use std::panic::resume_unwind;
 use std::pin::Pin;
 use std::ptr::NonNull;
-use std::sync::{Arc, OnceLock};
+use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 
-pub mod audio_thread;
-pub mod process;
+mod audio_thread;
+pub use audio_thread::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CallbackEvent {
     RequestProcess,
     RequestFlush,
-    RescanParamsValues,
-    RescanParamsText,
-    RescanParamsInfo,
-    RescanParamsAll,
-    RescanAudioPortsNames,
-    RescanAudioPortsAll,
-    RescanNotePortsNames,
-    RescanNotePortsAll,
-    ChangedLatency,
-    ChangedTail,
-    ChangedVoiceInfo,
-    ChangedState,
+
+    ParamsRescanValues,
+    ParamsRescanText,
+    ParamsRescanInfo,
+    ParamsRescanAll,
+
+    AudioPortsRescanNames,
+    AudioPortsRescanAll,
+    NotePortsRescanNames,
+    NotePortsRescanAll,
+
+    LatencyChanged,
+    TailChanged,
+    VoiceInfoChanged,
+    StateMarkDirty,
 }
 
 /// The plugin's current lifecycle state. This is checked extensively to ensure that the plugin is
@@ -80,8 +79,8 @@ impl PluginStatus {
     pub fn assert_is(&self, expected: PluginStatus) {
         if *self != expected {
             panic!(
-                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, \
-                 must be {:?}). This is a bug in the validator.",
+                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, must be {:?}). This is \
+                 a bug in the validator.",
                 self, expected
             )
         }
@@ -91,8 +90,8 @@ impl PluginStatus {
     pub fn assert_is_not(&self, unexpected: PluginStatus) {
         if *self == unexpected {
             panic!(
-                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, \
-                 must not be {:?}). This is a bug in the validator.",
+                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, must not be {:?}). \
+                 This is a bug in the validator.",
                 self, unexpected
             )
         }
@@ -102,8 +101,8 @@ impl PluginStatus {
     pub fn assert_active(&self) {
         if *self < PluginStatus::Activated {
             panic!(
-                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, \
-                 must be activated). This is a bug in the validator.",
+                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, must be activated). \
+                 This is a bug in the validator.",
                 self
             )
         }
@@ -113,8 +112,8 @@ impl PluginStatus {
     pub fn assert_inactive(&self) {
         if *self >= PluginStatus::Activated {
             panic!(
-                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, \
-                 must be deactivated). This is a bug in the validator.",
+                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, must be deactivated). \
+                 This is a bug in the validator.",
                 self
             )
         }
@@ -132,27 +131,28 @@ pub struct Plugin<'lib> {
 
     /// Information about this plugin instance stored on the host. This keeps track of things like
     /// audio thread IDs, whether the plugin has pending callbacks, and what state it is in.
-    state: Pin<Arc<InstanceState>>,
+    shared: Pin<Arc<InstanceShared>>,
+
+    main: InstanceMainThread,
 
     /// The CLAP plugin library this plugin instance was created from. This field is not used
     /// directly, but keeping a reference to the library here prevents the plugin instance from
     /// outliving the library.
-    _library: &'lib PluginLibrary,
+    _library: PhantomData<&'lib PluginLibrary>,
 
     /// To honor CLAP's thread safety guidelines, the thread this object was created from is
     /// designated the 'main thread', and this object cannot be shared with other threads. The
     /// [`on_audio_thread()`][Self::on_audio_thread()] method spawns an audio thread that is able to call
     /// the plugin's audio thread functions.
-    _send_sync_marker: PhantomData<*const ()>,
+    _thread: PhantomData<*const ()>,
 }
 
 impl Drop for Plugin<'_> {
     fn drop(&mut self) {
-        if let Some(error) = self.state.callback_error.take() {
+        if let Some(error) = self.shared.callback_error.lock().unwrap().take() {
             log::warn!(
-                "The validator's host has detected a callback error but this error has not been \
-                 used as part of the test result. This could be a clap-validator bug. The error \
-                 message is: {error}"
+                "The validator's host has detected a callback error but this error has not been used as part of the \
+                 test result. This could be a clap-validator bug. The error message is: {error}"
             )
         }
 
@@ -161,8 +161,8 @@ impl Drop for Plugin<'_> {
             PluginStatus::Uninitialized | PluginStatus::Deactivated => (),
             PluginStatus::Activated => self.deactivate(),
             status => panic!(
-                "The plugin was in an invalid state '{status:?}' when the instance got dropped, \
-                 this is a clap-validator bug"
+                "The plugin was in an invalid state '{status:?}' when the instance got dropped, this is a \
+                 clap-validator bug"
             ),
         }
 
@@ -179,30 +179,28 @@ impl<'lib> Plugin<'lib> {
     /// Create a plugin instance and return the still uninitialized plugin. Returns an error if the
     /// plugin could not be created. The plugin instance will be registered with the host, and
     /// unregistered when this object is dropped again.
-    pub(crate) fn new(
-        library: &'lib PluginLibrary,
-        factory: &clap_plugin_factory,
-        plugin_id: &CStr,
-    ) -> Result<Self> {
-        let state = InstanceState::new();
+    ///
+    /// # Safety
+    /// This MUST be called on the OS main thread (if applicable).
+    pub(crate) unsafe fn new(factory: &clap_plugin_factory, plugin_id: &CStr) -> Result<Self> {
+        let (shared, main) = InstanceShared::new();
         let plugin = unsafe {
             clap_call! {
-                factory=>create_plugin(factory, state.clap_host_ptr(), plugin_id.as_ptr())
+                factory=>create_plugin(factory, shared.clap_host_ptr(), plugin_id.as_ptr())
             }
         };
 
         if plugin.is_null() {
-            anyhow::bail!(
-                "'clap_plugin_factory::create_plugin({plugin_id:?})' returned a null pointer."
-            );
+            anyhow::bail!("'clap_plugin_factory::create_plugin({plugin_id:?})' returned a null pointer.");
         }
 
         Ok(Plugin {
             handle: NonNull::new(plugin as *mut clap_plugin).unwrap(),
-            state,
+            shared,
+            main,
 
-            _library: library,
-            _send_sync_marker: PhantomData,
+            _library: PhantomData,
+            _thread: PhantomData,
         })
     }
 
@@ -225,7 +223,11 @@ impl<'lib> Plugin<'lib> {
 
     /// The plugin's current initialization status.
     pub fn status(&self) -> PluginStatus {
-        self.state.status.load()
+        self.shared.status.load()
+    }
+
+    pub fn shared(&self) -> &Pin<Arc<InstanceShared>> {
+        &self.shared
     }
 
     /// Handle any pending main-thread callbacks for this plugin.
@@ -233,13 +235,14 @@ impl<'lib> Plugin<'lib> {
     pub fn handle_callback(&self) -> Result<()> {
         self.handle_callback_unchecked();
 
-        if let Some(error) = self.state.callback_error.take() {
+        if let Some(error) = self.shared.callback_error.lock().unwrap().take() {
             anyhow::bail!(error);
         }
 
-        while let Some(event) = self.state.callback_events.pop() {
-            println!("{:?}", event);
-        }
+        // TODO:
+        // while let Ok(event) = self.shared.callback_receiver.lock().unwrap().recv() {
+        //     println!("{:?}", event);
+        // }
 
         Ok(())
     }
@@ -257,12 +260,7 @@ impl<'lib> Plugin<'lib> {
             };
 
             if !extension_ptr.is_null() {
-                return unsafe {
-                    Some(T::new(
-                        self,
-                        NonNull::new(extension_ptr as *mut T::Struct).unwrap(),
-                    ))
-                };
+                return unsafe { Some(T::new(self, NonNull::new(extension_ptr as *mut T::Struct).unwrap())) };
             }
         }
 
@@ -275,70 +273,26 @@ impl<'lib> Plugin<'lib> {
     ///
     /// If whatever happens on the audio thread caused main-thread callback requests to be emited,
     /// then those will be handled concurrently.
-    pub fn on_audio_thread<'a, T: Send, F: FnOnce(PluginAudioThread<'a>) -> T + Send>(
-        &'a self,
-        f: F,
-    ) -> T {
-        struct SendWrapper<'lib>(&'lib Plugin<'lib>);
+    pub fn on_audio_thread<T: Send, F: FnOnce(PluginAudioThread) -> T + Send>(&self, f: F) -> T {
+        let plugin = unsafe { AssertSendSync::new(self) };
 
-        // SAFETY: We artificially impose `!Send`+`!Sync` requirements on `Plugin` and
-        //         `PluginAudioThread` to prevent them from being shared with other
-        //         threads. But we'll need to temporarily lift that restriction in order
-        //         to create this `PluginAudioThread`.
-        unsafe impl<'lib> Send for SendWrapper<'lib> {}
-        unsafe impl<'lib> Sync for SendWrapper<'lib> {}
-
-        impl<'lib> SendWrapper<'lib> {
-            fn get(&self) -> &'lib Plugin<'lib> {
-                self.0
-            }
-        }
-
-        self.status().assert_is(PluginStatus::Activated);
-
-        let is_running = AtomicCell::new(true);
-        let send_wrapper = SendWrapper(self);
-
-        crossbeam::scope(|s| {
-            let audio_thread = s
-                .builder()
-                .name(String::from("audio-thread"))
-                .spawn(|_| {
-                    struct SetFalseOnDrop<'a>(&'a AtomicCell<bool>);
-                    impl<'a> Drop for SetFalseOnDrop<'a> {
-                        fn drop(&mut self) {
-                            self.0.store(false);
-                        }
-                    }
-
-                    let this = send_wrapper.get();
-
-                    // So we know when to stop handling callbacks on the main thread
-                    // even if the audio thread panics
-                    let _guard = SetFalseOnDrop(&is_running);
-
-                    // This is used to check that calls are run from an audio thread
-                    this.state
-                        .audio_thread_id
-                        .store(Some(std::thread::current().id()));
-
-                    f(PluginAudioThread::new(this))
-                })
-                .expect("Unable to spawn an audio thread");
+        let result = std::thread::scope(|s| {
+            let thread = s.spawn(|| f(PluginAudioThread::new(plugin.get())));
 
             // Handle callbacks requests on the main thread while the audio thread is running
-            while is_running.load() {
-                self.handle_callback_unchecked();
-                std::thread::sleep(std::time::Duration::from_millis(5));
+            while let Ok(task) = self.main.task_receiver.recv() {
+                match task {
+                    MainThreadTask::Closure(closure) => closure(self),
+                    MainThreadTask::CallbackRequest => self.handle_callback_unchecked(),
+                    MainThreadTask::StopAudioThread => break,
+                }
             }
 
-            self.handle_callback_unchecked();
+            thread.join().unwrap_or_else(|panic_info| resume_unwind(panic_info))
+        });
 
-            audio_thread
-                .join()
-                .unwrap_or_else(|panic_info| resume_unwind(panic_info))
-        })
-        .unwrap()
+        self.handle_callback_unchecked();
+        result
     }
 
     /// Initialize the plugin. This needs to be called before doing anything else.
@@ -357,7 +311,7 @@ impl<'lib> Plugin<'lib> {
                 "clap_plugin::on_main_thread is null"
             );
 
-            self.state.status.store(PluginStatus::Deactivated);
+            self.shared.status.store(PluginStatus::Deactivated);
             Ok(())
         } else {
             anyhow::bail!("'clap_plugin::init()' returned false.")
@@ -367,12 +321,7 @@ impl<'lib> Plugin<'lib> {
     /// Activate the plugin. Returns an error if the plugin returned `false`. See
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
-    pub fn activate(
-        &self,
-        sample_rate: f64,
-        min_buffer_size: usize,
-        max_buffer_size: usize,
-    ) -> Result<()> {
+    pub fn activate(&self, sample_rate: f64, min_buffer_size: u32, max_buffer_size: u32) -> Result<()> {
         self.status().assert_is(PluginStatus::Deactivated);
 
         // Apparently 0 is invalid here
@@ -380,18 +329,18 @@ impl<'lib> Plugin<'lib> {
         assert!(max_buffer_size >= min_buffer_size);
 
         // we need to track the `Activating` state to validate that we call clap_host_latency::changed only within the activation call.
-        self.state.status.store(PluginStatus::Activating);
+        self.shared.status.store(PluginStatus::Activating);
 
         let plugin = self.as_ptr();
         let result = unsafe {
-            clap_call! { plugin=>activate(plugin, sample_rate, min_buffer_size as u32, max_buffer_size as u32) }
+            clap_call! { plugin=>activate(plugin, sample_rate, min_buffer_size, max_buffer_size) }
         };
 
         if result {
-            self.state.status.store(PluginStatus::Activated);
+            self.shared.status.store(PluginStatus::Activated);
             Ok(())
         } else {
-            self.state.status.store(PluginStatus::Deactivated);
+            self.shared.status.store(PluginStatus::Deactivated);
             anyhow::bail!("'clap_plugin::activate()' returned false.")
         }
     }
@@ -407,11 +356,11 @@ impl<'lib> Plugin<'lib> {
             clap_call! { plugin=>deactivate(plugin) }
         }
 
-        self.state.status.store(PluginStatus::Deactivated);
+        self.shared.status.store(PluginStatus::Deactivated);
     }
 
     fn handle_callback_unchecked(&self) {
-        if self.state.requested_callback.swap(false) {
+        if self.shared.requested_callback.swap(false) {
             let plugin = self.as_ptr();
             unsafe {
                 clap_call! { plugin=>on_main_thread(plugin) }
@@ -420,12 +369,19 @@ impl<'lib> Plugin<'lib> {
     }
 }
 
+pub enum MainThreadTask {
+    Closure(Box<dyn FnOnce(&Plugin) + Send>),
+    CallbackRequest,
+    StopAudioThread,
+}
+
 /// Runtime information about a plugin instance. This keeps track of pending callbacks and things
 /// like audio threads. It also contains the plugin's unique `clap_host` struct so host callbacks
 /// can be linked back to this specific plugin instance.
-struct InstanceState {
-    pub callback_events: SegQueue<CallbackEvent>,
-    pub callback_error: AtomicCell<Option<String>>,
+pub struct InstanceShared {
+    pub task_sender: Sender<MainThreadTask>,
+    pub callback_sender: Sender<CallbackEvent>,
+    pub callback_error: Mutex<Option<String>>,
 
     /// The plugin's current state in terms of activation and processing status.
     pub status: AtomicCell<PluginStatus>,
@@ -456,14 +412,21 @@ struct InstanceState {
     clap_host_voice_info: clap_host_voice_info,
 }
 
-impl InstanceState {
-    pub fn new() -> Pin<Arc<Self>> {
-        static VERSION: OnceLock<CString> = OnceLock::new();
+struct InstanceMainThread {
+    callback_receiver: Receiver<CallbackEvent>,
+    task_receiver: Receiver<MainThreadTask>,
+}
 
+impl InstanceShared {
+    fn new() -> (Pin<Arc<Self>>, InstanceMainThread) {
         let main_thread = std::thread::current().id();
-        let instance = Arc::pin(InstanceState {
-            callback_events: SegQueue::new(),
-            callback_error: AtomicCell::new(None),
+        let (callback_sender, callback_receiver) = channel();
+        let (task_sender, task_receiver) = channel();
+
+        let shared = Arc::pin(InstanceShared {
+            task_sender,
+            callback_sender,
+            callback_error: Mutex::new(None),
 
             status: AtomicCell::new(PluginStatus::Uninitialized),
             main_thread_id: main_thread,
@@ -478,9 +441,7 @@ impl InstanceState {
                 name: c"clap-validator".as_ptr(),
                 vendor: c"Robbert van der Helm".as_ptr(),
                 url: c"https://github.com/free-audio/clap-validator".as_ptr(),
-                version: VERSION
-                    .get_or_init(|| CString::new(env!("CARGO_PKG_VERSION")).unwrap())
-                    .as_ptr(),
+                version: validator_version().as_ptr(),
                 get_extension: Some(Self::get_extension),
                 request_restart: Some(Self::request_restart),
                 request_process: Some(Self::request_process),
@@ -522,15 +483,20 @@ impl InstanceState {
             },
         });
 
+        let main = InstanceMainThread {
+            callback_receiver,
+            task_receiver,
+        };
+
         // Now that the Arc is pinned in memory, we can store a pointer to it in the clap_host struct
         // so it can be retrieved in host callbacks
         unsafe {
-            (&raw const instance.clap_host.host_data)
+            (&raw const shared.clap_host.host_data)
                 .cast_mut()
-                .write(&*instance as *const _ as *mut std::ffi::c_void);
+                .write(&*shared as *const _ as *mut std::ffi::c_void);
         }
 
-        instance
+        (shared, main)
     }
 
     pub fn clap_host_ptr(&self) -> *const clap_host {
@@ -540,7 +506,7 @@ impl InstanceState {
     #[track_caller]
     pub unsafe fn from_clap_host<'a>(host: *const clap_host) -> &'a Self {
         unsafe {
-            let state = (*host).host_data as *const InstanceState;
+            let state = (*host).host_data as *const InstanceShared;
             &*state
         }
     }
@@ -548,8 +514,9 @@ impl InstanceState {
     /// Set the callback error field if it does not already contain a value. Earlier errors are not
     /// overwritten.
     fn set_callback_error(&self, error: impl Into<String>) {
-        if let Some(old_error) = self.callback_error.swap(Some(error.into())) {
-            self.callback_error.store(Some(old_error));
+        let mut guard = self.callback_error.lock().unwrap();
+        if guard.is_none() {
+            *guard = Some(error.into());
         }
     }
 
@@ -560,8 +527,7 @@ impl InstanceState {
         let current_thread_id = std::thread::current().id();
         if current_thread_id != self.main_thread_id {
             self.set_callback_error(format!(
-                "'{}' may only be called from the main thread (thread {:?}), but it was called \
-                 from thread {:?}.",
+                "'{}' may only be called from the main thread (thread {:?}), but it was called from thread {:?}.",
                 function_name, self.main_thread_id, current_thread_id
             ));
         }
@@ -575,13 +541,13 @@ impl InstanceState {
         if self.audio_thread_id.load() != Some(current_thread_id) {
             if current_thread_id == self.main_thread_id {
                 self.set_callback_error(format!(
-                    "'{function_name}' may only be called from an audio thread, but it was called \
-                     from the main thread."
+                    "'{function_name}' may only be called from an audio thread, but it was called from the main \
+                     thread."
                 ));
             } else {
                 self.set_callback_error(format!(
-                    "'{function_name}' may only be called from an audio thread, but it was called \
-                     from an unknown thread."
+                    "'{function_name}' may only be called from an audio thread, but it was called from an unknown \
+                     thread."
                 ));
             }
         }
@@ -599,12 +565,9 @@ impl InstanceState {
         }
     }
 
-    unsafe extern "C" fn get_extension(
-        host: *const clap_host,
-        extension_id: *const c_char,
-    ) -> *const c_void {
+    unsafe extern "C" fn get_extension(host: *const clap_host, extension_id: *const c_char) -> *const c_void {
         //check_null_ptr!(host, (*host).host_data, extension_id);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         // Right now there's no way to have the host only expose certain extensions. We can always
         // add that when test cases need it.
@@ -634,7 +597,7 @@ impl InstanceState {
 
     unsafe extern "C" fn request_restart(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         // This flag will be reset at the start of one of the `ProcessingTest::run*` functions, and
         // in the multi-iteration run function it will trigger a deactivate->reactivate cycle
@@ -644,31 +607,29 @@ impl InstanceState {
 
     unsafe extern "C" fn request_process(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         // Handling this within the context of the validator would be a bit messy. Do plugins use
         // this?
         log::trace!("'clap_host::request_process()' was called by the plugin");
-        this.callback_events.push(CallbackEvent::RequestProcess);
+        this.callback_sender.send(CallbackEvent::RequestProcess).unwrap();
     }
 
     unsafe extern "C" fn request_callback(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         // This this is either handled by `handle_callbacks_blocking()` while the audio thread is
         // active, or by an explicit call to `handle_callbacks_once()`. We print a warning if the
         // callback is not handled before the plugin is destroyed.
         log::trace!("'clap_host::request_callback()' was called by the plugin, setting the flag");
         this.requested_callback.store(true);
+        this.task_sender.send(MainThreadTask::CallbackRequest).unwrap();
     }
 
-    unsafe extern "C" fn ext_audio_ports_is_rescan_flag_supported(
-        host: *const clap_host,
-        _flag: u32,
-    ) -> bool {
+    unsafe extern "C" fn ext_audio_ports_is_rescan_flag_supported(host: *const clap_host, _flag: u32) -> bool {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_audio_ports::is_rescan_flag_supported()");
         log::trace!("'clap_host_audio_ports::is_rescan_flag_supported()' was called");
@@ -677,33 +638,27 @@ impl InstanceState {
 
     unsafe extern "C" fn ext_audio_ports_rescan(host: *const clap_host, flags: u32) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_audio_ports::rescan()");
         log::trace!("'clap_host_audio_ports::rescan()' was called");
 
         if flags & CLAP_AUDIO_PORTS_RESCAN_NAMES != 0 {
-            this.callback_events
-                .push(CallbackEvent::RescanAudioPortsNames);
+            this.callback_sender.send(CallbackEvent::AudioPortsRescanNames).unwrap();
         }
 
         if flags & !CLAP_AUDIO_PORTS_RESCAN_NAMES != 0 {
             if this.status.load() > PluginStatus::Activated {
-                this.set_callback_error(
-                    "'clap_host_audio_ports::rescan()' was called while the plugin was activated",
-                );
+                this.set_callback_error("'clap_host_audio_ports::rescan()' was called while the plugin was activated");
             }
 
-            this.callback_events
-                .push(CallbackEvent::RescanAudioPortsAll);
+            this.callback_sender.send(CallbackEvent::AudioPortsRescanAll).unwrap();
         }
     }
 
-    unsafe extern "C" fn ext_note_ports_supported_dialects(
-        host: *const clap_host,
-    ) -> clap_note_dialect {
+    unsafe extern "C" fn ext_note_ports_supported_dialects(host: *const clap_host) -> clap_note_dialect {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_note_ports::supported_dialects()");
         log::trace!("'clap_host_note_ports::supported_dialects()' was called");
@@ -713,25 +668,24 @@ impl InstanceState {
 
     unsafe extern "C" fn ext_note_ports_rescan(host: *const clap_host, flags: u32) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_note_ports::rescan()");
         log::trace!("'clap_host_note_ports::rescan()' was called");
 
         if flags & CLAP_NOTE_PORTS_RESCAN_NAMES != 0 {
-            this.callback_events
-                .push(CallbackEvent::RescanNotePortsNames);
+            this.callback_sender.send(CallbackEvent::NotePortsRescanNames).unwrap();
         }
 
         if flags & CLAP_NOTE_PORTS_RESCAN_ALL != 0 {
             if this.status.load() > PluginStatus::Activated {
                 this.set_callback_error(
-                    "'clap_host_note_ports::rescan(CLAP_NOTE_PORTS_RESCAN_ALL)' was called while \
-                     the plugin was activated",
+                    "'clap_host_note_ports::rescan(CLAP_NOTE_PORTS_RESCAN_ALL)' was called while the plugin was \
+                     activated",
                 );
             }
 
-            this.callback_events.push(CallbackEvent::RescanNotePortsAll);
+            this.callback_sender.send(CallbackEvent::NotePortsRescanAll).unwrap();
         }
     }
 
@@ -744,28 +698,27 @@ impl InstanceState {
         msg: *const c_char,
     ) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_preset_load::on_error()");
 
         let location = unsafe { LocationValue::new(location_kind, location) }
             .context("'clap_host_preset_load::on_error()' called with invalid location parameters");
-        let load_key = unsafe { util::cstr_ptr_to_optional_string(load_key) }.context(
-            "'clap_host_preset_load::on_error()' called with an invalid load_key parameter",
-        );
+        let load_key = unsafe { util::cstr_ptr_to_optional_string(load_key) }
+            .context("'clap_host_preset_load::on_error()' called with an invalid load_key parameter");
         let msg = unsafe { util::cstr_ptr_to_mandatory_string(msg) }
             .context("'clap_host_preset_load::on_error()' called with an invalid msg parameter");
         match (location, load_key, msg) {
             (Ok(location), Ok(Some(load_key)), Ok(msg)) => {
                 this.set_callback_error(format!(
-                    "'clap_host_preset_load::on_error()' called for {location} with load key \
-                     {load_key}, OS error code {os_error}, and the following error message: {msg}"
+                    "'clap_host_preset_load::on_error()' called for {location} with load key {load_key}, OS error \
+                     code {os_error}, and the following error message: {msg}"
                 ));
             }
             (Ok(location), Ok(None), Ok(msg)) => {
                 this.set_callback_error(format!(
-                    "'clap_host_preset_load::on_error()' called for {location} with no load key, \
-                     OS error code {os_error}, and the following error message: {msg}"
+                    "'clap_host_preset_load::on_error()' called for {location} with no load key, OS error code \
+                     {os_error}, and the following error message: {msg}"
                 ));
             }
             (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => {
@@ -781,7 +734,7 @@ impl InstanceState {
         load_key: *const c_char,
     ) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_preset_load::loaded()");
 
@@ -789,6 +742,7 @@ impl InstanceState {
             .context("'clap_host_preset_load::loaded()' called with invalid location parameters");
         let load_key = unsafe { util::cstr_ptr_to_optional_string(load_key) }
             .context("'clap_host_preset_load::loaded()' called with an invalid load_key parameter");
+
         match (location, load_key) {
             (Ok(_location), Ok(_load_key)) => {
                 log::debug!("TODO: Handle 'clap_host_preset_load::loaded()'");
@@ -801,42 +755,37 @@ impl InstanceState {
 
     unsafe extern "C" fn ext_params_rescan(host: *const clap_host, flags: clap_param_rescan_flags) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_params::rescan()");
         log::trace!("'clap_host_params::rescan()' was called");
 
         if flags & CLAP_PARAM_RESCAN_VALUES != 0 {
-            this.callback_events.push(CallbackEvent::RescanParamsValues);
+            this.callback_sender.send(CallbackEvent::ParamsRescanValues).unwrap();
         }
 
         if flags & CLAP_PARAM_RESCAN_TEXT != 0 {
-            this.callback_events.push(CallbackEvent::RescanParamsText);
+            this.callback_sender.send(CallbackEvent::ParamsRescanText).unwrap();
         }
 
         if flags & CLAP_PARAM_RESCAN_INFO != 0 {
-            this.callback_events.push(CallbackEvent::RescanParamsInfo);
+            this.callback_sender.send(CallbackEvent::ParamsRescanInfo).unwrap();
         }
 
         if flags & CLAP_PARAM_RESCAN_ALL != 0 {
             if this.status.load() > PluginStatus::Activated {
                 this.set_callback_error(
-                    "'clap_host_params::rescan(CLAP_PARAM_RESCAN_ALL)' was called while the \
-                     plugin is activated",
+                    "'clap_host_params::rescan(CLAP_PARAM_RESCAN_ALL)' was called while the plugin is activated",
                 );
             }
 
-            this.callback_events.push(CallbackEvent::RescanParamsAll);
+            this.callback_sender.send(CallbackEvent::ParamsRescanAll).unwrap();
         }
     }
 
-    unsafe extern "C" fn ext_params_clear(
-        host: *const clap_host,
-        _param_id: clap_id,
-        _flags: clap_param_clear_flags,
-    ) {
+    unsafe extern "C" fn ext_params_clear(host: *const clap_host, _param_id: clap_id, _flags: clap_param_clear_flags) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_params::clear()");
         log::debug!("TODO: Handle 'clap_host_params::clear()'");
@@ -844,65 +793,64 @@ impl InstanceState {
 
     unsafe extern "C" fn ext_params_request_flush(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         this.assert_not_audio_thread("clap_host_params::request_flush()");
         log::trace!("'clap_host_params::request_flush()' was called");
-        this.callback_events.push(CallbackEvent::RequestFlush);
+        this.callback_sender.send(CallbackEvent::RequestFlush).unwrap();
     }
 
     unsafe extern "C" fn ext_state_mark_dirty(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_state::mark_dirty()");
         log::trace!("'clap_host_state::mark_dirty()' was called");
-        this.callback_events.push(CallbackEvent::ChangedState);
+        this.callback_sender.send(CallbackEvent::StateMarkDirty).unwrap();
     }
 
     unsafe extern "C" fn ext_thread_check_is_main_thread(host: *const clap_host) -> bool {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
         this.main_thread_id == std::thread::current().id()
     }
 
     unsafe extern "C" fn ext_thread_check_is_audio_thread(host: *const clap_host) -> bool {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
         this.audio_thread_id.load() == Some(std::thread::current().id())
     }
 
     unsafe extern "C" fn ext_latency_changed(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         if this.status.load() != PluginStatus::Activating {
             this.set_callback_error(
-                "'clap_host_latency::changed()' must only be called within \
-                 'clap_plugin::activate()'",
+                "'clap_host_latency::changed()' must only be called within 'clap_plugin::activate()'",
             );
         }
 
         this.assert_main_thread("clap_host_latency::changed()");
         log::trace!("'clap_host_latency::changed()' was called");
-        this.callback_events.push(CallbackEvent::ChangedLatency);
+        this.callback_sender.send(CallbackEvent::LatencyChanged).unwrap();
     }
 
     unsafe extern "C" fn ext_tail_changed(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         this.assert_audio_thread("clap_host_tail::changed()");
         log::trace!("'clap_host_tail::changed()' was called");
-        this.callback_events.push(CallbackEvent::ChangedTail);
+        this.callback_sender.send(CallbackEvent::TailChanged).unwrap();
     }
 
     unsafe extern "C" fn ext_voice_info_changed(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceState::from_clap_host(host) };
+        let this = unsafe { InstanceShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_voice_info::changed()");
         log::trace!("'clap_host_voice_info::changed()' was called");
-        this.callback_events.push(CallbackEvent::ChangedVoiceInfo);
+        this.callback_sender.send(CallbackEvent::VoiceInfoChanged).unwrap();
     }
 }

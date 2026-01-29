@@ -3,8 +3,8 @@ use crate::plugin::instance::Plugin;
 use crate::util::clap_call;
 use clap_sys::ext::audio_ports::{CLAP_PORT_MONO, CLAP_PORT_STEREO};
 use clap_sys::ext::configurable_audio_ports::{
-    CLAP_EXT_CONFIGURABLE_AUDIO_PORTS, CLAP_EXT_CONFIGURABLE_AUDIO_PORTS_COMPAT,
-    clap_audio_port_configuration_request, clap_plugin_configurable_audio_ports,
+    CLAP_EXT_CONFIGURABLE_AUDIO_PORTS, CLAP_EXT_CONFIGURABLE_AUDIO_PORTS_COMPAT, clap_audio_port_configuration_request,
+    clap_plugin_configurable_audio_ports,
 };
 use std::ffi::CStr;
 use std::ptr::{NonNull, null};
@@ -39,10 +39,7 @@ impl<'a> Extension<&'a Plugin<'a>> for ConfigurableAudioPorts<'a> {
 }
 
 impl<'a> ConfigurableAudioPorts<'a> {
-    pub fn can_apply_configuration(
-        &self,
-        requests: impl IntoIterator<Item = AudioPortsRequest>,
-    ) -> bool {
+    pub fn can_apply_configuration(&self, requests: impl IntoIterator<Item = AudioPortsRequest>) -> bool {
         self.plugin.status().assert_inactive();
 
         let requests = requests
@@ -72,10 +69,7 @@ impl<'a> ConfigurableAudioPorts<'a> {
         }
     }
 
-    pub fn apply_configuration(
-        &self,
-        requests: impl IntoIterator<Item = AudioPortsRequest>,
-    ) -> bool {
+    pub fn apply_configuration(&self, requests: impl IntoIterator<Item = AudioPortsRequest>) -> bool {
         self.plugin.status().assert_inactive();
 
         let requests = requests

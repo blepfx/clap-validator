@@ -150,10 +150,10 @@ pub fn validator_temp_dir() -> PathBuf {
     /// [`std::env::temp_dir`], but taking `XDG_RUNTIME_DIR` on Linux into account.
     fn temp_dir() -> PathBuf {
         #[cfg(all(unix, not(target_os = "macos")))]
-        if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR").map(PathBuf::from) {
-            if dir.is_dir() {
-                return dir;
-            }
+        if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR").map(PathBuf::from)
+            && dir.is_dir()
+        {
+            return dir;
         }
 
         std::env::temp_dir()

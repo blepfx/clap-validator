@@ -71,9 +71,7 @@ impl Params<'_> {
         if result {
             Ok(value)
         } else {
-            anyhow::bail!(
-                "'clap_plugin_params::get_value()' returned false for parameter ID {param_id}."
-            );
+            anyhow::bail!("'clap_plugin_params::get_value()' returned false for parameter ID {param_id}.");
         }
     }
 
@@ -97,14 +95,11 @@ impl Params<'_> {
         };
 
         if result {
-            c_char_slice_to_string(&string_buffer)
-                .map(Some)
-                .with_context(|| {
-                    format!(
-                        "Could not convert the string representation of {value} for parameter \
-                         {param_id} to a UTF-8 string"
-                    )
-                })
+            c_char_slice_to_string(&string_buffer).map(Some).with_context(|| {
+                format!(
+                    "Could not convert the string representation of {value} for parameter {param_id} to a UTF-8 string"
+                )
+            })
         } else {
             Ok(None)
         }
@@ -154,18 +149,11 @@ impl Params<'_> {
             };
 
             if !success {
-                anyhow::bail!(
-                    "Plugin returned an error when querying parameter {i} ({num_params} total \
-                     parameters)."
-                );
+                anyhow::bail!("Plugin returned an error when querying parameter {i} ({num_params} total parameters).");
             }
 
-            let name = util::c_char_slice_to_string(&info.name).with_context(|| {
-                format!(
-                    "Could not read the name for parameter with stable ID {}",
-                    info.id
-                )
-            })?;
+            let name = util::c_char_slice_to_string(&info.name)
+                .with_context(|| format!("Could not read the name for parameter with stable ID {}", info.id))?;
 
             // We don't use the module string, but we'll still check it for consistency. Basically
             // anything goes here as long as there are no trailing, leading, or multiple subsequent
@@ -178,24 +166,21 @@ impl Params<'_> {
             })?;
             if module.starts_with('/') {
                 anyhow::bail!(
-                    "The module name for parameter '{}' (stable ID {}) starts with a leading \
-                     slash: '{}'.",
+                    "The module name for parameter '{}' (stable ID {}) starts with a leading slash: '{}'.",
                     &name,
                     info.id,
                     module
                 )
             } else if module.ends_with('/') {
                 anyhow::bail!(
-                    "The module name for parameter '{}' (stable ID {}) ends with a trailing \
-                     slash: '{}'.",
+                    "The module name for parameter '{}' (stable ID {}) ends with a trailing slash: '{}'.",
                     &name,
                     info.id,
                     module
                 )
             } else if module.contains("//") {
                 anyhow::bail!(
-                    "The module name for parameter '{}' (stable ID {}) contains multiple \
-                     subsequent slashes: '{}'.",
+                    "The module name for parameter '{}' (stable ID {}) contains multiple subsequent slashes: '{}'.",
                     &name,
                     info.id,
                     module
@@ -205,8 +190,8 @@ impl Params<'_> {
             let range = info.min_value..=info.max_value;
             if info.min_value > info.max_value {
                 anyhow::bail!(
-                    "Parameter '{}' (stable ID {}) has a minimum value ({:?}) that's higher than \
-                     it's maximum value ({:?}).",
+                    "Parameter '{}' (stable ID {}) has a minimum value ({:?}) that's higher than it's maximum value \
+                     ({:?}).",
                     &name,
                     info.id,
                     info.min_value,
@@ -215,8 +200,8 @@ impl Params<'_> {
             }
             if !range.contains(&info.default_value) {
                 anyhow::bail!(
-                    "Parameter '{}' (stable ID {}) has a default value ({:?}) that falls outside \
-                     of its value range ({:?}).",
+                    "Parameter '{}' (stable ID {}) has a default value ({:?}) that falls outside of its value range \
+                     ({:?}).",
                     &name,
                     info.id,
                     info.default_value,
@@ -226,8 +211,8 @@ impl Params<'_> {
             if (info.flags & CLAP_PARAM_IS_STEPPED) != 0 {
                 if info.min_value != info.min_value.trunc() {
                     anyhow::bail!(
-                        "Parameter '{}' (stable ID {}) is a stepped parameter, but its minimum \
-                         value ({:?}) is not an integer.",
+                        "Parameter '{}' (stable ID {}) is a stepped parameter, but its minimum value ({:?}) is not an \
+                         integer.",
                         &name,
                         info.id,
                         info.min_value,
@@ -235,8 +220,8 @@ impl Params<'_> {
                 }
                 if info.max_value != info.max_value.trunc() {
                     anyhow::bail!(
-                        "Parameter '{}' (stable ID {}) is a stepped parameter, but its maximum \
-                         value ({:?}) is not an integer.",
+                        "Parameter '{}' (stable ID {}) is a stepped parameter, but its maximum value ({:?}) is not an \
+                         integer.",
                         &name,
                         info.id,
                         info.max_value,
@@ -255,8 +240,7 @@ impl Params<'_> {
 
                 if (info.flags & CLAP_PARAM_IS_STEPPED) == 0 {
                     anyhow::bail!(
-                        "Parameter '{}' (stable ID {}) is a bypass parameter, but it is not \
-                         stepped.",
+                        "Parameter '{}' (stable ID {}) is a bypass parameter, but it is not stepped.",
                         &name,
                         info.id
                     )
@@ -275,8 +259,8 @@ impl Params<'_> {
                     != 0
             {
                 anyhow::bail!(
-                    "Parameter '{}' (stable ID {}) is automatable per note ID, key, channel, or \
-                     port, but does not have CLAP_PARAM_IS_AUTOMATABLE. This is likely a bug.",
+                    "Parameter '{}' (stable ID {}) is automatable per note ID, key, channel, or port, but does not \
+                     have CLAP_PARAM_IS_AUTOMATABLE. This is likely a bug.",
                     &name,
                     info.id
                 )
@@ -290,19 +274,18 @@ impl Params<'_> {
                     != 0
             {
                 anyhow::bail!(
-                    "Parameter '{}' (stable ID {}) is modulatable per note ID, key, channel, or \
-                     port, but does not have CLAP_PARAM_IS_MODULATABLE. This is likely a bug.",
+                    "Parameter '{}' (stable ID {}) is modulatable per note ID, key, channel, or port, but does not \
+                     have CLAP_PARAM_IS_MODULATABLE. This is likely a bug.",
                     &name,
                     info.id
                 )
             }
             if ((info.flags & CLAP_PARAM_IS_READONLY) != 0)
-                && ((info.flags & CLAP_PARAM_IS_AUTOMATABLE) != 0
-                    || (info.flags & CLAP_PARAM_IS_MODULATABLE) != 0)
+                && ((info.flags & CLAP_PARAM_IS_AUTOMATABLE) != 0 || (info.flags & CLAP_PARAM_IS_MODULATABLE) != 0)
             {
                 anyhow::bail!(
-                    "Parameter '{}' (stable ID {}) has the CLAP_PARAM_IS_READONLY flag set, but \
-                     it is also marked as automatable or modulatable. This is likely a bug.",
+                    "Parameter '{}' (stable ID {}) has the CLAP_PARAM_IS_READONLY flag set, but it is also marked as \
+                     automatable or modulatable. This is likely a bug.",
                     &name,
                     info.id
                 )
@@ -316,10 +299,7 @@ impl Params<'_> {
                 flags: info.flags,
             };
             if result.insert(info.id, processed_info).is_some() {
-                anyhow::bail!(
-                    "The plugin contains multiple parameters with stable ID {}.",
-                    info.id
-                );
+                anyhow::bail!("The plugin contains multiple parameters with stable ID {}.", info.id);
             }
         }
 
@@ -335,6 +315,8 @@ impl Params<'_> {
         // This may only be called on the audio thread when the plugin is active. This object is the
         // main thread interface for the parameters extension.
         self.status().assert_inactive();
+
+        assert!(input_events.is_sorted(), "Input event queue must be sorted.");
 
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();

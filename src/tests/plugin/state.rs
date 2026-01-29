@@ -26,10 +26,7 @@ const PARAM_DIFF_FILE_NAME: &str = "param-diff.csv";
 const BUFFER_SIZE: u32 = 512;
 
 /// The test for `PluginTestCase::StateInvalidEmpty`.
-pub fn test_state_invalid_empty(
-    library: &PluginLibrary,
-    plugin_id: &str,
-) -> Result<TestStatus> {
+pub fn test_state_invalid_empty(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let plugin = library
         .create_plugin(plugin_id)
         .context("Could not create the plugin instance")?;
@@ -39,24 +36,20 @@ pub fn test_state_invalid_empty(
         Some(state) => state,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(String::from(
-                    "The plugin does not implement the 'state' extension.",
-                )),
+                details: Some(String::from("The plugin does not implement the 'state' extension.")),
             });
         }
     };
 
     let result = state.load(&[]);
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     match result {
         Ok(_) => Ok(TestStatus::Warning {
             details: Some(String::from(
-                "The plugin returned true when 'clap_plugin_state::load()' \
-                 was called when an empty state, this is likely a bug.",
+                "The plugin returned true when 'clap_plugin_state::load()' was called when an empty state, this is \
+                 likely a bug.",
             )),
         }),
         Err(_) => Ok(TestStatus::Success { details: None }),
@@ -64,10 +57,7 @@ pub fn test_state_invalid_empty(
 }
 
 /// The test for `PluginTestCase::StateInvalidRandom`.
-pub fn test_state_invalid_random(
-    library: &PluginLibrary,
-    plugin_id: &str,
-) -> Result<TestStatus> {
+pub fn test_state_invalid_random(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
 
     let plugin = library
@@ -80,16 +70,12 @@ pub fn test_state_invalid_random(
         Some(state) => state,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(String::from(
-                    "The plugin does not implement the 'state' extension.",
-                )),
+                details: Some(String::from("The plugin does not implement the 'state' extension.")),
             });
         }
     };
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     let mut random_data = vec![0u8; 1024 * 1024];
     let mut succeeded = false;
@@ -99,16 +85,13 @@ pub fn test_state_invalid_random(
         succeeded |= state.load(&random_data).is_ok();
     }
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     match succeeded {
         false => Ok(TestStatus::Success { details: None }),
         true => Ok(TestStatus::Warning {
             details: Some(String::from(
-                "The plugin loaded random bytes successfully, which is \
-                 unexpected, but the plugin did not crash.",
+                "The plugin loaded random bytes successfully, which is unexpected, but the plugin did not crash.",
             )),
         }),
     }
@@ -137,9 +120,9 @@ pub fn test_state_reproducibility_basic(
         plugin.init().context("Error during initialization")?;
 
         let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
-            Some(audio_ports) => audio_ports.config().context(
-                "Error while querying 'audio-ports' IO configuration",
-            )?,
+            Some(audio_ports) => audio_ports
+                .config()
+                .context("Error while querying 'audio-ports' IO configuration")?,
             None => AudioPortConfig::default(),
         };
 
@@ -147,9 +130,7 @@ pub fn test_state_reproducibility_basic(
             Some(params) => params,
             None => {
                 return Ok(TestStatus::Skipped {
-                    details: Some(String::from(
-                        "The plugin does not implement the 'params' extension.",
-                    )),
+                    details: Some(String::from("The plugin does not implement the 'params' extension.")),
                 });
             }
         };
@@ -157,16 +138,12 @@ pub fn test_state_reproducibility_basic(
             Some(state) => state,
             None => {
                 return Ok(TestStatus::Skipped {
-                    details: Some(String::from(
-                        "The plugin does not implement the 'state' extension.",
-                    )),
+                    details: Some(String::from("The plugin does not implement the 'state' extension.")),
                 });
             }
         };
 
-        plugin
-            .handle_callback()
-            .context("An error occured during a callback")?;
+        plugin.handle_callback().context("An error occured during a callback")?;
 
         let param_infos = params
             .info()
@@ -175,8 +152,7 @@ pub fn test_state_reproducibility_basic(
         // We can't compare the values from these events direclty as the plugin
         // may round the values during the parameter set
         let param_fuzzer = ParamFuzzer::new(&param_infos);
-        let mut random_param_set_events: Vec<_> =
-            param_fuzzer.randomize_params_at(&mut prng, 0).collect();
+        let mut random_param_set_events: Vec<_> = param_fuzzer.randomize_params_at(&mut prng, 0).collect();
 
         // This is a variation on the test that checks whether the plugin handles null
         // pointer cookies correctly
@@ -187,20 +163,14 @@ pub fn test_state_reproducibility_basic(
                         event.cookie = std::ptr::null_mut();
                     }
                     event => {
-                        panic!(
-                            "Unexpected event {event:?}, this is a \
-                             clap-validator bug"
-                        )
+                        panic!("Unexpected event {event:?}")
                     }
                 }
             }
         }
 
         plugin.on_audio_thread(|plugin| {
-            let mut buffers = AudioBuffers::new_out_of_place_f32(
-                &audio_ports_config,
-                BUFFER_SIZE,
-            );
+            let mut buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
             let mut process = ProcessScope::new(&plugin, &mut buffers)?;
 
             process.audio_buffers().randomize(&mut prng);
@@ -213,16 +183,12 @@ pub fn test_state_reproducibility_basic(
         // deserializatoin process.
         let expected_param_values: BTreeMap<clap_id, f64> = param_infos
             .keys()
-            .map(|param_id| {
-                params.get(*param_id).map(|value| (*param_id, value))
-            })
+            .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
             .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
         let expected_state = state.save()?;
 
-        plugin
-            .handle_callback()
-            .context("An error occured during a callback")?;
+        plugin.handle_callback().context("An error occured during a callback")?;
 
         (expected_state, expected_param_values)
     };
@@ -245,9 +211,7 @@ pub fn test_state_reproducibility_basic(
         None => {
             // I sure hope that no plugin will ever hit this
             return Ok(TestStatus::Skipped {
-                details: Some(String::from(
-                    "The plugin does not implement the 'params' extension.",
-                )),
+                details: Some(String::from("The plugin does not implement the 'params' extension.")),
             });
         }
     };
@@ -257,22 +221,17 @@ pub fn test_state_reproducibility_basic(
         None => {
             return Ok(TestStatus::Skipped {
                 details: Some(String::from(
-                    "The plugin's second instance does not implement the \
-                     'state' extension.",
+                    "The plugin's second instance does not implement the 'state' extension.",
                 )),
             });
         }
     };
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     state.load(&expected_state)?;
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     let actual_param_values: BTreeMap<clap_id, f64> = expected_param_values
         .keys()
@@ -285,19 +244,13 @@ pub fn test_state_reproducibility_basic(
         PluginTestCase::StateReproducibilityBasic
     };
 
-    if let Some(diff) = generate_param_diff(
-        &actual_param_values,
-        &expected_param_values,
-        &params,
-    )? {
-        let (param_diff_file_path, mut param_diff_file) =
-            test.temporary_file(plugin_id, PARAM_DIFF_FILE_NAME)?;
+    if let Some(diff) = generate_param_diff(&actual_param_values, &expected_param_values, &params)? {
+        let (param_diff_file_path, mut param_diff_file) = test.temporary_file(plugin_id, PARAM_DIFF_FILE_NAME)?;
         param_diff_file.write_all(diff.as_bytes())?;
 
         anyhow::bail!(
-            "After reloading the state, the plugin's parameter values do not \
-             match the old values when queried through \
-             'clap_plugin_params::get()'. \nDiff: '{}'.",
+            "After reloading the state, the plugin's parameter values do not match the old values when queried \
+             through 'clap_plugin_params::get()'. \nDiff: '{}'.",
             param_diff_file_path.display(),
         );
     }
@@ -305,25 +258,22 @@ pub fn test_state_reproducibility_basic(
     // Now for the moment of truth
     let actual_state = state.save()?;
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     if actual_state == expected_state {
         Ok(TestStatus::Success { details: None })
     } else {
         let (expected_state_file_path, mut expected_state_file) =
             test.temporary_file(plugin_id, EXPECTED_STATE_FILE_NAME)?;
-        let (actual_state_file_path, mut actual_state_file) =
-            test.temporary_file(plugin_id, ACTUAL_STATE_FILE_NAME)?;
+        let (actual_state_file_path, mut actual_state_file) = test.temporary_file(plugin_id, ACTUAL_STATE_FILE_NAME)?;
 
         expected_state_file.write_all(&expected_state)?;
         actual_state_file.write_all(&actual_state)?;
 
         Ok(TestStatus::Warning {
             details: Some(format!(
-                "The saved state after loading differs from the original \
-                 saved state. \nExpected: '{}'. \nActual: '{}'.",
+                "The saved state after loading differs from the original saved state. \nExpected: '{}'. \nActual: \
+                 '{}'.",
                 expected_state_file_path.display(),
                 actual_state_file_path.display(),
             )),
@@ -332,10 +282,7 @@ pub fn test_state_reproducibility_basic(
 }
 
 /// The test for `PluginTestCase::StateReproducibilityFlush`.
-pub fn test_state_reproducibility_flush(
-    library: &PluginLibrary,
-    plugin_id: &str,
-) -> Result<TestStatus> {
+pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
 
     let plugin = library
@@ -353,9 +300,7 @@ pub fn test_state_reproducibility_flush(
             Some(params) => params,
             None => {
                 return Ok(TestStatus::Skipped {
-                    details: Some(String::from(
-                        "The plugin does not implement the 'params' extension.",
-                    )),
+                    details: Some(String::from("The plugin does not implement the 'params' extension.")),
                 });
             }
         };
@@ -363,16 +308,12 @@ pub fn test_state_reproducibility_flush(
             Some(state) => state,
             None => {
                 return Ok(TestStatus::Skipped {
-                    details: Some(String::from(
-                        "The plugin does not implement the 'state' extension.",
-                    )),
+                    details: Some(String::from("The plugin does not implement the 'state' extension.")),
                 });
             }
         };
 
-        plugin
-            .handle_callback()
-            .context("An error occured during a callback")?;
+        plugin.handle_callback().context("An error occured during a callback")?;
 
         let param_infos = params
             .info()
@@ -382,16 +323,13 @@ pub fn test_state_reproducibility_flush(
         // implemented flush.
         let initial_param_values: BTreeMap<clap_id, f64> = param_infos
             .keys()
-            .map(|param_id| {
-                params.get(*param_id).map(|value| (*param_id, value))
-            })
+            .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
             .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
         // The same param set events will be passed to the flush function in this pass and to the
         // process fuction in the second pass
         let param_fuzzer = ParamFuzzer::new(&param_infos);
-        let random_param_set_events: Vec<_> =
-            param_fuzzer.randomize_params_at(&mut prng, 0).collect();
+        let random_param_set_events: Vec<_> = param_fuzzer.randomize_params_at(&mut prng, 0).collect();
 
         let input_events = EventQueue::new();
         let output_events = EventQueue::new();
@@ -399,39 +337,26 @@ pub fn test_state_reproducibility_flush(
         input_events.add_events(random_param_set_events.clone());
         params.flush(&input_events, &output_events);
 
-        plugin
-            .handle_callback()
-            .context("An error occured during a callback")?;
+        plugin.handle_callback().context("An error occured during a callback")?;
 
         // We'll compare against these values in that second pass
         let expected_param_values: BTreeMap<clap_id, f64> = param_infos
             .keys()
-            .map(|param_id| {
-                params.get(*param_id).map(|value| (*param_id, value))
-            })
+            .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
             .collect::<Result<BTreeMap<clap_id, f64>>>()?;
         let expected_state = state.save()?;
 
-        plugin
-            .handle_callback()
-            .context("An error occured during a callback")?;
+        plugin.handle_callback().context("An error occured during a callback")?;
 
         // Plugins with no parameters at all should of course not trigger this error
-        if expected_param_values == initial_param_values
-            && !random_param_set_events.is_empty()
-        {
+        if expected_param_values == initial_param_values && !random_param_set_events.is_empty() {
             anyhow::bail!(
-                "'clap_plugin_params::flush()' has been called with random \
-                 parameter values, but the plugin's reported parameter values \
-                 have not changed."
+                "'clap_plugin_params::flush()' has been called with random parameter values, but the plugin's \
+                 reported parameter values have not changed."
             )
         }
 
-        (
-            expected_state,
-            random_param_set_events,
-            expected_param_values,
-        )
+        (expected_state, random_param_set_events, expected_param_values)
     };
 
     // This works the same as the basic state reproducibility test, except that we load the values
@@ -458,8 +383,7 @@ pub fn test_state_reproducibility_flush(
             // I sure hope that no plugin will eer hit this
             return Ok(TestStatus::Skipped {
                 details: Some(String::from(
-                    "The plugin's second instance does not implement the \
-                     'params' extension.",
+                    "The plugin's second instance does not implement the 'params' extension.",
                 )),
             });
         }
@@ -470,16 +394,13 @@ pub fn test_state_reproducibility_flush(
         None => {
             return Ok(TestStatus::Skipped {
                 details: Some(String::from(
-                    "The plugin's second instance does not implement the \
-                     'state' extension.",
+                    "The plugin's second instance does not implement the 'state' extension.",
                 )),
             });
         }
     };
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     // NOTE: We can reuse random parameter set events, except that the cookie pointers may be
     //       different if the plugin uses those. So we need to update these cookies first.
@@ -494,31 +415,23 @@ pub fn test_state_reproducibility_flush(
                     .get(&event.param_id)
                     .with_context(|| {
                         format!(
-                            "Expected the plugin to have a parameter with ID \
-                             {}, but the parameter is missing",
+                            "Expected the plugin to have a parameter with ID {}, but the parameter is missing",
                             event.param_id,
                         )
                     })?
                     .cookie;
             }
-            event => panic!(
-                "Unexpected event {event:?}, this is a clap-validator bug"
-            ),
+            event => panic!("Unexpected event {event:?}"),
         }
     }
 
     // In the previous pass we used flush, and here we use the process funciton
     plugin.on_audio_thread(|plugin| {
-        let mut buffers = AudioBuffers::new_out_of_place_f32(
-            &audio_ports_config,
-            BUFFER_SIZE,
-        );
+        let mut buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
         let mut process = ProcessScope::new(&plugin, &mut buffers)?;
 
         process.audio_buffers().randomize(&mut prng);
-        process
-            .input_queue()
-            .add_events(new_random_param_set_events);
+        process.input_queue().add_events(new_random_param_set_events);
         process.run()
     })?;
 
@@ -527,50 +440,39 @@ pub fn test_state_reproducibility_flush(
         .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
         .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
-    if let Some(diff) = generate_param_diff(
-        &actual_param_values,
-        &expected_param_values,
-        &params,
-    )? {
+    if let Some(diff) = generate_param_diff(&actual_param_values, &expected_param_values, &params)? {
         let (param_diff_file_path, mut param_diff_file) =
-            PluginTestCase::StateReproducibilityFlush
-                .temporary_file(plugin_id, PARAM_DIFF_FILE_NAME)?;
+            PluginTestCase::StateReproducibilityFlush.temporary_file(plugin_id, PARAM_DIFF_FILE_NAME)?;
 
         param_diff_file.write_all(diff.as_bytes())?;
 
         anyhow::bail!(
-            "Setting the same parameter values through \
-             'clap_plugin_params::flush()' and through the process function \
-             results in different reported values when queried through \
-             'clap_plugin_params::get_value()'. \nDiff: '{}'.",
+            "Setting the same parameter values through 'clap_plugin_params::flush()' and through the process function \
+             results in different reported values when queried through 'clap_plugin_params::get_value()'. \nDiff: \
+             '{}'.",
             param_diff_file_path.display(),
         );
     }
 
     let actual_state = state.save()?;
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     if actual_state == expected_state {
         Ok(TestStatus::Success { details: None })
     } else {
         let (expected_state_file_path, mut expected_state_file) =
-            PluginTestCase::StateReproducibilityFlush
-                .temporary_file(plugin_id, EXPECTED_STATE_FILE_NAME)?;
+            PluginTestCase::StateReproducibilityFlush.temporary_file(plugin_id, EXPECTED_STATE_FILE_NAME)?;
         let (actual_state_file_path, mut actual_state_file) =
-            PluginTestCase::StateReproducibilityFlush
-                .temporary_file(plugin_id, ACTUAL_STATE_FILE_NAME)?;
+            PluginTestCase::StateReproducibilityFlush.temporary_file(plugin_id, ACTUAL_STATE_FILE_NAME)?;
 
         expected_state_file.write_all(&expected_state)?;
         actual_state_file.write_all(&actual_state)?;
 
         Ok(TestStatus::Warning {
             details: Some(format!(
-                "Sending the same parameter values to two different instances \
-                 of the plugin resulted in different state files. \nExpected: \
-                 '{}'. \nActual: '{}'.",
+                "Sending the same parameter values to two different instances of the plugin resulted in different \
+                 state files. \nExpected: '{}'. \nActual: '{}'.",
                 expected_state_file_path.display(),
                 actual_state_file_path.display(),
             )),
@@ -579,10 +481,7 @@ pub fn test_state_reproducibility_flush(
 }
 
 /// The test for `PluginTestCase::StateBufferedStreams`.
-pub fn test_state_buffered_streams(
-    library: &PluginLibrary,
-    plugin_id: &str,
-) -> Result<TestStatus> {
+pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
 
     let plugin = library
@@ -593,18 +492,16 @@ pub fn test_state_buffered_streams(
         plugin.init().context("Error during initialization")?;
 
         let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
-            Some(audio_ports) => audio_ports.config().context(
-                "Error while querying 'audio-ports' IO configuration",
-            )?,
+            Some(audio_ports) => audio_ports
+                .config()
+                .context("Error while querying 'audio-ports' IO configuration")?,
             None => AudioPortConfig::default(),
         };
         let params = match plugin.get_extension::<Params>() {
             Some(params) => params,
             None => {
                 return Ok(TestStatus::Skipped {
-                    details: Some(String::from(
-                        "The plugin does not implement the 'params' extension.",
-                    )),
+                    details: Some(String::from("The plugin does not implement the 'params' extension.")),
                 });
             }
         };
@@ -612,9 +509,7 @@ pub fn test_state_buffered_streams(
             Some(state) => state,
             None => {
                 return Ok(TestStatus::Skipped {
-                    details: Some(String::from(
-                        "The plugin does not implement the 'state' extension.",
-                    )),
+                    details: Some(String::from("The plugin does not implement the 'state' extension.")),
                 });
             }
         };
@@ -623,14 +518,10 @@ pub fn test_state_buffered_streams(
             .info()
             .context("Failure while fetching the plugin's parameters")?;
         let param_fuzzer = ParamFuzzer::new(&param_infos);
-        let random_param_set_events: Vec<_> =
-            param_fuzzer.randomize_params_at(&mut prng, 0).collect();
+        let random_param_set_events: Vec<_> = param_fuzzer.randomize_params_at(&mut prng, 0).collect();
 
         plugin.on_audio_thread(|plugin| {
-            let mut buffers = AudioBuffers::new_out_of_place_f32(
-                &audio_ports_config,
-                BUFFER_SIZE,
-            );
+            let mut buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
             let mut process = ProcessScope::new(&plugin, &mut buffers)?;
 
             process.audio_buffers().randomize(&mut prng);
@@ -640,9 +531,7 @@ pub fn test_state_buffered_streams(
 
         let expected_param_values: BTreeMap<clap_id, f64> = param_infos
             .keys()
-            .map(|param_id| {
-                params.get(*param_id).map(|value| (*param_id, value))
-            })
+            .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
             .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
         // This state file is saved without buffered writes. It's expected that the plugin
@@ -650,9 +539,7 @@ pub fn test_state_buffered_streams(
         // treating this as the ground truth.
         let expected_state = state.save()?;
 
-        plugin
-            .handle_callback()
-            .context("An error occured during a callback")?;
+        plugin.handle_callback().context("An error occured during a callback")?;
 
         (expected_state, expected_param_values)
     };
@@ -673,8 +560,7 @@ pub fn test_state_buffered_streams(
         None => {
             return Ok(TestStatus::Skipped {
                 details: Some(String::from(
-                    "The plugin's second instance does not implement the \
-                     'params' extension.",
+                    "The plugin's second instance does not implement the 'params' extension.",
                 )),
             });
         }
@@ -685,45 +571,34 @@ pub fn test_state_buffered_streams(
         None => {
             return Ok(TestStatus::Skipped {
                 details: Some(String::from(
-                    "The plugin's second instance does not implement the \
-                     'state' extension.",
+                    "The plugin's second instance does not implement the 'state' extension.",
                 )),
             });
         }
     };
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     // This is a buffered load that only loads 17 bytes at a time. Why 17? Because.
     const BUFFERED_LOAD_MAX_BYTES: usize = 17;
     state.load_buffered(&expected_state, BUFFERED_LOAD_MAX_BYTES)?;
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     let actual_param_values: BTreeMap<clap_id, f64> = expected_param_values
         .keys()
         .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
         .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
-    if let Some(diff) = generate_param_diff(
-        &actual_param_values,
-        &expected_param_values,
-        &params,
-    )? {
+    if let Some(diff) = generate_param_diff(&actual_param_values, &expected_param_values, &params)? {
         let (param_diff_file_path, mut param_diff_file) =
-            PluginTestCase::StateBufferedStreams
-                .temporary_file(plugin_id, PARAM_DIFF_FILE_NAME)?;
+            PluginTestCase::StateBufferedStreams.temporary_file(plugin_id, PARAM_DIFF_FILE_NAME)?;
 
         param_diff_file.write_all(diff.as_bytes())?;
 
         anyhow::bail!(
-            "After reloading the state by allowing the plugin to read at most \
-             {BUFFERED_LOAD_MAX_BYTES} bytes at a time, the plugin's \
-             parameter values do not match the old values when queried \
-             through 'clap_plugin_params::get()'. \nDiff: '{}'.",
+            "After reloading the state by allowing the plugin to read at most {BUFFERED_LOAD_MAX_BYTES} bytes at a \
+             time, the plugin's parameter values do not match the old values when queried through \
+             'clap_plugin_params::get()'. \nDiff: '{}'.",
             param_diff_file_path.display()
         );
     }
@@ -732,32 +607,25 @@ pub fn test_state_buffered_streams(
     const BUFFERED_SAVE_MAX_BYTES: usize = 23;
     let actual_state = state.save_buffered(BUFFERED_SAVE_MAX_BYTES)?;
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     if actual_state == expected_state {
         Ok(TestStatus::Success { details: None })
     } else {
         let (expected_state_file_path, mut expected_state_file) =
-            PluginTestCase::StateBufferedStreams
-                .temporary_file(plugin_id, EXPECTED_STATE_FILE_NAME)?;
+            PluginTestCase::StateBufferedStreams.temporary_file(plugin_id, EXPECTED_STATE_FILE_NAME)?;
         let (actual_state_file_path, mut actual_state_file) =
-            PluginTestCase::StateBufferedStreams
-                .temporary_file(plugin_id, ACTUAL_STATE_FILE_NAME)?;
+            PluginTestCase::StateBufferedStreams.temporary_file(plugin_id, ACTUAL_STATE_FILE_NAME)?;
 
         expected_state_file.write_all(&expected_state)?;
         actual_state_file.write_all(&actual_state)?;
 
         Ok(TestStatus::Warning {
             details: Some(format!(
-                "Re-saving the loaded state resulted in a different state \
-                 file. The original state file being compared to was written \
-                 unbuffered, reloaded by allowing the plugin to read only \
-                 {BUFFERED_LOAD_MAX_BYTES} bytes at a time, and then written \
-                 again by allowing the plugin to write only \
-                 {BUFFERED_SAVE_MAX_BYTES} bytes at a time.\n Expected: \
-                 '{}'.\n Actual: '{}'.",
+                "Re-saving the loaded state resulted in a different state file. The original state file being \
+                 compared to was written unbuffered, reloaded by allowing the plugin to read only \
+                 {BUFFERED_LOAD_MAX_BYTES} bytes at a time, and then written again by allowing the plugin to write \
+                 only {BUFFERED_SAVE_MAX_BYTES} bytes at a time.\n Expected: '{}'.\n Actual: '{}'.",
                 expected_state_file_path.display(),
                 actual_state_file_path.display(),
             )),
@@ -795,12 +663,7 @@ fn generate_param_diff(
 
             Some(format!(
                 "{}, {:?}, {:?}, {:.4}, {:?}, {:.4}",
-                param_id,
-                param_name,
-                string_actual,
-                actual_value,
-                string_expected,
-                expected_value,
+                param_id, param_name, string_actual, actual_value, string_expected, expected_value,
             ))
         })
         .collect::<Vec<String>>();
@@ -809,8 +672,7 @@ fn generate_param_diff(
         Ok(None)
     } else {
         Ok(Some(format!(
-            "param-id, param-name, actual-string, actual-value, \
-             expected-string, expected-value\n{}",
+            "param-id, param-name, actual-string, actual-value, expected-string, expected-value\n{}",
             diff.join("\n")
         )))
     }

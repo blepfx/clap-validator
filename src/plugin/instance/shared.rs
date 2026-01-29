@@ -17,7 +17,7 @@ use clap_sys::host::clap_host;
 use clap_sys::id::clap_id;
 use clap_sys::plugin::clap_plugin;
 use clap_sys::version::CLAP_VERSION;
-use crossbeam_utils::atomic::AtomicCell;
+use crossbeam::atomic::AtomicCell;
 use std::ffi::{CStr, c_char, c_void};
 use std::pin::Pin;
 use std::sync::mpsc::{Receiver, Sender, channel};

@@ -153,9 +153,14 @@ impl<'lib> Plugin<'lib> {
     /// If whatever happens on the audio thread caused main-thread callback requests to be emited,
     /// then those will be handled concurrently.
     pub fn on_audio_thread<T: Send, F: FnOnce(PluginAudioThread) -> T + Send>(&self, f: F) -> T {
-        let result = std::thread::scope(|s| {
+        let result = crossbeam::scope(|s| {
             let shared = self.shared.clone();
-            let thread = s.spawn(move || f(PluginAudioThread::new(shared)));
+
+            let thread = s
+                .builder()
+                .name("audio_thread".into())
+                .spawn(move |_| f(PluginAudioThread::new(shared)))
+                .unwrap();
 
             // Handle callbacks requests on the main thread while the audio thread is running
             while let Ok(task) = self.main.task_receiver.recv() {
@@ -167,14 +172,11 @@ impl<'lib> Plugin<'lib> {
             }
 
             // Wait for the result, propagating panics
-            match thread.join() {
-                Ok(value) => value,
-                Err(panic_info) => resume_unwind(panic_info),
-            }
+            thread.join()
         });
 
         self.handle_callback_unchecked();
-        result
+        result.flatten().unwrap_or_else(|e| resume_unwind(e))
     }
 
     /// Initialize the plugin. This needs to be called before doing anything else.

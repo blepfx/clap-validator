@@ -1,7 +1,5 @@
 use crate::plugin::{ext::Extension, instance::Plugin};
-use clap_sys::ext::ambisonic::{
-    CLAP_EXT_AMBISONIC, CLAP_EXT_AMBISONIC_COMPAT, clap_plugin_ambisonic,
-};
+use clap_sys::ext::ambisonic::{CLAP_EXT_AMBISONIC, CLAP_EXT_AMBISONIC_COMPAT, clap_plugin_ambisonic};
 use std::{ffi::CStr, ptr::NonNull};
 
 #[allow(unused)]

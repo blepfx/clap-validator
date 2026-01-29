@@ -17,8 +17,8 @@ pub fn test_scan_time(library_path: &Path) -> Result<TestStatus> {
     {
         // The library will be unloaded when this object is dropped, so that is part of the
         // measurement
-        let library = PluginLibrary::load(library_path)
-            .with_context(|| format!("Could not load '{}'", library_path.display()));
+        let library =
+            PluginLibrary::load(library_path).with_context(|| format!("Could not load '{}'", library_path.display()));
 
         // This goes through all plugins and builds a data structure containing information for all
         // of those plugins, mimicing most of a DAW's plugin scanning process
@@ -48,11 +48,7 @@ pub fn test_scan_time(library_path: &Path) -> Result<TestStatus> {
             details: Some(format!(
                 "The plugin can be scanned in {} {}.",
                 millis,
-                if millis == 1 {
-                    "millisecond"
-                } else {
-                    "milliseconds"
-                }
+                if millis == 1 { "millisecond" } else { "milliseconds" }
             )),
         })
     } else {
@@ -81,12 +77,7 @@ pub fn test_scan_rtld_now(library_path: &Path) -> Result<TestStatus> {
         .map(libloading::Library::from)
         .context("Could not load the plugin library using 'RTLD_LOCAL | RTLD_NOW'")
     })
-    .with_context(|| {
-        format!(
-            "Could not load '{}' using 'RTLD_NOW",
-            library_path.display()
-        )
-    })?;
+    .with_context(|| format!("Could not load '{}' using 'RTLD_NOW", library_path.display()))?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -94,8 +85,6 @@ pub fn test_scan_rtld_now(library_path: &Path) -> Result<TestStatus> {
 #[cfg(not(unix))]
 pub fn test_scan_rtld_now(_: &Path) -> Result<TestStatus> {
     Ok(TestStatus::Skipped {
-        details: Some(String::from(
-            "This test is only relevant to Unix-like platforms",
-        )),
+        details: Some(String::from("This test is only relevant to Unix-like platforms")),
     })
 }

@@ -1,4 +1,7 @@
-use crate::plugin::{ext::Extension, instance::Plugin};
+use crate::{
+    plugin::{ext::Extension, instance::Plugin},
+    util::clap_call,
+};
 use clap_sys::ext::audio_ports_activation::*;
 use std::{ffi::CStr, ptr::NonNull};
 
@@ -17,6 +20,28 @@ impl<'a> Extension<&'a Plugin<'a>> for AudioPortsActivation<'a> {
         Self {
             plugin,
             audio_ports_activation: extension_struct,
+        }
+    }
+}
+
+impl<'a> AudioPortsActivation<'a> {
+    /// TODO: extra test where we do this while processing
+    pub fn can_activate_while_processing(&self) -> bool {
+        let audio_ports_activation = self.audio_ports_activation.as_ptr();
+        let plugin = self.plugin.as_ptr();
+        unsafe {
+            clap_call! { audio_ports_activation=>can_activate_while_processing(plugin) }
+        }
+    }
+
+    /// Activates or deactivates audio ports while inactive.
+    pub fn set_active(&mut self, is_input: bool, port_index: u32, is_active: bool, sample_size: u32) -> bool {
+        self.plugin.status().assert_inactive();
+
+        let audio_ports_activation = self.audio_ports_activation.as_ptr();
+        let plugin = self.plugin.as_ptr();
+        unsafe {
+            clap_call! { audio_ports_activation=>set_active(plugin, is_input, port_index, is_active, sample_size) }
         }
     }
 }

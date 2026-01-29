@@ -1,9 +1,7 @@
 //! An abstraction for the preset discovery factory.
 
 use anyhow::{Context, Result};
-use clap_sys::factory::preset_discovery::{
-    clap_preset_discovery_factory, clap_preset_discovery_provider_descriptor,
-};
+use clap_sys::factory::preset_discovery::{clap_preset_discovery_factory, clap_preset_discovery_provider_descriptor};
 use clap_sys::version::{clap_version, clap_version_is_compatible};
 use std::collections::HashSet;
 use std::ptr::NonNull;
@@ -81,10 +79,7 @@ impl ProviderMetadata {
 impl<'lib> PresetDiscoveryFactory<'lib> {
     /// Create a wrapper around a preset discovery factory instance returned from a CLAP plugin's
     /// entry point.
-    pub fn new(
-        library: &'lib PluginLibrary,
-        factory: NonNull<clap_preset_discovery_factory>,
-    ) -> Self {
+    pub fn new(library: &'lib PluginLibrary, factory: NonNull<clap_preset_discovery_factory>) -> Self {
         PresetDiscoveryFactory {
             handle: PresetDiscoveryHandle(factory),
             _library: library,
@@ -113,8 +108,8 @@ impl<'lib> PresetDiscoveryFactory<'lib> {
 
             if descriptor.is_null() {
                 anyhow::bail!(
-                    "The preset discovery factory returned a null pointer for the descriptor at \
-                     index {i} (expected {num_providers} total providers)."
+                    "The preset discovery factory returned a null pointer for the descriptor at index {i} (expected \
+                     {num_providers} total providers)."
                 );
             }
 
@@ -127,9 +122,7 @@ impl<'lib> PresetDiscoveryFactory<'lib> {
             .map(|provider_metadata| provider_metadata.id.as_str())
             .collect();
         if unique_ids.len() != metadata.len() {
-            anyhow::bail!(
-                "The preset discovery factory contains multiple entries for the same provider ID."
-            );
+            anyhow::bail!("The preset discovery factory contains multiple entries for the same provider ID.");
         }
 
         Ok(metadata)

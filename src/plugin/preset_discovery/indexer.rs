@@ -5,9 +5,8 @@ use crate::util::{self, check_null_ptr, validator_version};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap_sys::factory::preset_discovery::{
-    CLAP_PRESET_DISCOVERY_IS_DEMO_CONTENT, CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT,
-    CLAP_PRESET_DISCOVERY_IS_FAVORITE, CLAP_PRESET_DISCOVERY_IS_USER_CONTENT,
-    CLAP_PRESET_DISCOVERY_LOCATION_FILE, CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN,
+    CLAP_PRESET_DISCOVERY_IS_DEMO_CONTENT, CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT, CLAP_PRESET_DISCOVERY_IS_FAVORITE,
+    CLAP_PRESET_DISCOVERY_IS_USER_CONTENT, CLAP_PRESET_DISCOVERY_LOCATION_FILE, CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN,
     clap_preset_discovery_filetype, clap_preset_discovery_indexer, clap_preset_discovery_location,
     clap_preset_discovery_location_kind, clap_preset_discovery_soundpack,
 };
@@ -150,8 +149,7 @@ impl Location {
     pub fn from_descriptor(descriptor: &clap_preset_discovery_location) -> Result<Self> {
         Ok(Location {
             flags: Flags {
-                is_factory_content: (descriptor.flags & CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT)
-                    != 0,
+                is_factory_content: (descriptor.flags & CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT) != 0,
                 is_user_content: (descriptor.flags & CLAP_PRESET_DISCOVERY_IS_USER_CONTENT) != 0,
                 is_demo_content: (descriptor.flags & CLAP_PRESET_DISCOVERY_IS_DEMO_CONTENT) != 0,
                 is_favorite: (descriptor.flags & CLAP_PRESET_DISCOVERY_IS_FAVORITE) != 0,
@@ -220,23 +218,15 @@ impl LocationValue {
     /// Constructs an new [`LocationValue`] from a location kind and a location field. Whether this
     /// succeeds or not depends on the location kind and whether or not the location is a null
     /// pointer or not. See the preset discovery factory definition for more information.
-    pub unsafe fn new(
-        location_kind: clap_preset_discovery_location_kind,
-        location: *const c_char,
-    ) -> Result<Self> {
+    pub unsafe fn new(location_kind: clap_preset_discovery_location_kind, location: *const c_char) -> Result<Self> {
         match location_kind {
             CLAP_PRESET_DISCOVERY_LOCATION_FILE => {
                 if location.is_null() {
-                    anyhow::bail!(
-                        "The location may not be a null pointer with \
-                         CLAP_PRESET_DISCOVERY_LOCATION_FILE."
-                    )
+                    anyhow::bail!("The location may not be a null pointer with CLAP_PRESET_DISCOVERY_LOCATION_FILE.")
                 }
 
                 let path = unsafe { CStr::from_ptr(location) };
-                let path_str = path
-                    .to_str()
-                    .context("Invalid UTF-8 in preset discovery location")?;
+                let path_str = path.to_str().context("Invalid UTF-8 in preset discovery location")?;
                 if !path_str.starts_with('/') {
                     anyhow::bail!("'{path_str}' should be an absolute path, i.e. '/{path_str}'.");
                 }
@@ -245,10 +235,7 @@ impl LocationValue {
             }
             CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN => {
                 if !location.is_null() {
-                    anyhow::bail!(
-                        "The location must be a null pointer with \
-                         CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN."
-                    )
+                    anyhow::bail!("The location must be a null pointer with CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN.")
                 }
 
                 Ok(LocationValue::Internal)
@@ -310,8 +297,7 @@ impl Soundpack {
     pub fn from_descriptor(descriptor: &clap_preset_discovery_soundpack) -> Result<Self> {
         Ok(Soundpack {
             flags: Flags {
-                is_factory_content: (descriptor.flags & CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT)
-                    != 0,
+                is_factory_content: (descriptor.flags & CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT) != 0,
                 is_user_content: (descriptor.flags & CLAP_PRESET_DISCOVERY_IS_USER_CONTENT) != 0,
                 is_demo_content: (descriptor.flags & CLAP_PRESET_DISCOVERY_IS_DEMO_CONTENT) != 0,
                 is_favorite: (descriptor.flags & CLAP_PRESET_DISCOVERY_IS_FAVORITE) != 0,
@@ -340,22 +326,17 @@ impl Drop for Indexer {
         // The results will have been moved out of `self.results` when initializing the provider, so
         // if this does contain values then the plugin did something shady
         let results = self.results.borrow();
-        if !results.file_types.is_empty()
-            || !results.locations.is_empty()
-            || !results.soundpacks.is_empty()
-        {
+        if !results.file_types.is_empty() || !results.locations.is_empty() || !results.soundpacks.is_empty() {
             log::warn!(
-                "The plugin declared more file types, locations, or soundpacks after its \
-                 initialization. This is invalid behavior, but there is currently no test to \
-                 check for this."
+                "The plugin declared more file types, locations, or soundpacks after its initialization. This is \
+                 invalid behavior, but there is currently no test to check for this."
             )
         }
 
         if let Some(error) = self.callback_error.borrow_mut().take() {
             log::error!(
-                "The validator's 'clap_preset_indexer' has detected an error during a callback \
-                 that is going to be thrown away. This is a clap-validator bug. The error message \
-                 is: {error}"
+                "The validator's 'clap_preset_indexer' has detected an error during a callback that is going to be \
+                 thrown away. This is a clap-validator bug. The error message is: {error}"
             )
         }
     }
@@ -384,17 +365,14 @@ impl Indexer {
             },
         });
 
-        indexer.clap_preset_discovery_indexer.indexer_data =
-            &*indexer as *const Self as *mut c_void;
+        indexer.clap_preset_discovery_indexer.indexer_data = &*indexer as *const Self as *mut c_void;
 
         indexer
     }
 
     /// Get a `clap_preset_discovery_indexer` vtable pointer that can be passed to the
     /// `clap_preset_discovery_factory` when creating a provider.
-    pub fn clap_preset_discovery_indexer_ptr(
-        self: &Pin<Box<Self>>,
-    ) -> *const clap_preset_discovery_indexer {
+    pub fn clap_preset_discovery_indexer_ptr(self: &Pin<Box<Self>>) -> *const clap_preset_discovery_indexer {
         &self.clap_preset_discovery_indexer
     }
 
@@ -428,8 +406,8 @@ impl Indexer {
         let current_thread_id = std::thread::current().id();
         if current_thread_id != self.expected_thread_id {
             self.set_callback_error(format!(
-                "'{}' may only be called from the same thread the 'clap_preset_indexer' was \
-                 created on (thread {:?}), but it was called from thread {:?}",
+                "'{}' may only be called from the same thread the 'clap_preset_indexer' was created on (thread {:?}), \
+                 but it was called from thread {:?}",
                 function_name, self.expected_thread_id, current_thread_id
             ));
         }

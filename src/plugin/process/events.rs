@@ -77,6 +77,11 @@ impl EventQueue {
         events.sort_by_key(|event| event.header().time);
     }
 
+    pub fn is_sorted(&self) -> bool {
+        let events = self.events.lock().unwrap();
+        events.is_sorted_by_key(|event| event.header().time)
+    }
+
     pub fn read(&self) -> Vec<Event> {
         self.events.lock().unwrap().clone()
     }

@@ -41,7 +41,7 @@ impl<'a> ProcessScope<'a> {
 
             events_input: EventQueue::new(),
             events_output: EventQueue::new(),
-            transport: TransportState::default(),
+            transport: TransportState::dummy(),
             sample_rate,
         })
     }
@@ -105,6 +105,14 @@ impl<'a> ProcessScope<'a> {
 
         // prepare input event queue for processing
         self.events_input.sort_events();
+
+        // check if the input events are within the block size
+        if let Some(event) = self.events_input.read().last() {
+            assert!(
+                event.header().time <= samples,
+                "Input event timestamp larger than block size",
+            );
+        }
 
         // prepare output audio buffers for processing
         // this is used to detect uninitialized output buffers

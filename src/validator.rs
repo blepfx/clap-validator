@@ -162,10 +162,10 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Va
         tests.sort_by(|a, b| Ord::cmp(&a.name, &b.name));
     }
 
-    if let Some(plugin_id) = &settings.plugin_id {
-        if results.plugin_tests.is_empty() {
-            anyhow::bail!("No plugins matched the plugin ID '{plugin_id}'.");
-        }
+    if let Some(plugin_id) = &settings.plugin_id
+        && results.plugin_tests.is_empty()
+    {
+        anyhow::bail!("No plugins matched the plugin ID '{plugin_id}'.");
     }
 
     Ok(results)
@@ -320,7 +320,9 @@ fn run_test_in_process(test: impl FnOnce() -> Result<TestStatus>) -> TestStatus 
                 "A panic occurred".to_string()
             };
 
-            TestStatus::Crashed { details: message }
+            TestStatus::Crashed {
+                details: format!("{message}. This is a bug in clap-validator"),
+            }
         }
     }
 }

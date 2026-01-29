@@ -17,8 +17,8 @@ use std::path::Path;
 /// reported preset locations can be crawled successfully. If `load_presets` is enabled, then the
 /// crawled presets are also loaded.
 pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus> {
-    let library = PluginLibrary::load(library_path)
-        .with_context(|| format!("Could not load '{}'", library_path.display()))?;
+    let library =
+        PluginLibrary::load(library_path).with_context(|| format!("Could not load '{}'", library_path.display()))?;
     let preset_discovery_factory = match library.preset_discovery_factory() {
         Ok(preset_discovery_factory) => preset_discovery_factory,
         Err(_) => {
@@ -40,17 +40,12 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
     for provider_metadata in metadata {
         let provider = preset_discovery_factory
             .create_provider(&provider_metadata)
-            .with_context(|| {
-                format!(
-                    "Could not create the provider with ID '{}'",
-                    provider_metadata.id
-                )
-            })?;
+            .with_context(|| format!("Could not create the provider with ID '{}'", provider_metadata.id))?;
         for location in &provider.declared_data().locations {
             let presets = provider.crawl_location(location).with_context(|| {
                 format!(
-                    "Error occurred while crawling presets for the location '{}' with {} using \
-                     provider '{}' with ID '{}'",
+                    "Error occurred while crawling presets for the location '{}' with {} using provider '{}' with ID \
+                     '{}'",
                     location.name, location.value, provider_metadata.name, provider_metadata.id,
                 )
             })?;
@@ -72,27 +67,25 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
 
         // Stores `PresetFile`s with their associated locations for all CLAP plugin IDs in
         // `found_presets`
-        let mut loadable_presets_by_plugin_id: BTreeMap<String, Vec<LoadablePreset>> =
-            BTreeMap::new();
-        let mut maybe_add_preset =
-            |location: &LocationValue, load_key: Option<String>, preset: Preset| {
-                for plugin_id in &preset.plugin_ids {
-                    if plugin_id.abi == PluginAbi::Clap {
-                        if !loadable_presets_by_plugin_id.contains_key(&plugin_id.id) {
-                            loadable_presets_by_plugin_id.insert(plugin_id.id.clone(), Vec::new());
-                        }
-
-                        loadable_presets_by_plugin_id
-                            .get_mut(&plugin_id.id)
-                            .unwrap()
-                            .push(LoadablePreset {
-                                location: location.clone(),
-                                load_key: load_key.clone(),
-                                preset: preset.clone(),
-                            })
+        let mut loadable_presets_by_plugin_id: BTreeMap<String, Vec<LoadablePreset>> = BTreeMap::new();
+        let mut maybe_add_preset = |location: &LocationValue, load_key: Option<String>, preset: Preset| {
+            for plugin_id in &preset.plugin_ids {
+                if plugin_id.abi == PluginAbi::Clap {
+                    if !loadable_presets_by_plugin_id.contains_key(&plugin_id.id) {
+                        loadable_presets_by_plugin_id.insert(plugin_id.id.clone(), Vec::new());
                     }
+
+                    loadable_presets_by_plugin_id
+                        .get_mut(&plugin_id.id)
+                        .unwrap()
+                        .push(LoadablePreset {
+                            location: location.clone(),
+                            load_key: load_key.clone(),
+                            preset: preset.clone(),
+                        })
                 }
-            };
+            }
+        };
 
         for (location, preset_file) in found_presets {
             match preset_file {
@@ -152,12 +145,7 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
                 //       this.
                 let load_result = preset_load
                     .from_location(&location, load_key.as_deref())
-                    .with_context(|| {
-                        format!(
-                            "Could not load the preset '{}' for plugin '{}'",
-                            preset.name, plugin_id
-                        )
-                    });
+                    .with_context(|| format!("Could not load the preset '{}' for plugin '{}'", preset.name, plugin_id));
 
                 // In case the plugin uses `clap_host_preset_load::on_error()` to report an error,
                 // we will check that first before making sure the preset loaded correctly. This
@@ -179,20 +167,17 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
                         process.run()
                     })
                     .with_context(|| {
-                        format!(
-                            "Error while processing an audio buffer after loading a preset for \
-                             '{plugin_id}'"
-                        )
+                        format!("Error while processing an audio buffer after loading a preset for '{plugin_id}'")
                     })?;
 
-                plugin.handle_callback().with_context(|| {
-                    format!("An error occured during a host callback made by '{plugin_id}'")
-                })?;
+                plugin
+                    .handle_callback()
+                    .with_context(|| format!("An error occured during a host callback made by '{plugin_id}'"))?;
             }
 
-            plugin.handle_callback().with_context(|| {
-                format!("An error occured during a host callback made by '{plugin_id}'")
-            })?;
+            plugin
+                .handle_callback()
+                .with_context(|| format!("An error occured during a host callback made by '{plugin_id}'"))?;
         }
     }
 
@@ -202,8 +187,8 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
 /// The test for `PluginLibraryTestCase::PresetDiscoveryDescriptorConsistency`. Verifies that the
 /// descriptors stored in a plugin's preset providers match those returned by the factory.
 pub fn test_descriptor_consistency(library_path: &Path) -> Result<TestStatus> {
-    let library = PluginLibrary::load(library_path)
-        .with_context(|| format!("Could not load '{}'", library_path.display()))?;
+    let library =
+        PluginLibrary::load(library_path).with_context(|| format!("Could not load '{}'", library_path.display()))?;
     let preset_discovery_factory = match library.preset_discovery_factory() {
         Ok(preset_discovery_factory) => preset_discovery_factory,
         Err(_) => {
@@ -222,25 +207,18 @@ pub fn test_descriptor_consistency(library_path: &Path) -> Result<TestStatus> {
     for factory_metadata in metadata {
         let provider = preset_discovery_factory
             .create_provider(&factory_metadata)
-            .with_context(|| {
-                format!(
-                    "Could not create the provider with ID '{}'",
-                    factory_metadata.id
-                )
-            })?;
+            .with_context(|| format!("Could not create the provider with ID '{}'", factory_metadata.id))?;
         let provider_metadata = provider.descriptor().with_context(|| {
             format!(
-                "Could not grab the descriptor from the 'clap_preset_discovery_provider''s 'desc' \
-                 field for '{}'",
+                "Could not grab the descriptor from the 'clap_preset_discovery_provider''s 'desc' field for '{}'",
                 &factory_metadata.id
             )
         })?;
 
         if provider_metadata != factory_metadata {
             anyhow::bail!(
-                "The 'clap_preset_discovery_provider_descriptor' stored on '{}'s \
-                 'clap_preset_discovery_provider' object contains different values than the one \
-                 returned by the factory.",
+                "The 'clap_preset_discovery_provider_descriptor' stored on '{}'s 'clap_preset_discovery_provider' \
+                 object contains different values than the one returned by the factory.",
                 factory_metadata.id
             );
         }

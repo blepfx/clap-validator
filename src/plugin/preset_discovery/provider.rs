@@ -46,8 +46,7 @@ impl<'a> Provider<'a> {
     pub fn new(factory: &'a PresetDiscoveryFactory, provider_id: &str) -> Result<Self> {
         let indexer = Indexer::new();
 
-        let provider_id_cstring =
-            CString::new(provider_id).expect("The provider ID contained internal null bytes");
+        let provider_id_cstring = CString::new(provider_id).expect("The provider ID contained internal null bytes");
         let provider = {
             let factory = factory.as_ptr();
             let provider = unsafe {
@@ -63,8 +62,8 @@ impl<'a> Provider<'a> {
             match NonNull::new(provider as *mut clap_preset_discovery_provider) {
                 Some(provider) => provider,
                 None => anyhow::bail!(
-                    "'clap_preset_discovery_factory::create()' returned a null pointer for the \
-                     provider with ID '{provider_id}'.",
+                    "'clap_preset_discovery_factory::create()' returned a null pointer for the provider with ID \
+                     '{provider_id}'.",
                 ),
             }
         };
@@ -77,8 +76,7 @@ impl<'a> Provider<'a> {
 
             if !result {
                 anyhow::bail!(
-                    "'clap_preset_discovery_factory::init()' returned false for the provider with \
-                     ID '{provider_id}'."
+                    "'clap_preset_discovery_factory::init()' returned false for the provider with ID '{provider_id}'."
                 );
             }
 
@@ -86,8 +84,8 @@ impl<'a> Provider<'a> {
             //       currently test for this.
             indexer.results().with_context(|| {
                 format!(
-                    "Errors produced during 'clap_preset_discovery_indexer' callbacks made by the \
-                     provider with ID '{provider_id}'"
+                    "Errors produced during 'clap_preset_discovery_indexer' callbacks made by the provider with ID \
+                     '{provider_id}'"
                 )
             })?
         };
@@ -109,9 +107,7 @@ impl<'a> Provider<'a> {
         let provider = self.as_ptr();
         let descriptor = unsafe { (*provider).desc };
         if descriptor.is_null() {
-            anyhow::bail!(
-                "The 'desc' field on the 'clap_preset_provider' struct is a null pointer."
-            );
+            anyhow::bail!("The 'desc' field on the 'clap_preset_provider' struct is a null pointer.");
         }
 
         ProviderMetadata::from_descriptor(unsafe { &*descriptor })
@@ -133,10 +129,7 @@ impl<'a> Provider<'a> {
     /// plugin triggered any kind of error. The returned map contains a [`PresetFile`] for each of
     /// the crawled locations that the plugin declared presets for, which can be either a single
     /// preset or a container of multiple presets.
-    pub fn crawl_location(
-        &self,
-        location: &Location,
-    ) -> Result<BTreeMap<LocationValue, PresetFile>> {
+    pub fn crawl_location(&self, location: &Location) -> Result<BTreeMap<LocationValue, PresetFile>> {
         let mut results = BTreeMap::new();
 
         let location_flags = location.flags;
@@ -149,8 +142,7 @@ impl<'a> Provider<'a> {
             // theere. This can happen during the drop.
             let mut result = None;
             {
-                let metadata_receiver =
-                    MetadataReceiver::new(&mut result, &location, location_flags);
+                let metadata_receiver = MetadataReceiver::new(&mut result, &location, location_flags);
 
                 let provider = self.as_ptr();
                 let success = unsafe {
@@ -167,16 +159,13 @@ impl<'a> Provider<'a> {
                 if !success {
                     // TODO: Is the plugin allowed to return false here? If it doesn't have any
                     //       presets it should just not declare any, right?
-                    anyhow::bail!(
-                        "The preset provider returned false when fetching metadata for {location}.",
-                    );
+                    anyhow::bail!("The preset provider returned false when fetching metadata for {location}.",);
                 }
             }
 
             if let Some(preset_file) = result {
-                let preset_file = preset_file.with_context(|| {
-                    format!("Error while fetching fetching metadata for {location}")
-                })?;
+                let preset_file =
+                    preset_file.with_context(|| format!("Error while fetching fetching metadata for {location}"))?;
 
                 results.insert(location, preset_file);
             }
@@ -188,12 +177,9 @@ impl<'a> Provider<'a> {
             LocationValue::File(file_path) => {
                 // Single files are queried as is, directories are crawled. If the declared location
                 // does not exist, then that results in a hard error.
-                let file_path_str = file_path
-                    .to_str()
-                    .context("Invalid UTF-8 in location path")?;
-                let metadata = std::fs::metadata(file_path_str).with_context(|| {
-                    "Could not query metadata for the declared file location '{file_path_str}'"
-                })?;
+                let file_path_str = file_path.to_str().context("Invalid UTF-8 in location path")?;
+                let metadata = std::fs::metadata(file_path_str)
+                    .with_context(|| "Could not query metadata for the declared file location '{file_path_str}'")?;
                 if metadata.is_dir() {
                     // If the plugin declared valid file extensions, then we'll filter by those file
                     // extensions
@@ -224,13 +210,8 @@ impl<'a> Provider<'a> {
                         //       directories. If the plugin doesn't return an error but also doesn't
                         //       declare any presets then that gets handled gracefully
                         crawl(LocationValue::File(
-                            CString::new(
-                                candidate
-                                    .path()
-                                    .to_str()
-                                    .context("Invalid UTF-8 in file path")?,
-                            )
-                            .expect("File path contained null bytes"),
+                            CString::new(candidate.path().to_str().context("Invalid UTF-8 in file path")?)
+                                .expect("File path contained null bytes"),
                         ))?;
                     }
                 } else {

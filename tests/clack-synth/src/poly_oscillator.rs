@@ -3,9 +3,7 @@
 use crate::oscillator::SquareOscillator;
 use crate::params::PARAM_VOLUME_ID;
 use clack_plugin::events::Match;
-use clack_plugin::events::event_types::{
-    NoteOffEvent, NoteOnEvent, ParamModEvent, ParamValueEvent,
-};
+use clack_plugin::events::event_types::{NoteOffEvent, NoteOnEvent, ParamModEvent, ParamValueEvent};
 
 /// A voice in the polyphonic oscillator.
 ///
@@ -117,8 +115,7 @@ impl PolyOscillator {
             .position(|v| v.matches(channel, note_key, note_id))
         {
             // Swap the targeted voice with the last one.
-            self.voice_buffer
-                .swap(voice_index, self.active_voice_count - 1);
+            self.voice_buffer.swap(voice_index, self.active_voice_count - 1);
 
             // Remove the last voice from the active pool.
             self.active_voice_count -= 1;
@@ -192,19 +189,12 @@ impl PolyOscillator {
     /// Each voice will play at the given volume.
     ///
     /// This method assumes the buffer is initialized with `0`s.
-    pub fn generate_next_samples(
-        &mut self,
-        output_buffer: &mut [f32],
-        global_volume: f32,
-        global_volume_mod: f32,
-    ) {
+    pub fn generate_next_samples(&mut self, output_buffer: &mut [f32], global_volume: f32, global_volume_mod: f32) {
         for voice in self.active_voice_buffer_mut() {
             let volume = voice.volume.unwrap_or(global_volume);
             let volume_mod = voice.volume_mod.unwrap_or(global_volume_mod);
 
-            voice
-                .oscillator
-                .synth_samples(output_buffer, volume + volume_mod);
+            voice.oscillator.synth_samples(output_buffer, volume + volume_mod);
         }
     }
 

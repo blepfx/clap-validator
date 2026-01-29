@@ -47,7 +47,7 @@ impl<'a> ParamValue<'a> {
                     name: &param_infos[&event.param_id].name,
                     value: event.value,
                 },
-                _ => panic!("Unexpected event type. This is a clap-validator bug."),
+                _ => panic!("Unexpected event type"),
             })
             .collect()
     }
@@ -64,16 +64,12 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
         Some(params) => params,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(String::from(
-                    "The plugin does not implement the 'params' extension.",
-                )),
+                details: Some(String::from("The plugin does not implement the 'params' extension.")),
             });
         }
     };
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     let param_infos = params
         .info()
@@ -92,8 +88,8 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
         let param_name = &param_info.name;
 
         'value_loop: for i in 0..=100 {
-            let starting_value = param_info.range.start()
-                + (param_info.range.end() - param_info.range.start()) * (i as f64 / 100.0);
+            let starting_value =
+                param_info.range.start() + (param_info.range.end() - param_info.range.start()) * (i as f64 / 100.0);
 
             // If the plugin rounds string representations then `value` may very
             // will not roundtrip correctly, so we'll start at the string
@@ -119,72 +115,56 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
             };
             num_supported_text_to_value += 1;
 
-            let reconverted_text = params
-                .value_to_text(param_id, reconverted_value)?
-                .with_context(|| {
-                    format!(
-                        "Failure in repeated value to text conversion for parameter {param_id} \
-                         ('{param_name}')"
-                    )
-                })?;
+            let reconverted_text = params.value_to_text(param_id, reconverted_value)?.with_context(|| {
+                format!("Failure in repeated value to text conversion for parameter {param_id} ('{param_name}')")
+            })?;
             // Both of these are produced by the plugin, so they should be equal
             if starting_text != reconverted_text {
                 anyhow::bail!(
-                    "Converting {starting_value:?} to a string, back to a value, and then back to \
-                     a string again for parameter {param_id} ('{param_name}') results in \
-                     '{starting_text}' -> {reconverted_value:?} -> '{reconverted_text}', which is \
-                     not consistent."
+                    "Converting {starting_value:?} to a string, back to a value, and then back to a string again for \
+                     parameter {param_id} ('{param_name}') results in '{starting_text}' -> {reconverted_value:?} -> \
+                     '{reconverted_text}', which is not consistent."
                 );
             }
 
             // And one last hop back for good measure
-            let final_value = params
-                .text_to_value(param_id, &reconverted_text)?
-                .with_context(|| {
-                    format!(
-                        "Failure in repeated text to value conversion for parameter {param_id} \
-                         ('{param_name}')"
-                    )
-                })?;
+            let final_value = params.text_to_value(param_id, &reconverted_text)?.with_context(|| {
+                format!("Failure in repeated text to value conversion for parameter {param_id} ('{param_name}')")
+            })?;
             if final_value != reconverted_value {
                 anyhow::bail!(
-                    "Converting {starting_value:?} to a string, back to a value, back to a \
-                     string, and then back to a value again for parameter {param_id} \
-                     ('{param_name}') results in '{starting_text}' -> {reconverted_value:?} -> \
-                     '{reconverted_text}' -> {final_value:?}, which is not consistent."
+                    "Converting {starting_value:?} to a string, back to a value, back to a string, and then back to a \
+                     value again for parameter {param_id} ('{param_name}') results in '{starting_text}' -> \
+                     {reconverted_value:?} -> '{reconverted_text}' -> {final_value:?}, which is not consistent."
                 );
             }
         }
     }
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     if num_supported_value_to_text == 0 || num_supported_text_to_value == 0 {
         return Ok(TestStatus::Skipped {
             details: Some(String::from(
-                "The plugin's parameters need to support both value to text and text to value \
-                 conversions for this test.",
+                "The plugin's parameters need to support both value to text and text to value conversions for this \
+                 test.",
             )),
         });
     }
 
     if num_supported_value_to_text != expected_conversions {
         anyhow::bail!(
-            "'clap_plugin_params::value_to_text()' returned true for \
-             {num_supported_value_to_text} out of {expected_conversions} calls. This function is \
-             expected to be supported for either none of the parameters or for all of them. \
-             Examples of failing conversions were: {failed_value_to_text_calls:#?}"
+            "'clap_plugin_params::value_to_text()' returned true for {num_supported_value_to_text} out of \
+             {expected_conversions} calls. This function is expected to be supported for either none of the \
+             parameters or for all of them. Examples of failing conversions were: {failed_value_to_text_calls:#?}"
         );
     }
 
     if num_supported_text_to_value != expected_conversions {
         anyhow::bail!(
-            "'clap_plugin_params::text_to_value()' returned true for \
-             {num_supported_text_to_value} out of {expected_conversions} calls. This function is \
-             expected to be supported for either none of the parameters or for all of them. \
-             Examples of failing conversions were: {failed_text_to_value_calls:#?}"
+            "'clap_plugin_params::text_to_value()' returned true for {num_supported_text_to_value} out of \
+             {expected_conversions} calls. This function is expected to be supported for either none of the \
+             parameters or for all of them. Examples of failing conversions were: {failed_text_to_value_calls:#?}"
         );
     }
 
@@ -192,11 +172,7 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
 }
 
 /// The test for `ProcessingTest::ParamFuzzBasic` and `ProcessingTest::ParamFuzzBounds`.
-pub fn test_param_fuzz_basic(
-    library: &PluginLibrary,
-    plugin_id: &str,
-    snap_to_bounds: bool,
-) -> Result<TestStatus> {
+pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str, snap_to_bounds: bool) -> Result<TestStatus> {
     let mut prng = new_prng();
     let plugin = library
         .create_plugin(plugin_id)
@@ -210,16 +186,12 @@ pub fn test_param_fuzz_basic(
         Some(params) => params,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(String::from(
-                    "The plugin does not implement the 'params' extension.",
-                )),
+                details: Some(String::from("The plugin does not implement the 'params' extension.")),
             });
         }
     };
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     let audio_ports_config = audio_ports
         .map(|ports| ports.config())
@@ -231,9 +203,7 @@ pub fn test_param_fuzz_basic(
         .transpose()
         .context("Could not fetch the plugin's note port config")?
         .unwrap_or_default();
-    let param_infos = params
-        .info()
-        .context("Could not fetch the plugin's parameters")?;
+    let param_infos = params.info().context("Could not fetch the plugin's parameters")?;
 
     // For each set of runs we'll generate new parameter values, and if the plugin supports notes
     // we'll also generate note events.
@@ -259,9 +229,7 @@ pub fn test_param_fuzz_basic(
 
             for _ in 0..FUZZ_RUNS_PER_PERMUTATION {
                 if !have_set_parameters {
-                    process
-                        .input_queue()
-                        .add_events(current_events.clone().unwrap());
+                    process.input_queue().add_events(current_events.clone().unwrap());
                     have_set_parameters = true;
                 }
 
@@ -278,11 +246,9 @@ pub fn test_param_fuzz_basic(
         // If the run failed we'll want to write the parameter values to a file first
         if run_result.is_err() {
             let (previous_param_values_file_path, previous_param_values_file) =
-                PluginTestCase::ParamFuzzBasic
-                    .temporary_file(plugin_id, PREVIOUS_PARAM_VALUES_FILE_NAME)?;
+                PluginTestCase::ParamFuzzBasic.temporary_file(plugin_id, PREVIOUS_PARAM_VALUES_FILE_NAME)?;
             let (current_param_values_file_path, current_param_values_file) =
-                PluginTestCase::ParamFuzzBasic
-                    .temporary_file(plugin_id, CURRENT_PARAM_VALUES_FILE_NAME)?;
+                PluginTestCase::ParamFuzzBasic.temporary_file(plugin_id, CURRENT_PARAM_VALUES_FILE_NAME)?;
 
             serde_json::to_writer_pretty(
                 previous_param_values_file,
@@ -299,8 +265,8 @@ pub fn test_param_fuzz_basic(
             return Err(run_result
                 .with_context(|| {
                     format!(
-                        "Invalid output detected in parameter value permutation {} of {} ('{}' \
-                         and '{}' contain the current and previous parameter values)",
+                        "Invalid output detected in parameter value permutation {} of {} ('{}' and '{}' contain the \
+                         current and previous parameter values)",
                         permutation_no,
                         FUZZ_NUM_PERMUTATIONS,
                         current_param_values_file_path.display(),
@@ -313,18 +279,13 @@ pub fn test_param_fuzz_basic(
         std::mem::swap(&mut previous_events, &mut current_events);
     }
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
 
 /// The test for `ProcessingTest::ParamFuzzSampleAccurate`.
-pub fn test_param_fuzz_sample_accurate(
-    library: &PluginLibrary,
-    plugin_id: &str,
-) -> Result<TestStatus> {
+pub fn test_param_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     const INTERVALS: &[u32] = &[1000, 100, 1];
 
     let mut prng = new_prng();
@@ -340,16 +301,12 @@ pub fn test_param_fuzz_sample_accurate(
         Some(params) => params,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(String::from(
-                    "The plugin does not implement the 'params' extension.",
-                )),
+                details: Some(String::from("The plugin does not implement the 'params' extension.")),
             });
         }
     };
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     let audio_ports_config = audio_ports
         .map(|ports| ports.config())
@@ -361,9 +318,7 @@ pub fn test_param_fuzz_sample_accurate(
         .transpose()
         .context("Could not fetch the plugin's note port config")?
         .unwrap_or_default();
-    let param_infos = params
-        .info()
-        .context("Could not fetch the plugin's parameters")?;
+    let param_infos = params.info().context("Could not fetch the plugin's parameters")?;
 
     // For each set of runs we'll generate new parameter values, and if the plugin supports notes
     // we'll also generate note events.
@@ -381,9 +336,7 @@ pub fn test_param_fuzz_sample_accurate(
             let mut current_sample = 0;
             for _ in 0..num_steps {
                 while current_sample < BUFFER_SIZE {
-                    let events: Vec<Event> = param_fuzzer
-                        .randomize_params_at(&mut prng, current_sample)
-                        .collect();
+                    let events: Vec<Event> = param_fuzzer.randomize_params_at(&mut prng, current_sample).collect();
 
                     process.input_queue().add_events(events.clone());
                     current_events = Some(events);
@@ -405,9 +358,7 @@ pub fn test_param_fuzz_sample_accurate(
         })?;
     }
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -438,16 +389,12 @@ pub fn test_param_fuzz_modulation(library: &PluginLibrary, plugin_id: &str) -> R
         Some(params) => params,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(String::from(
-                    "The plugin does not implement the 'params' extension.",
-                )),
+                details: Some(String::from("The plugin does not implement the 'params' extension.")),
             });
         }
     };
 
-    let param_infos = params
-        .info()
-        .context("Could not fetch the plugin's parameters")?;
+    let param_infos = params.info().context("Could not fetch the plugin's parameters")?;
 
     let param_fuzzer = ParamFuzzer::new(&param_infos);
     let mut note_rng = NoteGenerator::new(&note_ports).with_params(&param_infos);
@@ -466,18 +413,13 @@ pub fn test_param_fuzz_modulation(library: &PluginLibrary, plugin_id: &str) -> R
         Ok(())
     })?;
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
 
 /// The test for `ProcessingTest::ParamSetWrongNamespace`.
-pub fn test_param_set_wrong_namespace(
-    library: &PluginLibrary,
-    plugin_id: &str,
-) -> Result<TestStatus> {
+pub fn test_param_set_wrong_namespace(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
     let plugin = library
         .create_plugin(plugin_id)
@@ -494,16 +436,12 @@ pub fn test_param_set_wrong_namespace(
         Some(params) => params,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(String::from(
-                    "The plugin does not implement the 'params' extension.",
-                )),
+                details: Some(String::from("The plugin does not implement the 'params' extension.")),
             });
         }
     };
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     let param_infos = params
         .info()
@@ -517,13 +455,12 @@ pub fn test_param_set_wrong_namespace(
     // else. The plugin's parameter values should thus not update its parameter values.
     const INCORRECT_NAMESPACE_ID: u16 = 0xb33f;
     let param_fuzzer = ParamFuzzer::new(&param_infos);
-    let mut random_param_set_events: Vec<_> =
-        param_fuzzer.randomize_params_at(&mut prng, 0).collect();
+    let mut random_param_set_events: Vec<_> = param_fuzzer.randomize_params_at(&mut prng, 0).collect();
 
     for event in random_param_set_events.iter_mut() {
         match event {
             Event::ParamValue(event) => event.header.space_id = INCORRECT_NAMESPACE_ID,
-            event => panic!("Unexpected event {event:?}, this is a clap-validator bug"),
+            event => panic!("Unexpected event {event:?}"),
         }
     }
 
@@ -544,19 +481,16 @@ pub fn test_param_set_wrong_namespace(
         .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
         .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     if actual_param_values == initial_param_values {
         Ok(TestStatus::Success { details: None })
     } else {
         Ok(TestStatus::Failed {
             details: Some(format!(
-                "Sending events with type ID {CLAP_EVENT_PARAM_VALUE} (CLAP_EVENT_PARAM_VALUE) \
-                 and namespace ID {INCORRECT_NAMESPACE_ID:#x} to the plugin caused its parameter \
-                 values to change. This should not happen. The plugin may not be checking the \
-                 event's namespace ID."
+                "Sending events with type ID {CLAP_EVENT_PARAM_VALUE} (CLAP_EVENT_PARAM_VALUE) and namespace ID \
+                 {INCORRECT_NAMESPACE_ID:#x} to the plugin caused its parameter values to change. This should not \
+                 happen. The plugin may not be checking the event's namespace ID."
             )),
         })
     }
@@ -573,16 +507,12 @@ pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Re
         Some(params) => params,
         None => {
             return Ok(TestStatus::Skipped {
-                details: Some(String::from(
-                    "The plugin does not implement the 'params' extension.",
-                )),
+                details: Some(String::from("The plugin does not implement the 'params' extension.")),
             });
         }
     };
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     let param_infos = params
         .info()
@@ -595,8 +525,8 @@ pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Re
 
         if !param_compare_approx(default_value, param_info.default) {
             anyhow::bail!(
-                "The default value for parameter {param_id} ('{}') is {}, but the actual \
-                 parameter value after initialization is {}.",
+                "The default value for parameter {param_id} ('{}') is {}, but the actual parameter value after \
+                 initialization is {}.",
                 param_info.name,
                 param_info.default,
                 default_value
@@ -604,9 +534,7 @@ pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Re
         }
     }
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }

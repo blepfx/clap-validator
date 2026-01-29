@@ -27,14 +27,14 @@ pub enum PluginTestCase {
     LayoutAudioPortsConfig,
     #[strum(serialize = "layout-configurable-audio-ports")]
     LayoutConfigurableAudioPorts,
-    #[strum(serialize = "process-audio-out-of-place-basic")]
-    ProcessAudioOutOfPlaceBasic,
-    #[strum(serialize = "process-audio-in-place-basic")]
-    ProcessAudioInPlaceBasic,
-    #[strum(serialize = "process-audio-out-of-place-double")]
-    ProcessAudioOutOfPlaceDouble,
-    #[strum(serialize = "process-audio-in-place-double")]
-    ProcessAudioInPlaceDouble,
+    #[strum(serialize = "process-audio-basic-out-of-place")]
+    ProcessAudioBasicOutOfPlace,
+    #[strum(serialize = "process-audio-basic-in-place")]
+    ProcessAudioBasicInPlace,
+    #[strum(serialize = "process-audio-double-out-of-place")]
+    ProcessAudioDoubleOutOfPlace,
+    #[strum(serialize = "process-audio-double-in-place")]
+    ProcessAudioDoubleInPlace,
     #[strum(serialize = "process-audio-constant-mask")]
     ProcessAudioConstantMask,
     #[strum(serialize = "process-audio-reset-determinism")]
@@ -100,34 +100,34 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::FeaturesDuplicates => {
                 String::from("The plugin's features array should not contain any duplicates.")
             }
-            PluginTestCase::ProcessAudioOutOfPlaceBasic => String::from(
+            PluginTestCase::ProcessAudioBasicOutOfPlace => String::from(
                 "Processes random audio through the plugin with its default parameter values and tests whether the \
                  output does not contain any non-finite or subnormal values. Uses out-of-place audio processing.",
             ),
-            PluginTestCase::ProcessAudioInPlaceBasic => String::from(
+            PluginTestCase::ProcessAudioBasicInPlace => String::from(
                 "Processes random audio through the plugin with its default parameter values and tests whether the \
                  output does not contain any non-finite or subnormal values. Uses in-place audio processing for buses \
                  that support it.",
             ),
-            PluginTestCase::ProcessAudioOutOfPlaceDouble => format!(
+            PluginTestCase::ProcessAudioDoubleOutOfPlace => format!(
                 "Same as '{}', but uses 64-bit floating point audio buffers instead of 32-bit ones for ports that \
                  support it.",
-                PluginTestCase::ProcessAudioOutOfPlaceBasic,
+                PluginTestCase::ProcessAudioBasicOutOfPlace,
             ),
-            PluginTestCase::ProcessAudioInPlaceDouble => format!(
+            PluginTestCase::ProcessAudioDoubleInPlace => format!(
                 "Same as '{}', but uses 64-bit floating point audio buffers instead of 32-bit ones for ports that \
                  support it.",
-                PluginTestCase::ProcessAudioInPlaceBasic,
+                PluginTestCase::ProcessAudioBasicInPlace,
             ),
             PluginTestCase::LayoutConfigurableAudioPorts => format!(
                 "Same as '{}', but this time it tries random configurations exposed via the \
                  'configurable-audio-ports' extension.",
-                PluginTestCase::ProcessAudioOutOfPlaceBasic,
+                PluginTestCase::ProcessAudioBasicOutOfPlace,
             ),
             PluginTestCase::LayoutAudioPortsConfig => format!(
                 "Same as '{}', but this time it tries all available port configurations exposed via the \
                  'audio-ports-config' extension.",
-                PluginTestCase::ProcessAudioInPlaceBasic,
+                PluginTestCase::ProcessAudioBasicInPlace,
             ),
             PluginTestCase::ProcessAudioConstantMask => String::from(
                 "Processes random audio through the plugin with its default parameter values while setting the \
@@ -227,8 +227,6 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  only allowed to read a small prime number of bytes at a time when reloading and resaving the state.",
                 PluginTestCase::StateReproducibilityBasic
             ),
-
-            // TODO: fix these
             PluginTestCase::TransportNull => String::from(
                 "Performs audio processing with a 'null' transport pointer, simulating a free-running transport \
                  state. The plugin passes the test if it doesn't produce any infinite or NaN values, and doesn't \
@@ -239,7 +237,7 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  passes the test if it doesn't produce any infinite or NaN values, and doesn't crash.",
             ),
             PluginTestCase::TransportFuzzSampleAccurate => format!(
-                "Same as '{}', but this time the test sends 'clap_event_transport' events in ample-accurate fashion \
+                "Same as '{}', but this time the test sends 'clap_event_transport' events in sample-accurate fashion \
                  while processing audio, generating them at fixed intervals (1, 100, 1000 samples). The plugin passes \
                  the test if it doesn't produce any infinite or NaN values, and doesn't crash.",
                 PluginTestCase::TransportFuzz
@@ -260,14 +258,14 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::LayoutConfigurableAudioPorts => {
                 layout::test_layout_configurable_audio_ports(library, plugin_id)
             }
-            PluginTestCase::ProcessAudioOutOfPlaceBasic => {
+            PluginTestCase::ProcessAudioBasicOutOfPlace => {
                 processing::test_process_audio_basic(library, plugin_id, false)
             }
-            PluginTestCase::ProcessAudioInPlaceBasic => processing::test_process_audio_basic(library, plugin_id, true),
-            PluginTestCase::ProcessAudioOutOfPlaceDouble => {
+            PluginTestCase::ProcessAudioBasicInPlace => processing::test_process_audio_basic(library, plugin_id, true),
+            PluginTestCase::ProcessAudioDoubleOutOfPlace => {
                 processing::test_process_audio_double(library, plugin_id, false)
             }
-            PluginTestCase::ProcessAudioInPlaceDouble => {
+            PluginTestCase::ProcessAudioDoubleInPlace => {
                 processing::test_process_audio_double(library, plugin_id, true)
             }
             PluginTestCase::ProcessAudioConstantMask => {

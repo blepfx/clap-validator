@@ -14,7 +14,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 
-const BUFFER_SIZE: u32 = 512;
+const BUFFER_SIZE: u32 = 128;
 
 /// The test for `PluginTestCase::TransportNull`
 pub fn test_transport_null(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
@@ -90,8 +90,9 @@ pub fn test_transport_fuzz(library: &PluginLibrary, plugin_id: &str) -> Result<T
         let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
-        for _ in 0..20 {
+        for _ in 0..80 {
             transport_fuzz.mutate(&mut prng, process.transport());
+
             process
                 .input_queue()
                 .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
@@ -141,26 +142,34 @@ pub fn test_transport_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &
 
                 let mut transport_fuzz = TransportFuzzer::new();
                 let mut transport_state = TransportState::default();
+                let mut transport_start = TransportState::default();
+                let mut current_sample = 0;
 
-                for _ in 0..5 {
-                    // set initial transport state for the block
-                    *process.transport() = transport_state.clone();
+                for _ in 0..20 {
+                    // reset transport state at the start of each block
+                    process.transport().clone_from(&transport_start);
 
                     // add sample-accurate transport events
-                    let mut current_sample = 0;
                     while current_sample < BUFFER_SIZE {
+                        // save transport state at the start of the next block
+                        if current_sample + interval >= BUFFER_SIZE {
+                            transport_start = transport_state.clone();
+                            transport_start.advance((BUFFER_SIZE - current_sample) as i64, process.sample_rate());
+                        }
+
                         // advance transport state to the event position, mutate it, and add the event
                         transport_state.advance(interval as i64, process.sample_rate());
                         transport_fuzz.mutate(&mut prng, &mut transport_state);
 
-                        current_sample += interval;
+                        // this will also send the event at current_sample == 0
+                        // but that's fine, the plugin should handle that correctly
                         process
                             .input_queue()
                             .add_events([Event::Transport(transport_state.as_clap_transport(current_sample))]);
+                        current_sample += interval;
                     }
 
-                    // set it to the start of the next block
-                    transport_state.advance(-(current_sample as i64), process.sample_rate());
+                    current_sample -= BUFFER_SIZE;
 
                     process.audio_buffers().randomize(&mut prng);
                     process

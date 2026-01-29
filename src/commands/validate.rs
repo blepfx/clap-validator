@@ -75,8 +75,7 @@ pub struct SingleTestSettings {
 
 /// The main validator command. This will validate one or more plugins and print the results.
 pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<ExitCode> {
-    let mut result =
-        validator::validate(verbosity, settings).context("Could not run the validator")?;
+    let mut result = validator::validate(verbosity, settings).context("Could not run the validator")?;
     let tally = result.tally();
 
     // Filtering out tests should be done after we did the tally for consistency's sake

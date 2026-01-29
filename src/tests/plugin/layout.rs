@@ -1,7 +1,8 @@
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
+use crate::plugin::ext::audio_ports_activation::AudioPortsActivation;
 use crate::plugin::ext::audio_ports_config::{AudioPortsConfig, AudioPortsConfigInfo};
 use crate::plugin::ext::configurable_audio_ports::{AudioPortsRequest, ConfigurableAudioPorts};
-use crate::plugin::ext::note_ports::NotePorts;
+use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::process::{AudioBuffers, ProcessScope};
 use crate::tests::TestStatus;
@@ -14,10 +15,7 @@ use rand_pcg::Pcg32;
 const BUFFER_SIZE: u32 = 512;
 
 /// The test for `PluginTestCase::LayoutAudioPortsConfig`.
-pub fn test_layout_audio_ports_config(
-    library: &PluginLibrary,
-    plugin_id: &str,
-) -> Result<TestStatus> {
+pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
 
     let plugin = library
@@ -87,48 +85,42 @@ pub fn test_layout_audio_ports_config(
                 .map(|x| x.num_channels);
 
             anyhow::ensure!(
-                config_audio_ports.inputs.len() as u32
-                    == config_audio_ports_config.input_port_count,
-                "The number of input audio ports for configuration '{}' ({}) does not match the \
-                 number reported by 'audio-ports' ({})",
+                config_audio_ports.inputs.len() as u32 == config_audio_ports_config.input_port_count,
+                "The number of input audio ports for configuration '{}' ({}) does not match the number reported by \
+                 'audio-ports' ({})",
                 config_audio_ports_config.name,
                 config_audio_ports_config.input_port_count,
                 config_audio_ports.inputs.len() as u32,
             );
 
             anyhow::ensure!(
-                config_audio_ports.outputs.len() as u32
-                    == config_audio_ports_config.output_port_count,
-                "The number of output audio ports for configuration '{}' ({}) does not match the \
-                 number reported by 'audio-ports' ({})",
+                config_audio_ports.outputs.len() as u32 == config_audio_ports_config.output_port_count,
+                "The number of output audio ports for configuration '{}' ({}) does not match the number reported by \
+                 'audio-ports' ({})",
                 config_audio_ports_config.name,
                 config_audio_ports_config.output_port_count,
                 config_audio_ports.outputs.len() as u32,
             );
 
-            match (
-                main_input_channels,
-                config_audio_ports_config.main_input_channel_count,
-            ) {
+            match (main_input_channels, config_audio_ports_config.main_input_channel_count) {
                 (None, None) => {}
                 (Some(a), Some(b)) => anyhow::ensure!(
                     a == b,
-                    "The number of channels in the main input port for the '{}' configuration \
-                     info ({}) does not match the number reported by 'audio-ports' ({})",
+                    "The number of channels in the main input port for the '{}' configuration info ({}) does not \
+                     match the number reported by 'audio-ports' ({})",
                     config_audio_ports_config.name,
                     b,
                     a,
                 ),
                 (None, Some(_)) => {
                     anyhow::bail!(
-                        "The configuration '{}' reports that a main input port exists, but \
-                         'audio-ports' does not.",
+                        "The configuration '{}' reports that a main input port exists, but 'audio-ports' does not.",
                         config_audio_ports_config.name,
                     )
                 }
                 (Some(_), None) => anyhow::bail!(
-                    "The configuration '{}' reports that main input port does not exist, but \
-                     according to 'audio-ports' it does.",
+                    "The configuration '{}' reports that main input port does not exist, but according to \
+                     'audio-ports' it does.",
                     config_audio_ports_config.name,
                 ),
             }
@@ -140,22 +132,21 @@ pub fn test_layout_audio_ports_config(
                 (None, None) => {}
                 (Some(a), Some(b)) => anyhow::ensure!(
                     a == b,
-                    "The number of channels in the main output port for the '{}' configuration \
-                     info ({}) does not match the number reported by 'audio-ports' ({})",
+                    "The number of channels in the main output port for the '{}' configuration info ({}) does not \
+                     match the number reported by 'audio-ports' ({})",
                     config_audio_ports_config.name,
                     b,
                     a,
                 ),
                 (None, Some(_)) => {
                     anyhow::bail!(
-                        "The configuration '{}' reports that a main output port exists, but \
-                         'audio-ports' does not.",
+                        "The configuration '{}' reports that a main output port exists, but 'audio-ports' does not.",
                         config_audio_ports_config.name,
                     )
                 }
                 (Some(_), None) => anyhow::bail!(
-                    "The configuration '{}' reports that main output port does not exist, but \
-                     according to 'audio-ports' it does.",
+                    "The configuration '{}' reports that main output port does not exist, but according to \
+                     'audio-ports' it does.",
                     config_audio_ports_config.name,
                 ),
             }
@@ -165,8 +156,8 @@ pub fn test_layout_audio_ports_config(
         if let Some(audio_ports_config_info) = &audio_ports_config_info {
             anyhow::ensure!(
                 audio_ports_config_info.current() == config_audio_ports_config.id,
-                "The current configuration ID reported by 'audio-ports-config-info' ({}) does not \
-                 match the last selected configuration ID ({})",
+                "The current configuration ID reported by 'audio-ports-config-info' ({}) does not match the last \
+                 selected configuration ID ({})",
                 audio_ports_config_info.current(),
                 config_audio_ports_config.id,
             );
@@ -176,8 +167,7 @@ pub fn test_layout_audio_ports_config(
 
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
-                let mut audio_buffers =
-                    AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE);
+                let mut audio_buffers = AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE);
                 let mut note_rng = NoteGenerator::new(&note_ports_config);
                 let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
@@ -199,22 +189,14 @@ pub fn test_layout_audio_ports_config(
             })?;
     }
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
 
 /// The test for `PluginTestCase::LayoutConfigurableAudioPorts`.
-pub fn test_layout_configurable_audio_ports(
-    library: &PluginLibrary,
-    plugin_id: &str,
-) -> Result<TestStatus> {
-    fn random_layout_requests(
-        prng: &mut Pcg32,
-        config: &AudioPortConfig,
-    ) -> Vec<AudioPortsRequest> {
+pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+    fn random_layout_requests(prng: &mut Pcg32, config: &AudioPortConfig) -> Vec<AudioPortsRequest> {
         let mut requests = Vec::new();
 
         for (i, _) in config.inputs.iter().enumerate() {
@@ -323,8 +305,7 @@ pub fn test_layout_configurable_audio_ports(
 
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
-                let mut audio_buffers =
-                    AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE);
+                let mut audio_buffers = AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE);
                 let mut note_rng = NoteGenerator::new(&note_ports_config);
                 let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
@@ -346,9 +327,7 @@ pub fn test_layout_configurable_audio_ports(
             })?;
     }
 
-    plugin
-        .handle_callback()
-        .context("An error occured during a callback")?;
+    plugin.handle_callback().context("An error occured during a callback")?;
 
     if checks_passed == 0 {
         return Ok(TestStatus::Warning {
@@ -357,6 +336,49 @@ pub fn test_layout_configurable_audio_ports(
             )),
         });
     }
+
+    Ok(TestStatus::Success { details: None })
+}
+
+/// The test for `PluginTestCase::LayoutAudioPortsActivation`.
+pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+    let mut prng = new_prng();
+
+    let plugin = library
+        .create_plugin(plugin_id)
+        .context("Could not create the plugin instance")?;
+    plugin.init().context("Error during initialization")?;
+
+    let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
+        Some(audio_ports) => audio_ports
+            .config()
+            .context("Error while querying 'audio-ports' IO configuration")?,
+        None => {
+            return Ok(TestStatus::Skipped {
+                details: Some(String::from(
+                    "The plugin does not implement the 'audio-ports' extension.",
+                )),
+            });
+        }
+    };
+
+    let audio_ports_activation = match plugin.get_extension::<AudioPortsActivation>() {
+        Some(extension) => extension,
+        None => {
+            return Ok(TestStatus::Skipped {
+                details: Some(String::from(
+                    "The plugin does not implement the 'audio-ports-activation' extension.",
+                )),
+            });
+        }
+    };
+
+    let note_ports = match plugin.get_extension::<NotePorts>() {
+        Some(note_ports) => note_ports
+            .config()
+            .context("Error while querying 'note-ports' IO configuration")?,
+        None => NotePortConfig::default(),
+    };
 
     Ok(TestStatus::Success { details: None })
 }

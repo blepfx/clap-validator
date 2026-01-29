@@ -60,8 +60,7 @@ impl PluginStatus {
     pub fn assert_is(&self, expected: PluginStatus) {
         if *self != expected {
             panic!(
-                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, must be {:?}). This is \
-                 a bug in the validator.",
+                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, must be {:?})",
                 self, expected
             )
         }
@@ -71,8 +70,7 @@ impl PluginStatus {
     pub fn assert_is_not(&self, unexpected: PluginStatus) {
         if *self == unexpected {
             panic!(
-                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, must not be {:?}). \
-                 This is a bug in the validator.",
+                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, must not be {:?})",
                 self, unexpected
             )
         }
@@ -82,8 +80,7 @@ impl PluginStatus {
     pub fn assert_active(&self) {
         if *self < PluginStatus::Activated {
             panic!(
-                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, must be activated). \
-                 This is a bug in the validator.",
+                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, must be activated)",
                 self
             )
         }
@@ -93,8 +90,7 @@ impl PluginStatus {
     pub fn assert_inactive(&self) {
         if *self >= PluginStatus::Activated {
             panic!(
-                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, must be deactivated). \
-                 This is a bug in the validator.",
+                "Invalid plugin function call while the plugin is in an incorrect state ({:?}, must be deactivated)",
                 self
             )
         }

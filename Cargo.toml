@@ -9,7 +9,7 @@ name = "clap-validator"
 version = "0.3.2"
 edition = "2024"
 license = "MIT"
-rust-version = "1.87.0"  # MSRV
+rust-version = "1.89.0"  # MSRV
 
 description = "A validator and automatic test suite for CLAP plugins"
 readme = "README.md"
@@ -24,7 +24,7 @@ clap = { version = "4.1.8", features = ["derive", "wrap_help"] }
 # For CLAP 1.2.2 support
 clap-sys = { git = "https://github.com/micahrj/clap-sys.git", rev = "25d7f53fdb6363ad63fbd80049cb7a42a97ac156" }
 colored = "3.0.0"
-crossbeam-utils = "0.8.21"
+crossbeam = "0.8.4"
 libloading = "0.9.0"
 log = "0.4"
 log-panics = { version = "2.0", features = ["with-backtrace"] }

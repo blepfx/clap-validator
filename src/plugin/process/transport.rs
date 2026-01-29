@@ -30,6 +30,23 @@ pub struct TransportState {
 }
 
 impl TransportState {
+    /// Create a dummy transport state with reasonable default values.
+    /// Used for most tests as "default" transport state.
+    ///
+    /// Use [`TransportState::default()`] if you want an "empty" transport state instead.
+    pub fn dummy() -> Self {
+        TransportState {
+            sample_pos: Some(0),
+            is_freerun: false,
+            is_playing: false,
+            is_recording: false,
+            tempo: Some((120.0, 0.0)),
+            time_signature: Some((4, 4)),
+            position_beats: Some(0.0),
+            position_seconds: Some(0.0),
+        }
+    }
+
     /// Advance the transport state by the given number of samples at the specified sample rate.
     pub fn advance(&mut self, samples: i64, sample_rate: f64) {
         if let Some(sample_pos) = &mut self.sample_pos {
@@ -63,6 +80,7 @@ impl TransportState {
         flags |= self.time_signature.is_some() as u32 * CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
 
         clap_event_transport {
+            flags,
             header: clap_event_header {
                 size: std::mem::size_of::<clap_event_transport>() as u32,
                 time: offset,
@@ -70,7 +88,6 @@ impl TransportState {
                 type_: CLAP_EVENT_TRANSPORT,
                 flags: 0,
             },
-            flags,
 
             // sending intentional invalid values when the info is not available
             // the plugin **must** check the flags to see what info is valid

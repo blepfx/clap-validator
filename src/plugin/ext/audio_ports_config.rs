@@ -1,12 +1,11 @@
 use crate::plugin::ext::Extension;
+use crate::plugin::ext::ambisonic::Ambisonic;
+use crate::plugin::ext::audio_ports::is_audio_port_type_consistent;
+use crate::plugin::ext::surround::Surround;
 use crate::plugin::instance::Plugin;
 use crate::util::{c_char_slice_to_string, clap_call};
-use anyhow::Result;
-use clap_sys::ext::audio_ports_config::{
-    CLAP_EXT_AUDIO_PORTS_CONFIG, CLAP_EXT_AUDIO_PORTS_CONFIG_INFO,
-    CLAP_EXT_AUDIO_PORTS_CONFIG_INFO_COMPAT, clap_audio_ports_config,
-    clap_plugin_audio_ports_config, clap_plugin_audio_ports_config_info,
-};
+use anyhow::{Context, Result};
+use clap_sys::ext::audio_ports_config::*;
 use clap_sys::id::clap_id;
 use std::ffi::CStr;
 use std::mem::zeroed;
@@ -66,6 +65,9 @@ impl<'a> Extension<&'a Plugin<'a>> for AudioPortsConfigInfo<'a> {
 
 impl AudioPortsConfig<'_> {
     pub fn enumerate(&self) -> Result<Vec<AudioPortsConfigConfig>> {
+        let has_ambisonic = self.plugin.get_extension::<Ambisonic>().is_some();
+        let has_surround = self.plugin.get_extension::<Surround>().is_some();
+
         let audio_ports_config = self.audio_ports_config.as_ptr();
         let plugin = self.plugin.as_ptr();
         let count = unsafe {
@@ -80,17 +82,41 @@ impl AudioPortsConfig<'_> {
                     anyhow::bail!("audio_ports_config::get({}) returned false", i);
                 }
 
+                if dst.has_main_input {
+                    is_audio_port_type_consistent(
+                        if dst.main_input_port_type.is_null() {
+                            None
+                        } else {
+                            Some(CStr::from_ptr(dst.main_input_port_type))
+                        },
+                        dst.main_input_channel_count,
+                        has_ambisonic,
+                        has_surround,
+                    )
+                    .with_context(|| format!("Inconsistent channel count for main input port for config {i}"))?;
+                }
+
+                if dst.has_main_output {
+                    is_audio_port_type_consistent(
+                        if dst.main_output_port_type.is_null() {
+                            None
+                        } else {
+                            Some(CStr::from_ptr(dst.main_output_port_type))
+                        },
+                        dst.main_output_channel_count,
+                        has_ambisonic,
+                        has_surround,
+                    )
+                    .with_context(|| format!("Inconsistent channel count for main output port for config {i}"))?;
+                }
+
                 Ok(AudioPortsConfigConfig {
                     id: dst.id,
                     name: c_char_slice_to_string(&dst.name)?,
                     input_port_count: dst.input_port_count,
                     output_port_count: dst.output_port_count,
-                    main_input_channel_count: dst
-                        .has_main_input
-                        .then_some(dst.main_input_channel_count),
-                    main_output_channel_count: dst
-                        .has_main_output
-                        .then_some(dst.main_output_channel_count),
+                    main_input_channel_count: dst.has_main_input.then_some(dst.main_input_channel_count),
+                    main_output_channel_count: dst.has_main_output.then_some(dst.main_output_channel_count),
                 })
             })
             .collect()
@@ -120,6 +146,4 @@ impl AudioPortsConfigInfo<'_> {
             clap_call! { audio_ports_config_info=>current_config(plugin) }
         }
     }
-
-    // TODO:
 }

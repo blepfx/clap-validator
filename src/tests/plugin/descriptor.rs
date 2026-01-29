@@ -22,7 +22,7 @@ pub fn test_consistency(library: &PluginLibrary, plugin_id: &str) -> Result<Test
         .plugins
         .into_iter()
         .find(|plugin_meta| plugin_meta.id == plugin_id)
-        .expect("Incorrect plugin ID for metadata query, this is a bug in clap-validator");
+        .expect("Incorrect plugin ID for metadata query");
 
     let plugin = library
         .create_plugin(plugin_id)
@@ -34,8 +34,8 @@ pub fn test_consistency(library: &PluginLibrary, plugin_id: &str) -> Result<Test
     } else {
         Ok(TestStatus::Failed {
             details: Some(format!(
-                "The 'clap_plugin_descriptor' stored on '{plugin_id}'s 'clap_plugin' object \
-                 contains different values than the one returned by the factory."
+                "The 'clap_plugin_descriptor' stored on '{plugin_id}'s 'clap_plugin' object contains different values \
+                 than the one returned by the factory."
             )),
         })
     }
@@ -66,7 +66,7 @@ pub fn test_features_categories(library: &PluginLibrary, plugin_id: &str) -> Res
         Ok(TestStatus::Success { details: None })
     } else {
         anyhow::bail!(
-            "The plugin needs to have at least one of thw following plugin category features: \
+            "The plugin needs to have at least one of the following plugin category features: \
              \"{instrument_feature}\", \"{audio_effect_feature}\", \"{note_effect_feature}\", or \
              \"{analyzer_feature}\"."
         )
@@ -99,12 +99,12 @@ fn plugin_features(library: &PluginLibrary, plugin_id: &str) -> Result<Vec<Strin
                 library.plugin_path().display()
             )
         })
-        .and_then(|metadata| {
+        .map(|metadata| {
             metadata
                 .plugins
                 .into_iter()
                 .find(|plugin_meta| plugin_meta.id == plugin_id)
-                .context("Incorrect plugin ID for metadata query, this is a bug in clap-validator")
+                .expect("Incorrect plugin ID for metadata query")
         })
         .map(|metadata| metadata.features)
 }

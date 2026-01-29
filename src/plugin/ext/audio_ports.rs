@@ -7,12 +7,7 @@ use crate::plugin::instance::Plugin;
 use crate::util::clap_call;
 use anyhow::{Context, Result};
 use clap_sys::ext::ambisonic::CLAP_PORT_AMBISONIC;
-use clap_sys::ext::audio_ports::{
-    CLAP_AUDIO_PORT_IS_MAIN, CLAP_AUDIO_PORT_PREFERS_64BITS,
-    CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE, CLAP_AUDIO_PORT_SUPPORTS_64BITS,
-    CLAP_EXT_AUDIO_PORTS, CLAP_PORT_MONO, CLAP_PORT_STEREO, clap_audio_port_info,
-    clap_plugin_audio_ports,
-};
+use clap_sys::ext::audio_ports::*;
 use clap_sys::ext::surround::CLAP_PORT_SURROUND;
 use clap_sys::id::CLAP_INVALID_ID;
 use std::collections::HashMap;
@@ -107,20 +102,25 @@ impl AudioPorts<'_> {
 
             if !success {
                 anyhow::bail!(
-                    "Plugin returned an error when querying input audio port {i} ({num_inputs} \
-                     total input ports)."
+                    "Plugin returned an error when querying input audio port {i} ({num_inputs} total input ports)."
                 );
             }
 
-            is_audio_port_type_consistent(&info, has_ambisonic, has_surround)
-                .with_context(|| format!("Inconsistent type for output port {i}"))?;
+            is_audio_port_type_consistent(
+                if info.port_type.is_null() {
+                    None
+                } else {
+                    Some(unsafe { CStr::from_ptr(info.port_type) })
+                },
+                info.channel_count,
+                has_ambisonic,
+                has_surround,
+            )
+            .with_context(|| format!("Inconsistent channel count for output port {i}"))?;
 
             // We'll convert these stable IDs to vector indices later
             if input_stable_index_pairs.contains_key(&info.id) {
-                anyhow::bail!(
-                    "The stable ID of input audio port {i} (id={}) is a duplicate.",
-                    info.id
-                );
+                anyhow::bail!("The stable ID of input audio port {i} (id={}) is a duplicate.", info.id);
             }
             input_stable_index_pairs.insert(info.id, (i as usize, info.in_place_pair));
 
@@ -128,21 +128,18 @@ impl AudioPorts<'_> {
             let is_main = (info.flags & CLAP_AUDIO_PORT_IS_MAIN) != 0;
             if is_main && i != 0 {
                 anyhow::bail!(
-                    "Input audio port {i} (id={}) is marked as main, but it is not the first port \
-                     in the list.",
+                    "Input audio port {i} (id={}) is marked as main, but it is not the first port in the list.",
                     info.id
                 );
             }
 
             let supports_double_sample_size = (info.flags & CLAP_AUDIO_PORT_SUPPORTS_64BITS) != 0;
             let prefers_double_sample_size = (info.flags & CLAP_AUDIO_PORT_PREFERS_64BITS) != 0;
-            let requires_common_sample_size =
-                (info.flags & CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE) != 0;
+            let requires_common_sample_size = (info.flags & CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE) != 0;
 
             if prefers_double_sample_size && !supports_double_sample_size {
                 anyhow::bail!(
-                    "Input audio port {i} (id={}) prefers 64-bit sample size, but does not \
-                     support it.",
+                    "Input audio port {i} (id={}) prefers 64-bit sample size, but does not support it.",
                     info.id
                 );
             }
@@ -175,13 +172,21 @@ impl AudioPorts<'_> {
 
             if !success {
                 anyhow::bail!(
-                    "Plugin returned an error when querying output audio port {i} ({num_outputs} \
-                     total output ports)."
+                    "Plugin returned an error when querying output audio port {i} ({num_outputs} total output ports)."
                 );
             }
 
-            is_audio_port_type_consistent(&info, has_ambisonic, has_surround)
-                .with_context(|| format!("Inconsistent channel count for output port {i}"))?;
+            is_audio_port_type_consistent(
+                if info.port_type.is_null() {
+                    None
+                } else {
+                    Some(unsafe { CStr::from_ptr(info.port_type) })
+                },
+                info.channel_count,
+                has_ambisonic,
+                has_surround,
+            )
+            .with_context(|| format!("Inconsistent channel count for output port {i}"))?;
 
             if output_stable_index_pairs.contains_key(&info.id) {
                 anyhow::bail!(
@@ -194,21 +199,18 @@ impl AudioPorts<'_> {
             let is_main = (info.flags & CLAP_AUDIO_PORT_IS_MAIN) != 0;
             if is_main && i != 0 {
                 anyhow::bail!(
-                    "Output audio port {i} (id={}) is marked as main, but it is not the first \
-                     port in the list.",
+                    "Output audio port {i} (id={}) is marked as main, but it is not the first port in the list.",
                     info.id
                 );
             }
 
             let supports_double_sample_size = (info.flags & CLAP_AUDIO_PORT_SUPPORTS_64BITS) != 0;
             let prefers_double_sample_size = (info.flags & CLAP_AUDIO_PORT_PREFERS_64BITS) != 0;
-            let requires_common_sample_size =
-                (info.flags & CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE) != 0;
+            let requires_common_sample_size = (info.flags & CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE) != 0;
 
             if prefers_double_sample_size && !supports_double_sample_size {
                 anyhow::bail!(
-                    "Output audio port {i} (id={}) prefers 64-bit sample size, but does not \
-                     support it.",
+                    "Output audio port {i} (id={}) prefers 64-bit sample size, but does not support it.",
                     info.id
                 );
             }
@@ -235,8 +237,8 @@ impl AudioPorts<'_> {
         // 32bit sample size) and nullifies the 64 bit support of the other ports
         if has_single_precision_requires_common_port && has_double_precision_requires_common_port {
             anyhow::bail!(
-                "The plugin has audio ports that require common sample size, but some of these \
-                 ports only support 32-bit sample size while others support 64-bit sample size."
+                "The plugin has audio ports that require common sample size, but some of these ports only support \
+                 32-bit sample size while others support 64-bit sample size."
             );
         }
 
@@ -258,17 +260,15 @@ impl AudioPorts<'_> {
                 }
                 Some((output_stable_id, (pair_output_port_idx, output_pair_stable_id))) => {
                     anyhow::bail!(
-                        "Input port {input_port_idx} with stable ID {input_stable_id} is \
-                         connected to output port {pair_output_port_idx} with stable ID \
-                         {output_stable_id} through an in-place pair, but the relation is not \
-                         symmetrical. The output port reports to have an in-place pair with \
-                         stable ID {output_pair_stable_id}."
+                        "Input port {input_port_idx} with stable ID {input_stable_id} is connected to output port \
+                         {pair_output_port_idx} with stable ID {output_stable_id} through an in-place pair, but the \
+                         relation is not symmetrical. The output port reports to have an in-place pair with stable ID \
+                         {output_pair_stable_id}."
                     )
                 }
                 None => anyhow::bail!(
-                    "Input port {input_port_idx} with stable ID {input_stable_id} claims to be \
-                     connected to an output port with stable ID {pair_stable_id} through an \
-                     in-place pair, but this port does not exist."
+                    "Input port {input_port_idx} with stable ID {input_stable_id} claims to be connected to an output \
+                     port with stable ID {pair_stable_id} through an in-place pair, but this port does not exist."
                 ),
             }
         }
@@ -283,9 +283,7 @@ impl AudioPorts<'_> {
                 .iter()
                 .find(|(input_stable_id, (_, _))| *input_stable_id == pair_stable_id)
             {
-                Some((_, (pair_input_port_idx, input_pair_stable_id)))
-                    if input_pair_stable_id == output_stable_id =>
-                {
+                Some((_, (pair_input_port_idx, input_pair_stable_id))) if input_pair_stable_id == output_stable_id => {
                     // We should have already done this. If this is not the case, then this is an
                     // error in the validator
                     assert_eq!(
@@ -299,17 +297,16 @@ impl AudioPorts<'_> {
                 }
                 Some((input_stable_id, (pair_input_port_idx, input_pair_stable_id))) => {
                     anyhow::bail!(
-                        "Output port {output_port_idx} with stable ID {output_stable_id} is \
-                         connected to input port {pair_input_port_idx} with stable ID \
-                         {input_stable_id} through an in-place pair, but the relation is not \
-                         symmetrical. The input port reports to have an in-place pair with stable \
-                         ID {input_pair_stable_id}."
+                        "Output port {output_port_idx} with stable ID {output_stable_id} is connected to input port \
+                         {pair_input_port_idx} with stable ID {input_stable_id} through an in-place pair, but the \
+                         relation is not symmetrical. The input port reports to have an in-place pair with stable ID \
+                         {input_pair_stable_id}."
                     )
                 }
                 None => anyhow::bail!(
-                    "Output port {output_port_idx} with stable ID {output_stable_id} claims to be \
-                     connected to an input port with stable ID {pair_stable_id} through an \
-                     in-place pair, but this port does not exist."
+                    "Output port {output_port_idx} with stable ID {output_stable_id} claims to be connected to an \
+                     input port with stable ID {pair_stable_id} through an in-place pair, but this port does not \
+                     exist."
                 ),
             }
         }
@@ -320,57 +317,50 @@ impl AudioPorts<'_> {
 
 /// Check whether the number of channels matches an audio port's type string, if that is set.
 /// Returns an error if the port type is not consistent
-fn is_audio_port_type_consistent(
-    info: &clap_audio_port_info,
+pub fn is_audio_port_type_consistent(
+    port_type: Option<&CStr>,
+    channel_count: u32,
     has_ambisonic: bool,
     has_surround: bool,
 ) -> Result<()> {
-    if info.port_type.is_null() {
+    if port_type.is_none() {
         return Ok(());
     }
 
-    let port_type = unsafe { CStr::from_ptr(info.port_type) };
-    if port_type == CLAP_PORT_MONO {
-        if info.channel_count == 1 {
+    if port_type == Some(CLAP_PORT_MONO) {
+        if channel_count == 1 {
             Ok(())
         } else {
-            anyhow::bail!(
-                "Expected 1 channel, but the audio port has {} channels.",
-                info.channel_count
-            );
+            anyhow::bail!("Expected 1 channel, but the audio port has {} channels.", channel_count);
         }
-    } else if port_type == CLAP_PORT_STEREO {
-        if info.channel_count == 2 {
+    } else if port_type == Some(CLAP_PORT_STEREO) {
+        if channel_count == 2 {
             Ok(())
         } else {
             anyhow::bail!(
                 "Expected 2 channels, but the audio port has {} channel(s).",
-                info.channel_count
+                channel_count
             );
         }
-    } else if port_type == CLAP_PORT_SURROUND {
+    } else if port_type == Some(CLAP_PORT_SURROUND) {
         if !has_surround {
-            anyhow::bail!(
-                "Audio port type is 'surround', but the plugin does not implement the 'surround' \
-                 extension."
-            );
+            anyhow::bail!("Audio port type is 'surround', but the plugin does not implement the 'surround' extension.");
         }
 
         Ok(())
-    } else if port_type == CLAP_PORT_AMBISONIC {
+    } else if port_type == Some(CLAP_PORT_AMBISONIC) {
         if !has_ambisonic {
             anyhow::bail!(
-                "Audio port type is 'ambisonic', but the plugin does not implement the \
-                 'ambisonic' extension."
+                "Audio port type is 'ambisonic', but the plugin does not implement the 'ambisonic' extension."
             );
         }
 
         // ambisonic audio requires (N^2) channels where N is the ambisonics order
-        if info.channel_count.isqrt().pow(2) != info.channel_count {
+        if channel_count.isqrt().pow(2) != channel_count {
             anyhow::bail!(
-                "Expected a perfect square (1, 4, 9, ...) number of channels for ambisonic audio \
-                 port, but the audio port has {} channels.",
-                info.channel_count
+                "Expected a perfect square (N^2 where N is the ambisonics order) number of channels for ambisonic \
+                 audio port, but the audio port has {} channels.",
+                channel_count
             );
         }
 

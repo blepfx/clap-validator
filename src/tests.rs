@@ -10,7 +10,7 @@
 //! be converted to and from a string representation.
 
 use crate::util;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::any::TypeId;
 use std::collections::BTreeMap;
@@ -100,18 +100,17 @@ pub trait TestCase<'a>: Display + FromStr + Sized + 'static {
             .join(plugin_id)
             .join(self.to_string())
             .join(name);
+
         if path.exists() {
             panic!(
-                "Tried to create a temporary file at '{}', but this file already exists. This is \
-                 a bug in clap-validator.",
+                "Tried to create a temporary file at '{}', but this file already exists",
                 path.display()
             )
         }
 
         fs::create_dir_all(path.parent().unwrap())
-            .context("Could not create the directory for the test's temporary files")?;
-        let file =
-            fs::File::create(&path).context("Could not create a temporary file for the test")?;
+            .expect("Could not create the directory for the test's temporary files");
+        let file = fs::File::create(&path).expect("Could not create a temporary file for the test");
 
         Ok((path, file))
     }
@@ -123,9 +122,7 @@ impl TestStatus {
     pub fn failed_or_warning(&self) -> bool {
         match self {
             TestStatus::Success { .. } | TestStatus::Skipped { .. } => false,
-            TestStatus::Warning { .. } | TestStatus::Crashed { .. } | TestStatus::Failed { .. } => {
-                true
-            }
+            TestStatus::Warning { .. } | TestStatus::Crashed { .. } | TestStatus::Failed { .. } => true,
         }
     }
 
@@ -176,7 +173,7 @@ impl SerializedTest {
                 data: serde_json::to_string(&data)?,
             })
         } else {
-            anyhow::bail!("Unsupported test case type for serialization.");
+            panic!("Unsupported test case type for serialization.");
         }
     }
 
@@ -188,7 +185,7 @@ impl SerializedTest {
             let test: PluginLibraryTestCase = self.test_name.parse()?;
             test.run(serde_json::from_str(&self.data)?)
         } else {
-            anyhow::bail!("Unsupported test type '{}'", self.test_type);
+            panic!("Unsupported test type '{}'", self.test_type);
         }
     }
 }

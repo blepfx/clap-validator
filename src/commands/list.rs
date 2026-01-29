@@ -179,10 +179,7 @@ where
                     wrapper,
                     " - {} ({}) (contains {} {}, {} {}):",
                     provider_result.provider_name,
-                    provider_result
-                        .provider_vendor
-                        .as_deref()
-                        .unwrap_or("unknown vendor"),
+                    provider_result.provider_vendor.as_deref().unwrap_or("unknown vendor"),
                     provider_result.soundpacks.len(),
                     if provider_result.soundpacks.len() == 1 {
                         "soundpack"
@@ -237,12 +234,7 @@ where
                                 println_wrapped!(wrapper, "   - {}", preset_uri);
 
                                 println!();
-                                println_wrapped!(
-                                    wrapper,
-                                    "     {} ({})",
-                                    preset.name,
-                                    preset.plugin_ids_string()
-                                );
+                                println_wrapped!(wrapper, "     {} ({})", preset.name, preset.plugin_ids_string());
                                 if let Some(description) = preset.description {
                                     println_wrapped_no_indent!(wrapper, "     {}", description);
                                 }
@@ -270,18 +262,10 @@ where
                                 }
                                 println_wrapped!(wrapper, "     flags: {}", preset.flags);
                                 if !preset.features.is_empty() {
-                                    println_wrapped!(
-                                        wrapper,
-                                        "     features: [{}]",
-                                        preset.features.join(", ")
-                                    );
+                                    println_wrapped!(wrapper, "     features: [{}]", preset.features.join(", "));
                                 }
                                 if !preset.extra_info.is_empty() {
-                                    println_wrapped!(
-                                        wrapper,
-                                        "     extra info: {:#?}",
-                                        preset.extra_info
-                                    );
+                                    println_wrapped!(wrapper, "     extra info: {:#?}", preset.extra_info);
                                 }
                             }
                             PresetFile::Container(presets) => {
@@ -290,11 +274,7 @@ where
                                     "   - {} (contains {} {})",
                                     preset_uri,
                                     presets.len(),
-                                    if presets.len() == 1 {
-                                        "preset"
-                                    } else {
-                                        "presets"
-                                    }
+                                    if presets.len() == 1 { "preset" } else { "presets" }
                                 );
 
                                 for (load_key, preset) in presets {
@@ -307,11 +287,7 @@ where
                                         preset.plugin_ids_string()
                                     );
                                     if let Some(description) = preset.description {
-                                        println_wrapped_no_indent!(
-                                            wrapper,
-                                            "       {}",
-                                            description
-                                        );
+                                        println_wrapped_no_indent!(wrapper, "       {}", description);
                                     }
                                     println!();
                                     if !preset.creators.is_empty() {
@@ -327,37 +303,20 @@ where
                                         );
                                     }
                                     if let Some(soundpack_id) = preset.soundpack_id {
-                                        println_wrapped!(
-                                            wrapper,
-                                            "       soundpack: {soundpack_id}"
-                                        );
+                                        println_wrapped!(wrapper, "       soundpack: {soundpack_id}");
                                     }
                                     if let Some(creation_time) = preset.creation_time {
-                                        println_wrapped!(
-                                            wrapper,
-                                            "       created: {creation_time}"
-                                        );
+                                        println_wrapped!(wrapper, "       created: {creation_time}");
                                     }
                                     if let Some(modification_time) = preset.modification_time {
-                                        println_wrapped!(
-                                            wrapper,
-                                            "       modified: {modification_time}"
-                                        );
+                                        println_wrapped!(wrapper, "       modified: {modification_time}");
                                     }
                                     println_wrapped!(wrapper, "       flags: {}", preset.flags);
                                     if !preset.features.is_empty() {
-                                        println_wrapped!(
-                                            wrapper,
-                                            "       features: [{}]",
-                                            preset.features.join(", ")
-                                        );
+                                        println_wrapped!(wrapper, "       features: [{}]", preset.features.join(", "));
                                     }
                                     if !preset.extra_info.is_empty() {
-                                        println_wrapped!(
-                                            wrapper,
-                                            "       extra info: {:#?}",
-                                            preset.extra_info
-                                        );
+                                        println_wrapped!(wrapper, "       extra info: {:#?}", preset.extra_info);
                                     }
                                 }
                             }

@@ -39,9 +39,7 @@ impl PresetLoad<'_> {
     pub fn from_location(&self, location: &LocationValue, load_key: Option<&str>) -> Result<()> {
         let (location_kind, location_ptr) = location.to_raw();
         let load_key_cstring = load_key
-            .map(|load_key| {
-                CString::new(load_key).context("Load key contained internal null bytes")
-            })
+            .map(|load_key| CString::new(load_key).context("Load key contained internal null bytes"))
             .transpose()?;
 
         let preset_load = self.preset_load.as_ptr();

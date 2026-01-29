@@ -58,7 +58,9 @@ pub struct ParamFuzzer<'a> {
 }
 
 /// A helper to generate random transport events in a couple different ways to stress test a plugin's transport handling.
-pub struct TransportFuzzer {}
+pub struct TransportFuzzer {
+    probability_change: f64,
+}
 
 /// The description of an active note in the [`NoteGenerator`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -590,7 +592,7 @@ impl<'a> NoteGenerator<'a> {
             }
         }
 
-        panic!("Unable to generate a random note event after 1024 tries, this is a bug in the validator");
+        panic!("Unable to generate a random note event after 1024 tries");
     }
 
     #[allow(unused)]
@@ -796,23 +798,25 @@ impl<'a> ParamFuzzer<'a> {
 impl TransportFuzzer {
     /// Create a new transport fuzzer.
     pub fn new() -> Self {
-        TransportFuzzer {}
+        TransportFuzzer {
+            probability_change: 0.2,
+        }
     }
 
     /// Mutates an existing transport state.
     pub fn mutate(&mut self, prng: &mut Pcg32, transport: &mut TransportState) {
-        // toggle playback state with 10% probability
-        if prng.random_bool(0.1) {
+        // toggle playback state with 20% probability
+        if prng.random_bool(self.probability_change) {
             transport.is_playing = !transport.is_playing;
         }
 
-        // toggle recording state with 10% probability
-        if prng.random_bool(0.1) {
+        // toggle recording state with 20% probability
+        if prng.random_bool(self.probability_change) {
             transport.is_recording = !transport.is_recording;
         }
 
-        // change time signature with 10% probability
-        if prng.random_bool(0.1) {
+        // change time signature with 20% probability
+        if prng.random_bool(self.probability_change) {
             if prng.random_bool(0.5) {
                 transport.time_signature = None;
             } else {
@@ -820,8 +824,8 @@ impl TransportFuzzer {
             }
         }
 
-        // change tempo (instanteous) with 10% probability
-        if prng.random_bool(0.1) {
+        // change tempo (instanteous) with 20% probability
+        if prng.random_bool(self.probability_change) {
             if prng.random_bool(0.5) {
                 transport.tempo = None;
             } else {
@@ -829,21 +833,21 @@ impl TransportFuzzer {
             }
         }
 
-        // change tempo (ramp) with 20% probability
-        if prng.random_bool(0.2) {
-            if let Some((tempo, ramp)) = &mut transport.tempo {
-                // safeguard to prevent extremely low tempos
-                if *tempo < 40.0 {
-                    *tempo = 40.0;
-                    *ramp = prng.random_range(0.0..=0.01);
-                }
-
-                *ramp = prng.random_range(-0.01..=0.01);
+        // change tempo (ramp) with 40% probability
+        if let Some((tempo, ramp)) = &mut transport.tempo
+            && prng.random_bool(self.probability_change)
+        {
+            // safeguard to prevent extremely low tempos
+            if *tempo < 40.0 {
+                *tempo = 40.0;
+                *ramp = prng.random_range(0.0..=0.01);
             }
+
+            *ramp = prng.random_range(-0.01..=0.01);
         }
 
-        // seek to a new position with 5% probability
-        if prng.random_bool(0.05) {
+        // seek to a new position with 10% probability
+        if prng.random_bool(self.probability_change) {
             if prng.random_bool(0.5) {
                 transport.position_seconds = None;
             } else {
@@ -862,6 +866,10 @@ impl TransportFuzzer {
                 // we can only seek forward
                 transport.sample_pos = Some(transport.sample_pos.unwrap_or(0) + prng.random_range(0..=100_000) as u64);
             }
+        }
+
+        if transport.tempo.is_none() {
+            transport.position_beats = None;
         }
     }
 }

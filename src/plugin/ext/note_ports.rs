@@ -4,10 +4,7 @@ use super::Extension;
 use crate::plugin::instance::Plugin;
 use crate::util::clap_call;
 use anyhow::Result;
-use clap_sys::ext::note_ports::{
-    CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI,
-    CLAP_NOTE_DIALECT_MIDI_MPE, clap_note_dialect, clap_note_port_info, clap_plugin_note_ports,
-};
+use clap_sys::ext::note_ports::*;
 use std::collections::HashSet;
 use std::ffi::CStr;
 use std::mem;
@@ -78,32 +75,26 @@ impl NotePorts<'_> {
             };
             if !success {
                 anyhow::bail!(
-                    "Plugin returned an error when querying input note port {i} ({num_inputs} \
-                     total input ports)."
+                    "Plugin returned an error when querying input note port {i} ({num_inputs} total input ports)."
                 );
             }
 
             let num_preferred_dialects = info.preferred_dialect.count_ones();
             if num_preferred_dialects != 1 {
-                anyhow::bail!(
-                    "Plugin prefers {num_preferred_dialects} dialects for input note port {i}."
-                );
+                anyhow::bail!("Plugin prefers {num_preferred_dialects} dialects for input note port {i}.");
             }
 
             if (info.supported_dialects & info.preferred_dialect) == 0 {
                 anyhow::bail!(
-                    "Plugin prefers note dialect {:#b} for input note port {i} which is not \
-                     contained within the supported note dialects field ({:#b}).",
+                    "Plugin prefers note dialect {:#b} for input note port {i} which is not contained within the \
+                     supported note dialects field ({:#b}).",
                     info.preferred_dialect,
                     info.supported_dialects
                 );
             }
 
             if !input_stable_indices.insert(info.id) {
-                anyhow::bail!(
-                    "The stable ID of input note port {i} ({}) is a duplicate.",
-                    info.id
-                );
+                anyhow::bail!("The stable ID of input note port {i} ({}) is a duplicate.", info.id);
             }
 
             config.inputs.push(NotePort {
@@ -122,32 +113,26 @@ impl NotePorts<'_> {
             };
             if !success {
                 anyhow::bail!(
-                    "Plugin returned an error when querying output note port {i} ({num_outputs} \
-                     total output ports)."
+                    "Plugin returned an error when querying output note port {i} ({num_outputs} total output ports)."
                 );
             }
 
             let num_preferred_dialects = info.preferred_dialect.count_ones();
             if num_preferred_dialects != 1 {
-                anyhow::bail!(
-                    "Plugin prefers {num_preferred_dialects} dialects for output note port {i}."
-                );
+                anyhow::bail!("Plugin prefers {num_preferred_dialects} dialects for output note port {i}.");
             }
 
             if (info.supported_dialects & info.preferred_dialect) == 0 {
                 anyhow::bail!(
-                    "Plugin prefers note dialect {:#b} for output note port {i} which is not \
-                     contained within the supported note dialects field ({:#b}).",
+                    "Plugin prefers note dialect {:#b} for output note port {i} which is not contained within the \
+                     supported note dialects field ({:#b}).",
                     info.preferred_dialect,
                     info.supported_dialects
                 );
             }
 
             if !output_stable_indices.insert(info.id) {
-                anyhow::bail!(
-                    "The stable ID of output note port {i} ({}) is a duplicate.",
-                    info.id
-                );
+                anyhow::bail!("The stable ID of output note port {i} ({}) is a duplicate.", info.id);
             }
 
             config.outputs.push(NotePort {
@@ -170,8 +155,6 @@ impl NotePort {
 
     pub fn supports_midi(&self) -> bool {
         self.supported_dialects.contains(&CLAP_NOTE_DIALECT_MIDI)
-            || self
-                .supported_dialects
-                .contains(&CLAP_NOTE_DIALECT_MIDI_MPE)
+            || self.supported_dialects.contains(&CLAP_NOTE_DIALECT_MIDI_MPE)
     }
 }

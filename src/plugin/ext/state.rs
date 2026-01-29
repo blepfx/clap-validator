@@ -97,8 +97,8 @@ impl State<'_> {
             Ok(stream.into_vec())
         } else {
             anyhow::bail!(
-                "'clap_plugin_state::save()' returned false when only allowing the plugin to \
-                 write {max_bytes} bytes at a time."
+                "'clap_plugin_state::save()' returned false when only allowing the plugin to write {max_bytes} bytes \
+                 at a time."
             );
         }
     }
@@ -135,8 +135,8 @@ impl State<'_> {
             Ok(())
         } else {
             anyhow::bail!(
-                "'clap_plugin_state::load()' returned false when only allowing the plugin to read \
-                 {max_bytes} bytes at a time."
+                "'clap_plugin_state::load()' returned false when only allowing the plugin to read {max_bytes} bytes \
+                 at a time."
             );
         }
     }
@@ -186,8 +186,7 @@ impl<'a> InputStream<'a> {
 
             let current_pos = this.read_position.load(Ordering::Relaxed);
             let bytes_to_read = (this.buffer.len() - current_pos).min(size as usize);
-            this.read_position
-                .fetch_add(bytes_to_read, Ordering::Relaxed);
+            this.read_position.fetch_add(bytes_to_read, Ordering::Relaxed);
 
             std::slice::from_raw_parts_mut(buffer as *mut u8, bytes_to_read)
                 .copy_from_slice(&this.buffer[current_pos..current_pos + bytes_to_read]);
@@ -231,17 +230,10 @@ impl OutputStream {
     /// Get the byte buffer from this stream.
     pub fn into_vec(self: Pin<Box<Self>>) -> Vec<u8> {
         // SAFETY: We can safely grab this inner buffer because this consumes the Box<Self>
-        unsafe { Pin::into_inner_unchecked(self) }
-            .buffer
-            .into_inner()
-            .unwrap()
+        unsafe { Pin::into_inner_unchecked(self) }.buffer.into_inner().unwrap()
     }
 
-    unsafe extern "C" fn write(
-        stream: *const clap_ostream,
-        buffer: *const c_void,
-        size: u64,
-    ) -> i64 {
+    unsafe extern "C" fn write(stream: *const clap_ostream, buffer: *const c_void, size: u64) -> i64 {
         unsafe {
             check_null_ptr!(stream, (*stream).ctx, buffer);
             let this = &*((*stream).ctx as *const Self);
@@ -255,10 +247,7 @@ impl OutputStream {
             this.buffer
                 .lock()
                 .unwrap()
-                .extend_from_slice(std::slice::from_raw_parts(
-                    buffer as *const u8,
-                    size as usize,
-                ));
+                .extend_from_slice(std::slice::from_raw_parts(buffer as *const u8, size as usize));
 
             size as i64
         }

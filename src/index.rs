@@ -109,12 +109,9 @@ where
         let library = crate::plugin::library::PluginLibrary::load(path)
             .with_context(|| format!("Could not load '{}'", path.display()))?;
 
-        let preset_discovery_factory = library.preset_discovery_factory().with_context(|| {
-            format!(
-                "Could not get the preset discovery factory for '{}",
-                path.display()
-            )
-        });
+        let preset_discovery_factory = library
+            .preset_discovery_factory()
+            .with_context(|| format!("Could not get the preset discovery factory for '{}", path.display()));
         if preset_discovery_factory.is_err() && skip_unsupported {
             continue;
         }
@@ -128,24 +125,16 @@ where
             for provider_metadata in metadata {
                 let provider = factory
                     .create_provider(&provider_metadata)
-                    .with_context(|| {
-                        format!(
-                            "Could not create the provider with ID '{}'",
-                            provider_metadata.id
-                        )
-                    })?;
+                    .with_context(|| format!("Could not create the provider with ID '{}'", provider_metadata.id))?;
 
                 let declared_data = provider.declared_data();
                 let mut presets = BTreeMap::new();
                 for location in &declared_data.locations {
                     presets.extend(provider.crawl_location(location).with_context(|| {
                         format!(
-                            "Error occurred while crawling presets for the location '{}' with {} \
-                             using provider '{}' with ID '{}'",
-                            location.name,
-                            location.value,
-                            provider_metadata.name,
-                            provider_metadata.id,
+                            "Error occurred while crawling presets for the location '{}' with {} using provider '{}' \
+                             with ID '{}'",
+                            location.name, location.value, provider_metadata.name, provider_metadata.id,
                         )
                     })?);
                 }
@@ -163,16 +152,14 @@ where
 
         match result {
             Ok(provider_results) => {
-                index.0.insert(
-                    path.to_owned(),
-                    PresetIndexResult::Success(provider_results),
-                );
+                index
+                    .0
+                    .insert(path.to_owned(), PresetIndexResult::Success(provider_results));
             }
             Err(err) => {
-                index.0.insert(
-                    path.to_owned(),
-                    PresetIndexResult::Error(format!("{err:#}")),
-                );
+                index
+                    .0
+                    .insert(path.to_owned(), PresetIndexResult::Error(format!("{err:#}")));
             }
         }
     }
@@ -212,8 +199,7 @@ pub fn clap_directories() -> Result<Vec<PathBuf>> {
 /// error if the paths could not be parsed correctly.
 #[cfg(windows)]
 pub fn clap_directories() -> Result<Vec<PathBuf>> {
-    let common_files =
-        std::env::var("COMMONPROGRAMFILES").context("'$COMMONPROGRAMFILES' is not set")?;
+    let common_files = std::env::var("COMMONPROGRAMFILES").context("'$COMMONPROGRAMFILES' is not set")?;
     let local_appdata = std::env::var("LOCALAPPDATA").context("'$LOCALAPPDATA' is not set")?;
 
     // TODO: Does this work reliably? There are dedicated Win32 API functions for getting these

@@ -123,12 +123,7 @@ impl PluginMainThreadParams for PolySynthPluginMainThread<'_> {
         }
     }
 
-    fn value_to_text(
-        &mut self,
-        param_id: ClapId,
-        value: f64,
-        writer: &mut ParamDisplayWriter,
-    ) -> std::fmt::Result {
+    fn value_to_text(&mut self, param_id: ClapId, value: f64, writer: &mut ParamDisplayWriter) -> std::fmt::Result {
         match param_id {
             PARAM_VOLUME_ID => write!(writer, "{0:.2} %", value * 100.0),
             _ => Err(std::fmt::Error),
@@ -147,11 +142,7 @@ impl PluginMainThreadParams for PolySynthPluginMainThread<'_> {
         }
     }
 
-    fn flush(
-        &mut self,
-        input_parameter_changes: &InputEvents,
-        _output_parameter_changes: &mut OutputEvents,
-    ) {
+    fn flush(&mut self, input_parameter_changes: &InputEvents, _output_parameter_changes: &mut OutputEvents) {
         for event in input_parameter_changes {
             if let Some(CoreEventSpace::ParamValue(event)) = event.as_core_event() {
                 self.shared.params.handle_event(event)
@@ -161,11 +152,7 @@ impl PluginMainThreadParams for PolySynthPluginMainThread<'_> {
 }
 
 impl PluginAudioProcessorParams for PolySynthAudioProcessor<'_> {
-    fn flush(
-        &mut self,
-        input_parameter_changes: &InputEvents,
-        _output_parameter_changes: &mut OutputEvents,
-    ) {
+    fn flush(&mut self, input_parameter_changes: &InputEvents, _output_parameter_changes: &mut OutputEvents) {
         for event in input_parameter_changes {
             self.handle_event(event)
         }

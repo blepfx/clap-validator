@@ -49,10 +49,7 @@ impl TextWrapper {
             .indent_strings
             .entry(subsequent_indent_width)
             .or_insert_with(|| " ".repeat(subsequent_indent_width));
-        let wrapping_options = self
-            .wrapping_options
-            .clone()
-            .subsequent_indent(indent_string);
+        let wrapping_options = self.wrapping_options.clone().subsequent_indent(indent_string);
         println!("{}", textwrap::fill(text.as_ref(), wrapping_options));
     }
 
@@ -74,9 +71,6 @@ impl TextWrapper {
 
     /// The number of characters until the start of the string, ignoring spaces and dashes.
     fn auto_indent_width(text: impl AsRef<str>) -> usize {
-        text.as_ref()
-            .chars()
-            .take_while(|&c| c == ' ' || c == '-')
-            .count()
+        text.as_ref().chars().take_while(|&c| c == ' ' || c == '-').count()
     }
 }

@@ -2,7 +2,7 @@
 
 use crate::plugin::ext::note_ports::NotePortConfig;
 use crate::plugin::ext::params::{Param, ParamInfo};
-use crate::plugin::process::{Event, EventQueue};
+use crate::plugin::process::{Event, EventQueue, TransportState};
 use clap_sys::events::*;
 use midi_consts::channel_event as midi;
 use rand::Rng;
@@ -57,6 +57,9 @@ pub struct ParamFuzzer<'a> {
     sample_offset_range: RangeInclusive<i32>,
 }
 
+/// A helper to generate random transport events in a couple different ways to stress test a plugin's transport handling.
+pub struct TransportFuzzer {}
+
 /// The description of an active note in the [`NoteGenerator`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Note {
@@ -83,6 +86,54 @@ enum NoteEventType {
     MidiProgramChange,
     ParamValue,
     ParamModulation,
+}
+
+impl NoteEventType {
+    const CLAP_EVENTS: &'static [NoteEventType] = &[
+        NoteEventType::ClapNoteOn,
+        NoteEventType::ClapNoteOff,
+        NoteEventType::ClapNoteChoke,
+        NoteEventType::ClapNoteExpression,
+    ];
+    const MIDI_EVENTS: &'static [NoteEventType] = &[
+        NoteEventType::MidiNoteOn,
+        NoteEventType::MidiNoteOff,
+        NoteEventType::MidiChannelPressure,
+        NoteEventType::MidiPolyKeyPressure,
+        NoteEventType::MidiPitchBend,
+        NoteEventType::MidiCc,
+        NoteEventType::MidiProgramChange,
+    ];
+    const PARAM_EVENTS: &'static [NoteEventType] = &[NoteEventType::ParamValue, NoteEventType::ParamModulation];
+
+    /// Get a slice containing the event types supported by a plugin. Returns None if the plugin
+    /// supports neither CLAP note events nor MIDI.
+    pub fn supported_types(
+        supports_clap_note_events: bool,
+        supports_midi_events: bool,
+        supports_param_events: bool,
+    ) -> impl Iterator<Item = NoteEventType> {
+        let clap = if supports_clap_note_events {
+            Self::CLAP_EVENTS
+        } else {
+            &[]
+        };
+        let midi = if supports_midi_events { Self::MIDI_EVENTS } else { &[] };
+        let param = if supports_param_events { Self::PARAM_EVENTS } else { &[] };
+
+        clap.iter().chain(midi.iter()).chain(param.iter()).copied()
+    }
+}
+
+impl Note {
+    fn random(prng: &mut Pcg32) -> Self {
+        Note {
+            key: prng.random_range(0..128),
+            channel: prng.random_range(0..16),
+            note_id: prng.random_range(0..100),
+            choked: false,
+        }
+    }
 }
 
 impl<'a> NoteGenerator<'a> {
@@ -274,8 +325,7 @@ impl<'a> NoteGenerator<'a> {
                         Note::random(prng)
                     };
 
-                    let expression_id = prng
-                        .random_range(CLAP_NOTE_EXPRESSION_VOLUME..=CLAP_NOTE_EXPRESSION_PRESSURE);
+                    let expression_id = prng.random_range(CLAP_NOTE_EXPRESSION_VOLUME..=CLAP_NOTE_EXPRESSION_PRESSURE);
                     let value_range = match expression_id {
                         CLAP_NOTE_EXPRESSION_VOLUME => 0.0..=4.0,
                         CLAP_NOTE_EXPRESSION_TUNING => -128.0..=128.0,
@@ -462,9 +512,7 @@ impl<'a> NoteGenerator<'a> {
 
                     let Some((param_id, param)) = params
                         .iter()
-                        .filter(|(_, param)| {
-                            !param.readonly() && !param.hidden() && param.poly_automatable()
-                        })
+                        .filter(|(_, param)| !param.readonly() && !param.hidden() && param.poly_automatable())
                         .choose(prng)
                     else {
                         continue;
@@ -505,9 +553,7 @@ impl<'a> NoteGenerator<'a> {
 
                     let Some((param_id, param)) = params
                         .iter()
-                        .filter(|(_, param)| {
-                            !param.readonly() && !param.hidden() && param.poly_modulatable()
-                        })
+                        .filter(|(_, param)| !param.readonly() && !param.hidden() && param.poly_modulatable())
                         .choose(prng)
                     else {
                         continue;
@@ -544,10 +590,7 @@ impl<'a> NoteGenerator<'a> {
             }
         }
 
-        panic!(
-            "Unable to generate a random note event after 1024 tries, this is a bug in the \
-             validator"
-        );
+        panic!("Unable to generate a random note event after 1024 tries, this is a bug in the validator");
     }
 
     #[allow(unused)]
@@ -596,63 +639,6 @@ impl<'a> NoteGenerator<'a> {
         self.next_note_id = 0;
         for active_notes in &mut self.active_notes {
             active_notes.clear();
-        }
-    }
-}
-
-impl NoteEventType {
-    const CLAP_EVENTS: &'static [NoteEventType] = &[
-        NoteEventType::ClapNoteOn,
-        NoteEventType::ClapNoteOff,
-        NoteEventType::ClapNoteChoke,
-        NoteEventType::ClapNoteExpression,
-    ];
-    const MIDI_EVENTS: &'static [NoteEventType] = &[
-        NoteEventType::MidiNoteOn,
-        NoteEventType::MidiNoteOff,
-        NoteEventType::MidiChannelPressure,
-        NoteEventType::MidiPolyKeyPressure,
-        NoteEventType::MidiPitchBend,
-        NoteEventType::MidiCc,
-        NoteEventType::MidiProgramChange,
-    ];
-    const PARAM_EVENTS: &'static [NoteEventType] =
-        &[NoteEventType::ParamValue, NoteEventType::ParamModulation];
-
-    /// Get a slice containing the event types supported by a plugin. Returns None if the plugin
-    /// supports neither CLAP note events nor MIDI.
-    pub fn supported_types(
-        supports_clap_note_events: bool,
-        supports_midi_events: bool,
-        supports_param_events: bool,
-    ) -> impl Iterator<Item = NoteEventType> {
-        let clap = if supports_clap_note_events {
-            Self::CLAP_EVENTS
-        } else {
-            &[]
-        };
-        let midi = if supports_midi_events {
-            Self::MIDI_EVENTS
-        } else {
-            &[]
-        };
-        let param = if supports_param_events {
-            Self::PARAM_EVENTS
-        } else {
-            &[]
-        };
-
-        clap.iter().chain(midi.iter()).chain(param.iter()).copied()
-    }
-}
-
-impl Note {
-    fn random(prng: &mut Pcg32) -> Self {
-        Note {
-            key: prng.random_range(0..128),
-            channel: prng.random_range(0..16),
-            note_id: prng.random_range(0..100),
-            choked: false,
         }
     }
 }
@@ -744,52 +730,46 @@ impl<'a> ParamFuzzer<'a> {
 
     /// Randomize _all_ parameters at a certain sample index using **automation**, returning an
     /// iterator yielding automation events for all parameters.
-    pub fn randomize_params_at(
-        &'a self,
-        prng: &'a mut Pcg32,
-        time_offset: u32,
-    ) -> impl Iterator<Item = Event> + 'a {
-        self.params
-            .iter()
-            .filter_map(move |(param_id, param_info)| {
-                // We can send parameter changes for parameters that are not automatable:
-                //
-                // > The host can send live user changes for this parameter regardless of this flag.
-                if param_info.readonly() || param_info.hidden() {
-                    return None;
-                }
+    pub fn randomize_params_at(&'a self, prng: &'a mut Pcg32, time_offset: u32) -> impl Iterator<Item = Event> + 'a {
+        self.params.iter().filter_map(move |(param_id, param_info)| {
+            // We can send parameter changes for parameters that are not automatable:
+            //
+            // > The host can send live user changes for this parameter regardless of this flag.
+            if param_info.readonly() || param_info.hidden() {
+                return None;
+            }
 
-                let value = if self.snap_to_bounds {
-                    if prng.random_bool(0.5) {
-                        *param_info.range.start()
-                    } else {
-                        *param_info.range.end()
-                    }
+            let value = if self.snap_to_bounds {
+                if prng.random_bool(0.5) {
+                    *param_info.range.start()
                 } else {
-                    ParamFuzzer::random_value(param_info, prng)
-                };
+                    *param_info.range.end()
+                }
+            } else {
+                ParamFuzzer::random_value(param_info, prng)
+            };
 
-                Some(Event::ParamValue(clap_event_param_value {
-                    header: clap_event_header {
-                        size: std::mem::size_of::<clap_event_param_value>() as u32,
-                        time: time_offset,
-                        space_id: CLAP_CORE_EVENT_SPACE_ID,
-                        type_: CLAP_EVENT_PARAM_VALUE,
-                        flags: if param_info.automatable() {
-                            0
-                        } else {
-                            CLAP_EVENT_IS_LIVE
-                        },
+            Some(Event::ParamValue(clap_event_param_value {
+                header: clap_event_header {
+                    size: std::mem::size_of::<clap_event_param_value>() as u32,
+                    time: time_offset,
+                    space_id: CLAP_CORE_EVENT_SPACE_ID,
+                    type_: CLAP_EVENT_PARAM_VALUE,
+                    flags: if param_info.automatable() {
+                        0
+                    } else {
+                        CLAP_EVENT_IS_LIVE
                     },
-                    param_id: *param_id,
-                    cookie: param_info.cookie,
-                    note_id: -1,
-                    port_index: -1,
-                    channel: -1,
-                    key: -1,
-                    value,
-                }))
-            })
+                },
+                param_id: *param_id,
+                cookie: param_info.cookie,
+                note_id: -1,
+                port_index: -1,
+                channel: -1,
+                key: -1,
+                value,
+            }))
+        })
     }
 
     pub fn random_value(param: &Param, prng: &mut Pcg32) -> f64 {
@@ -809,6 +789,79 @@ impl<'a> ParamFuzzer<'a> {
             prng.random_range(-range..=range).round()
         } else {
             prng.random_range(-range..=range)
+        }
+    }
+}
+
+impl TransportFuzzer {
+    /// Create a new transport fuzzer.
+    pub fn new() -> Self {
+        TransportFuzzer {}
+    }
+
+    /// Mutates an existing transport state.
+    pub fn mutate(&mut self, prng: &mut Pcg32, transport: &mut TransportState) {
+        // toggle playback state with 10% probability
+        if prng.random_bool(0.1) {
+            transport.is_playing = !transport.is_playing;
+        }
+
+        // toggle recording state with 10% probability
+        if prng.random_bool(0.1) {
+            transport.is_recording = !transport.is_recording;
+        }
+
+        // change time signature with 10% probability
+        if prng.random_bool(0.1) {
+            if prng.random_bool(0.5) {
+                transport.time_signature = None;
+            } else {
+                transport.time_signature = Some((prng.random_range(1..=16), prng.random_range(1..=4)));
+            }
+        }
+
+        // change tempo (instanteous) with 10% probability
+        if prng.random_bool(0.1) {
+            if prng.random_bool(0.5) {
+                transport.tempo = None;
+            } else {
+                transport.tempo = Some((prng.random_range(40.0..=480.0), 0.0));
+            }
+        }
+
+        // change tempo (ramp) with 20% probability
+        if prng.random_bool(0.2) {
+            if let Some((tempo, ramp)) = &mut transport.tempo {
+                // safeguard to prevent extremely low tempos
+                if *tempo < 40.0 {
+                    *tempo = 40.0;
+                    *ramp = prng.random_range(0.0..=0.01);
+                }
+
+                *ramp = prng.random_range(-0.01..=0.01);
+            }
+        }
+
+        // seek to a new position with 5% probability
+        if prng.random_bool(0.05) {
+            if prng.random_bool(0.5) {
+                transport.position_seconds = None;
+            } else {
+                transport.position_seconds = Some(prng.random_range(0.0..=60.0));
+            }
+
+            if prng.random_bool(0.5) {
+                transport.position_beats = None;
+            } else {
+                transport.position_beats = Some(prng.random_range(0.0..=240.0));
+            }
+
+            if prng.random_bool(0.5) {
+                transport.sample_pos = None;
+            } else {
+                // we can only seek forward
+                transport.sample_pos = Some(transport.sample_pos.unwrap_or(0) + prng.random_range(0..=100_000) as u64);
+            }
         }
     }
 }

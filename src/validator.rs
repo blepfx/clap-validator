@@ -4,9 +4,7 @@
 use crate::Verbosity;
 use crate::commands::validate::{SingleTestSettings, ValidatorSettings};
 use crate::plugin::library::{PluginLibrary, PluginMetadata};
-use crate::tests::{
-    PluginLibraryTestCase, PluginTestCase, SerializedTest, TestCase, TestResult, TestStatus,
-};
+use crate::tests::{PluginLibraryTestCase, PluginTestCase, SerializedTest, TestCase, TestResult, TestStatus};
 use crate::util::{self, IteratorExt};
 use anyhow::{Context, Result};
 use clap::ValueEnum;
@@ -90,9 +88,7 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Va
                 library_path.clone(),
                 PluginLibraryTestCase::iter()
                     .filter(|test| test_filter(test, settings, &test_filter_re))
-                    .map_parallel(parallel, |test| {
-                        run_test(&test, verbosity, settings, library_path)
-                    })
+                    .map_parallel(parallel, |test| run_test(&test, verbosity, settings, library_path))
                     .collect::<Result<Vec<TestResult>>>()?,
             );
 
@@ -100,12 +96,9 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Va
             let plugin_library = PluginLibrary::load(library_path)
                 .with_context(|| format!("Could not load '{}'", library_path.display()))?;
 
-            let plugin_metadata = plugin_library.metadata().with_context(|| {
-                format!(
-                    "Could not fetch plugin metadata for '{}'",
-                    library_path.display()
-                )
-            })?;
+            let plugin_metadata = plugin_library
+                .metadata()
+                .with_context(|| format!("Could not fetch plugin metadata for '{}'", library_path.display()))?;
 
             if !clap_version_is_compatible(plugin_metadata.clap_version()) {
                 log::debug!(
@@ -130,18 +123,10 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Va
                     let tests = PluginTestCase::iter()
                         .filter(|test| test_filter(test, settings, &test_filter_re))
                         .map_parallel(parallel, |test| {
-                            run_test(
-                                &test,
-                                verbosity,
-                                settings,
-                                (library_path, &plugin_metadata.id),
-                            )
+                            run_test(&test, verbosity, settings, (library_path, &plugin_metadata.id))
                         });
 
-                    Ok((
-                        plugin_metadata.id.clone(),
-                        tests.collect::<Result<Vec<TestResult>>>()?,
-                    ))
+                    Ok((plugin_metadata.id.clone(), tests.collect::<Result<Vec<TestResult>>>()?))
                 })
                 .collect::<Result<BTreeMap<_, _>>>()?;
 
@@ -158,8 +143,8 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Va
             // don't test two versionsq of the same plugin.
             if a.intersects(&b) {
                 anyhow::bail!(
-                    "Duplicate plugin ID in validation results. Maybe multiple versions of the \
-                     same plugin are being validated."
+                    "Duplicate plugin ID in validation results. Maybe multiple versions of the same plugin are being \
+                     validated."
                 );
             }
 
@@ -211,11 +196,7 @@ pub fn run_single_test(settings: &SingleTestSettings) -> Result<()> {
 
 /// The filter function for determining whether or not a test should be run based on the validator's
 /// settings settings.
-fn test_filter<'a, T: TestCase<'a>>(
-    test: &T,
-    settings: &ValidatorSettings,
-    test_filter_re: &Option<Regex>,
-) -> bool {
+fn test_filter<'a, T: TestCase<'a>>(test: &T, settings: &ValidatorSettings, test_filter_re: &Option<Regex>) -> bool {
     let test_name = test.to_string();
     match (&test_filter_re, settings.invert_filter) {
         (Some(test_filter_re), false) if !test_filter_re.is_match(&test_name) => false,
@@ -280,9 +261,8 @@ fn run_test_out_of_process<'a, T: TestCase<'a>>(
         .context("Could not create a temporary file path")?
         .into_temp_path();
 
-    let mut command = Command::new(
-        std::env::current_exe().context("Could not find the path to the current executable")?,
-    );
+    let mut command =
+        Command::new(std::env::current_exe().context("Could not find the path to the current executable")?);
 
     command
         .arg("--verbosity")
@@ -314,14 +294,13 @@ fn run_test_out_of_process<'a, T: TestCase<'a>>(
 
     // At this point, the child process _should_ have written its output to `output_file_path`,
     // and we can just parse it from there
-    let result =
-        serde_json::from_str(&fs::read_to_string(&output_file_path).with_context(|| {
-            format!(
-                "Could not read the child process output from '{}'",
-                output_file_path.display()
-            )
-        })?)
-        .context("Could not parse the child process output to JSON")?;
+    let result = serde_json::from_str(&fs::read_to_string(&output_file_path).with_context(|| {
+        format!(
+            "Could not read the child process output from '{}'",
+            output_file_path.display()
+        )
+    })?)
+    .context("Could not parse the child process output to JSON")?;
 
     Ok(result)
 }

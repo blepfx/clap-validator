@@ -5,7 +5,7 @@ use clap_sys::{events::*, fixedpoint::*};
 #[derive(Debug, Clone, Default)]
 pub struct TransportState {
     /// The current sample position.
-    pub sample_pos: i64,
+    pub sample_pos: Option<u64>,
 
     /// When true, `null` is passed as the transport pointer to the plugin.
     pub is_freerun: bool,
@@ -31,8 +31,10 @@ pub struct TransportState {
 
 impl TransportState {
     /// Advance the transport state by the given number of samples at the specified sample rate.
-    pub fn advance(&mut self, samples: u32, sample_rate: f64) {
-        self.sample_pos += samples as i64;
+    pub fn advance(&mut self, samples: i64, sample_rate: f64) {
+        if let Some(sample_pos) = &mut self.sample_pos {
+            *sample_pos = sample_pos.saturating_add_signed(samples);
+        }
 
         if let Some(position_seconds) = &mut self.position_seconds {
             *position_seconds += samples as f64 / sample_rate;

@@ -69,12 +69,12 @@ impl EventQueue {
     }
 
     pub fn add_events(&self, extend: impl IntoIterator<Item = Event>) {
+        self.events.lock().unwrap().extend(extend);
+    }
+
+    pub fn sort_events(&self) {
         let mut events = self.events.lock().unwrap();
-        let should_sort = !events.is_empty();
-        events.extend(extend);
-        if should_sort {
-            events.sort_by_key(|event| event.header().time);
-        }
+        events.sort_by_key(|event| event.header().time);
     }
 
     pub fn read(&self) -> Vec<Event> {
@@ -99,10 +99,7 @@ impl EventQueue {
         }
     }
 
-    unsafe extern "C" fn get(
-        list: *const clap_input_events,
-        index: u32,
-    ) -> *const clap_event_header {
+    unsafe extern "C" fn get(list: *const clap_input_events, index: u32) -> *const clap_event_header {
         unsafe {
             check_null_ptr!(list, (*list).ctx);
             let this = &*((*list).ctx as *const Self);
@@ -121,10 +118,7 @@ impl EventQueue {
         }
     }
 
-    unsafe extern "C" fn try_push(
-        list: *const clap_output_events,
-        event: *const clap_event_header,
-    ) -> bool {
+    unsafe extern "C" fn try_push(list: *const clap_output_events, event: *const clap_event_header) -> bool {
         unsafe {
             check_null_ptr!(list, (*list).ctx, event);
             let this = &*((*list).ctx as *const Self);
@@ -141,19 +135,13 @@ impl EventQueue {
 impl Event {
     /// Parse an event from a plugin-provided pointer. Returns an error if the pointer as a null pointer
     pub unsafe fn from_raw(ptr: *const clap_event_header) -> Self {
-        assert!(
-            !ptr.is_null(),
-            "Null pointer provided for 'clap_event_header'."
-        );
+        assert!(!ptr.is_null(), "Null pointer provided for 'clap_event_header'.");
 
         unsafe {
             match ((*ptr).space_id, ((*ptr).type_)) {
                 (
                     CLAP_CORE_EVENT_SPACE_ID,
-                    CLAP_EVENT_NOTE_ON
-                    | CLAP_EVENT_NOTE_OFF
-                    | CLAP_EVENT_NOTE_CHOKE
-                    | CLAP_EVENT_NOTE_END,
+                    CLAP_EVENT_NOTE_ON | CLAP_EVENT_NOTE_OFF | CLAP_EVENT_NOTE_CHOKE | CLAP_EVENT_NOTE_END,
                 ) => Event::Note(*(ptr as *const clap_event_note)),
                 (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_EXPRESSION) => {
                     Event::NoteExpression(*(ptr as *const clap_event_note_expression))
@@ -164,9 +152,7 @@ impl Event {
                 (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_MOD) => {
                     Event::ParamMod(*(ptr as *const clap_event_param_mod))
                 }
-                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI) => {
-                    Event::Midi(*(ptr as *const clap_event_midi))
-                }
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI) => Event::Midi(*(ptr as *const clap_event_midi)),
                 (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_TRANSPORT) => {
                     Event::Transport(*(ptr as *const clap_event_transport))
                 }

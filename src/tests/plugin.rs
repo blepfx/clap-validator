@@ -9,8 +9,9 @@ use std::path::Path;
 mod descriptor;
 mod layout;
 mod params;
-pub mod processing;
+mod processing;
 mod state;
+mod transport;
 
 /// The tests for individual CLAP plugins. See the module's heading for more information, and the
 /// `description` function below for a description of each test case.
@@ -74,6 +75,12 @@ pub enum PluginTestCase {
     StateReproducibilityFlush,
     #[strum(serialize = "state-buffered-streams")]
     StateBufferedStreams,
+    #[strum(serialize = "transport-null")]
+    TransportNull,
+    #[strum(serialize = "transport-fuzz")]
+    TransportFuzz,
+    #[strum(serialize = "transport-sample-accurate")]
+    TransportFuzzSampleAccurate,
 }
 
 impl<'a> TestCase<'a> for PluginTestCase {
@@ -103,23 +110,23 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  that support it.",
             ),
             PluginTestCase::ProcessAudioOutOfPlaceDouble => format!(
-                "Same as {}, but uses 64-bit floating point audio buffers instead of 32-bit ones for ports that \
+                "Same as '{}', but uses 64-bit floating point audio buffers instead of 32-bit ones for ports that \
                  support it.",
                 PluginTestCase::ProcessAudioOutOfPlaceBasic,
             ),
             PluginTestCase::ProcessAudioInPlaceDouble => format!(
-                "Same as {}, but uses 64-bit floating point audio buffers instead of 32-bit ones for ports that \
+                "Same as '{}', but uses 64-bit floating point audio buffers instead of 32-bit ones for ports that \
                  support it.",
                 PluginTestCase::ProcessAudioInPlaceBasic,
             ),
             PluginTestCase::LayoutConfigurableAudioPorts => format!(
-                "Performs the same test as {}, but this time it tries random configurations exposed via the \
+                "Same as '{}', but this time it tries random configurations exposed via the \
                  'configurable-audio-ports' extension.",
                 PluginTestCase::ProcessAudioOutOfPlaceBasic,
             ),
             PluginTestCase::LayoutAudioPortsConfig => format!(
-                "Performs the same test as {}, but this time it tries all available port configurations exposed via \
-                 the 'audio-ports-config' extension.",
+                "Same as '{}', but this time it tries all available port configurations exposed via the \
+                 'audio-ports-config' extension.",
                 PluginTestCase::ProcessAudioInPlaceBasic,
             ),
             PluginTestCase::ProcessAudioConstantMask => String::from(
@@ -169,8 +176,8 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 params::FUZZ_RUNS_PER_PERMUTATION
             ),
             PluginTestCase::ParamFuzzBounds => format!(
-                "The exact same test as {}, but this time the parameter values are snapped to the minimum and maximum \
-                 values.",
+                "The exact same test as '{}', but this time the parameter values are snapped to the minimum and \
+                 maximum values.",
                 PluginTestCase::ParamFuzzBasic
             ),
             PluginTestCase::ParamFuzzSampleAccurate => String::from(
@@ -205,7 +212,7 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  function.",
             ),
             PluginTestCase::StateReproducibilityNullCookies => format!(
-                "The exact same test as {}, but with all cookies in the parameter events set to null pointers. The \
+                "The exact same test as '{}', but with all cookies in the parameter events set to null pointers. The \
                  plugin should handle this in the same way as the other test case.",
                 PluginTestCase::StateReproducibilityBasic
             ),
@@ -219,6 +226,23 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 "Performs the same state and parameter reproducibility check as in '{}', but this time the plugin is \
                  only allowed to read a small prime number of bytes at a time when reloading and resaving the state.",
                 PluginTestCase::StateReproducibilityBasic
+            ),
+
+            // TODO: fix these
+            PluginTestCase::TransportNull => String::from(
+                "Performs audio processing with a 'null' transport pointer, simulating a free-running transport \
+                 state. The plugin passes the test if it doesn't produce any infinite or NaN values, and doesn't \
+                 crash.",
+            ),
+            PluginTestCase::TransportFuzz => String::from(
+                "Performs audio processing while randomly changing the transport state on every block. The plugin \
+                 passes the test if it doesn't produce any infinite or NaN values, and doesn't crash.",
+            ),
+            PluginTestCase::TransportFuzzSampleAccurate => format!(
+                "Same as '{}', but this time the test sends 'clap_event_transport' events in ample-accurate fashion \
+                 while processing audio, generating them at fixed intervals (1, 100, 1000 samples). The plugin passes \
+                 the test if it doesn't produce any infinite or NaN values, and doesn't crash.",
+                PluginTestCase::TransportFuzz
             ),
         }
     }
@@ -282,6 +306,11 @@ impl<'a> TestCase<'a> for PluginTestCase {
             }
             PluginTestCase::StateReproducibilityFlush => state::test_state_reproducibility_flush(library, plugin_id),
             PluginTestCase::StateBufferedStreams => state::test_state_buffered_streams(library, plugin_id),
+            PluginTestCase::TransportNull => transport::test_transport_null(library, plugin_id),
+            PluginTestCase::TransportFuzz => transport::test_transport_fuzz(library, plugin_id),
+            PluginTestCase::TransportFuzzSampleAccurate => {
+                transport::test_transport_fuzz_sample_accurate(library, plugin_id)
+            }
         }
     }
 }

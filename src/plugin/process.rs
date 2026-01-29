@@ -46,6 +46,10 @@ impl<'a> ProcessScope<'a> {
         })
     }
 
+    pub fn sample_rate(&self) -> f64 {
+        self.sample_rate
+    }
+
     pub fn max_block_size(&self) -> u32 {
         self.buffer.len()
     }
@@ -99,6 +103,9 @@ impl<'a> ProcessScope<'a> {
         // prepare output event queue for processing
         self.events_output.clear();
 
+        // prepare input event queue for processing
+        self.events_input.sort_events();
+
         // prepare output audio buffers for processing
         // this is used to detect uninitialized output buffers
         for buffer in self.buffer.buffers_mut() {
@@ -114,7 +121,7 @@ impl<'a> ProcessScope<'a> {
         let transport = self.transport.as_clap_transport(0);
         let (inputs, outputs) = self.buffer.clap_buffers();
         self.plugin.process(&clap_process {
-            steady_time: self.transport.sample_pos,
+            steady_time: self.transport.sample_pos.map_or(-1, |f| f as i64),
             frames_count: samples,
             transport: if self.transport.is_freerun {
                 std::ptr::null()
@@ -131,7 +138,7 @@ impl<'a> ProcessScope<'a> {
 
         // clear input event queue and advance transport
         self.events_input.clear();
-        self.transport.advance(samples, self.sample_rate);
+        self.transport.advance(samples as i64, self.sample_rate());
 
         // check output audio buffers for NaNs or infinities
         check_process_call_consistency(self.buffer.buffers(), &original_buffers, self.output_queue(), samples)

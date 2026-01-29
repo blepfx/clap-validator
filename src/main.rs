@@ -1,8 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::process::ExitCode;
 
-use crate::plugin::library::mark_current_thread_as_os_main_thread;
-
 mod commands;
 mod index;
 mod plugin;
@@ -53,8 +51,6 @@ enum Command {
 }
 
 fn main() -> ExitCode {
-    mark_current_thread_as_os_main_thread();
-
     let cli = Cli::parse();
 
     // For now logging everything to the terminal is fine. In the future it may be useful to have
@@ -76,7 +72,13 @@ fn main() -> ExitCode {
         simplelog::ColorChoice::Auto,
     )
     .expect("Could not initialize logger");
+
     log_panics::init();
+
+    // Mark the main thread as such for plugin instance creation checks.
+    unsafe {
+        plugin::instance::mark_current_thread_as_os_main_thread();
+    }
 
     let result = match cli.command {
         Command::Validate(settings) => commands::validate::validate(cli.verbosity, &settings),

@@ -50,10 +50,6 @@ impl<'a> ProcessScope<'a> {
         self.buffer.len()
     }
 
-    pub fn sample_rate(&self) -> f64 {
-        self.sample_rate
-    }
-
     pub fn input_queue(&self) -> &EventQueue {
         &self.events_input
     }
@@ -120,7 +116,11 @@ impl<'a> ProcessScope<'a> {
         self.plugin.process(&clap_process {
             steady_time: self.transport.sample_pos,
             frames_count: samples,
-            transport: &transport,
+            transport: if self.transport.is_freerun {
+                std::ptr::null()
+            } else {
+                &transport as *const _
+            },
             audio_inputs: inputs.as_ptr(),
             audio_outputs: outputs.as_mut_ptr(),
             audio_inputs_count: inputs.len() as u32,
@@ -134,7 +134,7 @@ impl<'a> ProcessScope<'a> {
         self.transport.advance(samples, self.sample_rate);
 
         // check output audio buffers for NaNs or infinities
-        check_process_call_consistency(self.buffer.buffers(), &original_buffers, &self.events_output, samples)
+        check_process_call_consistency(self.buffer.buffers(), &original_buffers, self.output_queue(), samples)
     }
 
     pub fn restart(&mut self) {
@@ -160,6 +160,7 @@ impl Drop for ProcessScope<'_> {
 /// These are quiet NaNs with a specific payload to avoid accidental matches with other NaN values.
 /// The payload is chosen to be unlikely to appear in normal processing.
 const CHECK_NAN_F32: f32 = f32::from_bits(0x7FC0_1234);
+/// See [`CHECK_NAN_F32`].
 const CHECK_NAN_F64: f64 = f64::from_bits(0x7FF8_1234_5678_1234);
 
 /// The process for consistency. This verifies that the output buffer has been written to, doesn't contain any NaN,

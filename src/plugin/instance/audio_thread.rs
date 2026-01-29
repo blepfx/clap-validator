@@ -3,7 +3,7 @@
 use super::{Plugin, PluginStatus};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::{InstanceShared, MainThreadTask};
-use crate::util::{AssertSendSync, clap_call};
+use crate::util::clap_call;
 use anyhow::Result;
 use clap_sys::plugin::clap_plugin;
 use clap_sys::process::{
@@ -18,10 +18,11 @@ use std::sync::{Arc, Condvar, Mutex};
 /// An audio thread equivalent to [`Plugin`]. This version only allows audio thread functions to be
 /// called. It can be constructed using [`Plugin::on_audio_thread()`].
 pub struct PluginAudioThread<'a> {
-    /// The plugin instance this audio thread belongs to. This is needed to ensure that the audio
-    /// thread instance cannot outlive the plugin instance (which cannot outlive the plugin
-    /// library). This `Plugin` also contains a reference to the plugin instance's state.
-    pub(super) plugin: &'a Plugin<'a>,
+    /// Information about this plugin instance stored on the host. This keeps track of things like
+    /// audio thread IDs, whether the plugin has pending callbacks, and what state it is in.
+    shared: Pin<Arc<InstanceShared>>,
+
+    _plugin_marker: PhantomData<&'a Plugin<'a>>,
 
     /// To honor CLAP's thread safety guidelines, the thread this object was created from is
     /// designated the 'audio thread', and this object cannot be shared with other threads.
@@ -40,38 +41,34 @@ pub enum ProcessStatus {
 
 impl Drop for PluginAudioThread<'_> {
     fn drop(&mut self) {
-        self.plugin.shared.audio_thread_id.store(None);
-        self.plugin
-            .shared
-            .task_sender
-            .send(MainThreadTask::StopAudioThread)
-            .unwrap();
+        self.shared.audio_thread_id.store(None);
+        self.shared.task_sender.send(MainThreadTask::StopAudioThread).unwrap();
     }
 }
 
 impl<'a> PluginAudioThread<'a> {
-    pub(crate) fn new(plugin: &'a Plugin<'a>) -> Self {
-        plugin.shared.audio_thread_id.store(Some(std::thread::current().id()));
-
-        Self {
-            plugin,
+    pub(super) fn new(shared: Pin<Arc<InstanceShared>>) -> PluginAudioThread<'a> {
+        shared.audio_thread_id.store(Some(std::thread::current().id()));
+        PluginAudioThread {
+            shared,
+            _plugin_marker: PhantomData,
             _send_sync_marker: PhantomData,
         }
     }
 
     /// Get the raw pointer to the `clap_plugin` instance.
     pub fn as_ptr(&self) -> *const clap_plugin {
-        self.plugin.as_ptr()
+        self.shared.clap_plugin_ptr()
     }
 
     /// Get the plugin's current initialization status.
     pub fn status(&self) -> PluginStatus {
-        self.plugin.status()
+        self.shared.status.load()
     }
 
     /// Get a reference to the plugin's shared state.
     pub fn shared(&self) -> &Pin<Arc<InstanceShared>> {
-        &self.plugin.shared
+        &self.shared
     }
 
     /// Get the _audio thread_ extension abstraction for the extension `T`, if the plugin supports
@@ -98,45 +95,37 @@ impl<'a> PluginAudioThread<'a> {
     /// Dispatch a task to be executed on the main thread. This is a blocking call that will wait
     /// for the task to complete and return its result.
     pub fn send_main_thread<F: FnOnce(&Plugin) -> T + Send, T: Send>(&self, callback: F) -> T {
-        struct Scope<'a, F, O> {
-            condvar: &'a Condvar,
-            output: &'a Mutex<Option<O>>,
+        struct Scope<'a, F, T> {
             callback: F,
+            mutex: &'a Mutex<Option<T>>,
+            condvar: &'a Condvar,
         }
 
-        let output = Mutex::new(None);
+        let mutex = Mutex::new(None);
         let condvar = Condvar::new();
         let scope = Scope {
-            condvar: &condvar,
-            output: &output,
             callback,
+            mutex: &mutex,
+            condvar: &condvar,
         };
 
-        let scope_ptr = unsafe { AssertSendSync::new(&scope as *const Scope<F, T> as *const ()) };
+        self.shared
+            .task_sender
+            .send(MainThreadTask::Dispatch {
+                data: &scope as *const _ as _,
+                func: |plugin, data| {
+                    let scope = unsafe { data.cast::<Scope<F, T>>().read() };
+                    scope.mutex.lock().unwrap().replace((scope.callback)(plugin));
+                    scope.condvar.notify_one();
+                },
+            })
+            .unwrap();
 
-        self.post_main_thread(move |plugin| unsafe {
-            let scope = (scope_ptr.get() as *const Scope<F, T>).read();
-            let result = (scope.callback)(plugin);
-            scope.output.lock().unwrap().replace(result);
-            scope.condvar.notify_one();
-        });
-
-        scope
-            .condvar
-            .wait_while(scope.output.lock().unwrap(), |v| v.is_none())
+        condvar
+            .wait_while(mutex.lock().unwrap(), |x| x.is_none())
             .unwrap()
             .take()
             .unwrap()
-    }
-
-    /// Post a task to be executed on the main thread. This is a non-blocking call that does not
-    /// wait for the task to complete and does not return a result.
-    pub fn post_main_thread(&self, task: impl FnOnce(&Plugin) + Send + 'static) {
-        self.plugin
-            .shared
-            .task_sender
-            .send(MainThreadTask::Closure(Box::new(task)))
-            .unwrap();
     }
 
     /// Prepare for audio processing. Returns an error if the plugin returned `false`. See
@@ -151,7 +140,7 @@ impl<'a> PluginAudioThread<'a> {
         };
 
         if result {
-            self.plugin.shared.status.store(PluginStatus::Processing);
+            self.shared.status.store(PluginStatus::Processing);
             Ok(())
         } else {
             anyhow::bail!("'clap_plugin::start_processing()' returned false.")
@@ -205,6 +194,6 @@ impl<'a> PluginAudioThread<'a> {
             clap_call! { plugin=>stop_processing(plugin) }
         };
 
-        self.plugin.shared.status.store(PluginStatus::Activated);
+        self.shared.status.store(PluginStatus::Activated);
     }
 }

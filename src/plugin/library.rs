@@ -264,7 +264,7 @@ impl PluginLibrary {
         }
 
         let id_cstring = CString::new(id).context("Plugin ID contained null bytes")?;
-        unsafe { Plugin::new(&*plugin_factory, &id_cstring) }
+        unsafe { Plugin::create_plugin(&*plugin_factory, &id_cstring) }
     }
 
     /// Returns the plugin's preset discovery factory, if it has one.
@@ -309,14 +309,4 @@ fn get_clap_entry_point(library: &libloading::Library) -> Result<&clap_plugin_en
     }
 
     Ok(unsafe { &**entry_point })
-}
-
-thread_local! {
-    static IS_OS_MAIN_THREAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-pub(crate) fn mark_current_thread_as_os_main_thread() {
-    IS_OS_MAIN_THREAD.with(|cell| {
-        cell.set(true);
-    });
 }

@@ -9,15 +9,16 @@ use std::ptr::null_mut;
 /// or out-of-place, single or double precision.
 #[derive(Clone)]
 pub struct AudioBuffers {
-    // These are all indexed by `[port_idx][channel_idx][sample_idx]`. The inputs also need to be
-    // mutable because reborrwing them from here is the only way to modify them without
-    // reinitializing the pointers.
+    /// These are all indexed by `[port_idx][channel_idx][sample_idx]`. The inputs also need to be
+    /// mutable because reborrwing them from here is the only way to modify them without
+    /// reinitializing the pointers.
     buffers: Box<[AudioBuffer]>,
 
-    // These are point to `inputs` and `outputs` because `clap_audio_buffer` needs to contain a
-    // `*const *const f32`
+    /// These point to `inputs` and `outputs` because `clap_audio_buffer` needs to contain a
+    /// `*const *const f32`
     _pointers: Box<[Box<[*const ()]>]>,
 
+    /// The CLAP audio buffer representations for inputs and outputs.
     clap_inputs: Box<[clap_audio_buffer]>,
     clap_outputs: Box<[clap_audio_buffer]>,
 
@@ -149,8 +150,6 @@ impl AudioBuffers {
         }
     }
 
-    /// Construct the out of place audio buffers. This allocates the channel pointers that are
-    /// handed to the plugin in the process function.
     pub fn new_out_of_place_f32(config: &AudioPortConfig, num_samples: u32) -> Self {
         Self::new(
             config
@@ -168,8 +167,6 @@ impl AudioBuffers {
         )
     }
 
-    /// Construct the in place audio buffers. This allocates the channel pointers that are handed to
-    /// the plugin in the process function.
     pub fn new_in_place_f32(config: &AudioPortConfig, num_samples: u32) -> Self {
         let mut buffers = vec![];
 
@@ -234,8 +231,6 @@ impl AudioBuffers {
         )
     }
 
-    /// Construct the in place audio buffers. This allocates the channel pointers that are handed to
-    /// the plugin in the process function.
     pub fn new_in_place_f64(config: &AudioPortConfig, num_samples: u32) -> Self {
         let mut buffers = vec![];
 
@@ -321,6 +316,7 @@ impl AudioBuffers {
         }
     }
 
+    /// Fill the input buffers with silence (zeros), and mark all input channels as constant.
     pub fn silence_inputs(&mut self) {
         for buffer in self.buffers_mut() {
             if buffer.is_input() {
@@ -333,10 +329,7 @@ impl AudioBuffers {
         }
     }
 
-    pub fn set_input_constant_mask(&mut self, bus: usize, mask: ConstantMask) {
-        self.clap_inputs[bus].constant_mask = mask.0;
-    }
-
+    /// Get the constant mask for the given output bus.
     pub fn get_output_constant_mask(&self, bus: usize) -> ConstantMask {
         ConstantMask(self.clap_outputs[bus].constant_mask)
     }

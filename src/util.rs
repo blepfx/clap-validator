@@ -169,31 +169,11 @@ pub fn validator_version() -> &'static CStr {
         .as_c_str()
 }
 
-/// A helper struct used to send stuff across thread boundary.
-pub struct AssertSendSync<T>(T);
-
-impl<T> AssertSendSync<T> {
-    pub unsafe fn new(value: T) -> Self {
-        AssertSendSync(value)
-    }
-
-    pub fn get(self) -> T {
-        self.0
-    }
-}
-
-unsafe impl<T> Send for AssertSendSync<T> {}
-unsafe impl<T> Sync for AssertSendSync<T> {}
-
 impl<T: ?Sized> IteratorExt for T where T: Iterator {}
 pub trait IteratorExt: Iterator {
     /// Map the iterator in parallel if `parallel` is `true`, or sequentially if it is `false`.
     /// Returns an iterator over the mapped values, in arbitrary order.
-    fn map_parallel<R: Send>(
-        self,
-        parallel: bool,
-        f: impl Fn(Self::Item) -> R + Send + Sync,
-    ) -> impl Iterator<Item = R>
+    fn map_parallel<R: Send>(self, parallel: bool, f: impl Fn(Self::Item) -> R + Send + Sync) -> impl Iterator<Item = R>
     where
         Self: Sized + Send,
         Self::Item: Send,

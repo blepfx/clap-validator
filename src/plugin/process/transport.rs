@@ -4,19 +4,33 @@ use clap_sys::{events::*, fixedpoint::*};
 /// transport changes.
 #[derive(Debug, Clone, Default)]
 pub struct TransportState {
+    /// The current sample position.
     pub sample_pos: i64,
 
+    /// When true, `null` is passed as the transport pointer to the plugin.
+    pub is_freerun: bool,
+
+    /// Whether playback is active. Sets `CLAP_TRANSPORT_IS_PLAYING` flag.
     pub is_playing: bool,
+
+    /// Whether recording is active. Sets `CLAP_TRANSPORT_IS_RECORDING` flag.
     pub is_recording: bool,
 
+    /// Current tempo in BPM and its increment per sample. Sets `CLAP_TRANSPORT_HAS_TEMPO` flag.
     pub tempo: Option<(f64, f64)>,
+
+    /// Current time signature as (numerator, denominator). Sets `CLAP_TRANSPORT_HAS_TIME_SIGNATURE` flag.
     pub time_signature: Option<(u16, u16)>,
 
+    /// Current position in beats. Sets `CLAP_TRANSPORT_HAS_BEATS_TIMELINE` flag.
     pub position_beats: Option<f64>,
+
+    /// Current position in seconds. Sets `CLAP_TRANSPORT_HAS_SECONDS_TIMELINE` flag.
     pub position_seconds: Option<f64>,
 }
 
 impl TransportState {
+    /// Advance the transport state by the given number of samples at the specified sample rate.
     pub fn advance(&mut self, samples: u32, sample_rate: f64) {
         self.sample_pos += samples as i64;
 
@@ -31,12 +45,12 @@ impl TransportState {
 
             if let Some(position_beats) = &mut self.position_beats {
                 // Integrate tempo over the sample block using the trapezoidal rule
-                *position_beats +=
-                    (samples as f64 * (tempo_end + tempo_start) / 60.0 * 0.5) / sample_rate;
+                *position_beats += (samples as f64 * (tempo_end + tempo_start) / 60.0 * 0.5) / sample_rate;
             }
         }
     }
 
+    /// Convert the transport state to a CLAP transport event.
     pub fn as_clap_transport(&self, offset: u32) -> clap_event_transport {
         let mut flags = 0;
         flags |= self.is_playing as u32 * CLAP_TRANSPORT_IS_PLAYING;
@@ -86,14 +100,8 @@ impl TransportState {
 pub struct ConstantMask(pub u64);
 
 impl ConstantMask {
-    pub const CONSTANT: Self = Self(u64::MAX);
-    pub const DYNAMIC: Self = Self(0);
-
+    /// Check if the specified channel marked as constant.
     pub fn is_channel_constant(&self, channel: u32) -> bool {
         self.0 & 1u64.unbounded_shl(channel) != 0
-    }
-
-    pub fn are_channels_constant(&self, channels: u32) -> bool {
-        self.0 & 1u64.unbounded_shl(channels).wrapping_sub(1) == 0
     }
 }

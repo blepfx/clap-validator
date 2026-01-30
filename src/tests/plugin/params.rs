@@ -223,16 +223,12 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str, snap_to_b
     for permutation_no in 1..=FUZZ_NUM_PERMUTATIONS {
         current_events = Some(param_fuzzer.randomize_params_at(&mut prng, 0).collect());
 
-        let mut have_set_parameters = false;
         let run_result = plugin.on_audio_thread(|plugin| -> Result<()> {
             let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
-            for _ in 0..FUZZ_RUNS_PER_PERMUTATION {
-                if !have_set_parameters {
-                    process.input_queue().add_events(current_events.clone().unwrap());
-                    have_set_parameters = true;
-                }
+            process.input_queue().add_events(current_events.clone().unwrap());
 
+            for _ in 0..FUZZ_RUNS_PER_PERMUTATION {
                 process.audio_buffers().randomize(&mut prng);
                 process
                     .input_queue()

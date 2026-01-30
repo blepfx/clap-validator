@@ -2,6 +2,7 @@
 
 use super::instance::Plugin;
 use super::preset_discovery::PresetDiscoveryFactory;
+use crate::plugin::instance::PluginShared;
 use crate::util::{self, clap_call};
 use anyhow::{Context, Result};
 use clap_sys::entry::clap_plugin_entry;
@@ -264,7 +265,7 @@ impl PluginLibrary {
         }
 
         let id_cstring = CString::new(id).context("Plugin ID contained null bytes")?;
-        unsafe { Plugin::create_plugin(&*plugin_factory, &id_cstring) }
+        unsafe { PluginShared::create_plugin(&*plugin_factory, &id_cstring) }
     }
 
     /// Returns the plugin's preset discovery factory, if it has one.

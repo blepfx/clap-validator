@@ -23,6 +23,8 @@ pub enum PluginTestCase {
     FeaturesCategories,
     #[strum(serialize = "features-duplicates")]
     FeaturesDuplicates,
+    #[strum(serialize = "layout-audio-ports-activation")]
+    LayoutAudioPortsActivation,
     #[strum(serialize = "layout-audio-ports-config")]
     LayoutAudioPortsConfig,
     #[strum(serialize = "layout-configurable-audio-ports")]
@@ -118,6 +120,11 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 "Same as '{}', but uses 64-bit floating point audio buffers instead of 32-bit ones for ports that \
                  support it.",
                 PluginTestCase::ProcessAudioBasicInPlace,
+            ),
+            PluginTestCase::LayoutAudioPortsActivation => format!(
+                "Same as '{}', but this time it toggles the activation state of audio ports on and off via the \
+                 'audio-ports-activation' extension.",
+                PluginTestCase::ProcessAudioBasicOutOfPlace,
             ),
             PluginTestCase::LayoutConfigurableAudioPorts => format!(
                 "Same as '{}', but this time it tries random configurations exposed via the \
@@ -254,6 +261,9 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::DescriptorConsistency => descriptor::test_consistency(library, plugin_id),
             PluginTestCase::FeaturesCategories => descriptor::test_features_categories(library, plugin_id),
             PluginTestCase::FeaturesDuplicates => descriptor::test_features_duplicates(library, plugin_id),
+            PluginTestCase::LayoutAudioPortsActivation => {
+                layout::test_layout_audio_ports_activation(library, plugin_id)
+            }
             PluginTestCase::LayoutAudioPortsConfig => layout::test_layout_audio_ports_config(library, plugin_id),
             PluginTestCase::LayoutConfigurableAudioPorts => {
                 layout::test_layout_configurable_audio_ports(library, plugin_id)

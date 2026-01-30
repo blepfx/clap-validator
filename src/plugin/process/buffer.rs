@@ -314,6 +314,10 @@ impl AudioBuffers {
                 buffer.fill_white_noise(prng);
             }
         }
+
+        for input in &mut self.clap_inputs {
+            input.constant_mask = 0;
+        }
     }
 
     /// Fill the input buffers with silence (zeros), and mark all input channels as constant.

@@ -1,14 +1,26 @@
 use crate::{
     plugin::{
         ext::Extension,
-        instance::{InstanceMainThread, InstanceShared, MainThreadTask, PluginAudioThread, PluginStatus},
+        instance::{CallbackEvent, PluginAudioThread, PluginShared, PluginStatus},
         library::PluginMetadata,
     },
     util::clap_call,
 };
 use anyhow::Result;
-use clap_sys::{factory::plugin_factory::clap_plugin_factory, plugin::clap_plugin};
-use std::{ffi::CStr, marker::PhantomData, panic::resume_unwind, pin::Pin, ptr::NonNull, sync::Arc};
+use clap_sys::plugin::clap_plugin;
+use std::{
+    marker::PhantomData,
+    panic::resume_unwind,
+    pin::Pin,
+    ptr::NonNull,
+    sync::{Arc, mpsc::Receiver},
+};
+
+pub enum MainThreadTask {
+    Dispatch(Box<dyn FnOnce(&Plugin) + Send>),
+    CallbackRequest,
+    StopAudioThread,
+}
 
 /// A CLAP plugin instance. The plugin will be deinitialized when this object is dropped. All
 /// functions here are callable only from the main thread. Use the
@@ -17,22 +29,23 @@ use std::{ffi::CStr, marker::PhantomData, panic::resume_unwind, pin::Pin, ptr::N
 /// All functions on `Plugin` and the objects created from it will panic if the plugin is not in the
 /// correct state.
 pub struct Plugin<'lib> {
-    main: InstanceMainThread,
+    pub(super) callback_receiver: Receiver<CallbackEvent>,
+    pub(super) task_receiver: Receiver<MainThreadTask>,
 
     /// Information about this plugin instance stored on the host. This keeps track of things like
     /// audio thread IDs, whether the plugin has pending callbacks, and what state it is in.
-    shared: Pin<Arc<InstanceShared>>,
+    pub(super) shared: Pin<Arc<PluginShared>>,
 
     /// The CLAP plugin library this plugin instance was created from. This field is not used
     /// directly, but keeping a reference to the library here prevents the plugin instance from
     /// outliving the library.
-    _library: PhantomData<&'lib ()>,
+    pub(super) _library: PhantomData<&'lib ()>,
 
     /// To honor CLAP's thread safety guidelines, the thread this object was created from is
     /// designated the 'main thread', and this object cannot be shared with other threads. The
     /// [`on_audio_thread()`][Self::on_audio_thread()] method spawns an audio thread that is able to call
     /// the plugin's audio thread functions.
-    _thread: PhantomData<*const ()>,
+    pub(super) _thread: PhantomData<*const ()>,
 }
 
 impl Drop for Plugin<'_> {
@@ -64,29 +77,6 @@ impl Drop for Plugin<'_> {
 }
 
 impl<'lib> Plugin<'lib> {
-    /// Create a plugin instance and return the still uninitialized plugin. Returns an error if the
-    /// plugin could not be created. The plugin instance will be registered with the host, and
-    /// unregistered when this object is dropped again.
-    ///
-    /// # Panics
-    /// This MUST be called on the OS main thread (if applicable).
-    ///
-    /// # Safety
-    /// The `factory` object must be valid.
-    pub(crate) unsafe fn create_plugin(factory: &clap_plugin_factory, plugin_id: &CStr) -> Result<Self> {
-        assert!(IS_OS_MAIN_THREAD.with(|cell| cell.get()), "not main thread");
-
-        let (shared, main) = unsafe { InstanceShared::new(factory, plugin_id)? };
-
-        Ok(Plugin {
-            shared,
-            main,
-
-            _library: PhantomData,
-            _thread: PhantomData,
-        })
-    }
-
     /// Get the raw pointer to the `clap_plugin` instance.
     pub fn as_ptr(&self) -> *const clap_plugin {
         self.shared.clap_plugin_ptr()
@@ -163,9 +153,9 @@ impl<'lib> Plugin<'lib> {
                 .unwrap();
 
             // Handle callbacks requests on the main thread while the audio thread is running
-            while let Ok(task) = self.main.task_receiver.recv() {
+            while let Ok(task) = self.task_receiver.recv() {
                 match task {
-                    MainThreadTask::Dispatch { func, data } => func(self, data),
+                    MainThreadTask::Dispatch(func) => func(self),
                     MainThreadTask::CallbackRequest => self.handle_callback_unchecked(),
                     MainThreadTask::StopAudioThread => break,
                 }
@@ -251,14 +241,4 @@ impl<'lib> Plugin<'lib> {
             };
         }
     }
-}
-
-thread_local! {
-    static IS_OS_MAIN_THREAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-pub unsafe fn mark_current_thread_as_os_main_thread() {
-    IS_OS_MAIN_THREAD.with(|cell| {
-        cell.set(true);
-    });
 }

@@ -3,7 +3,6 @@
 
 use crate::util::{self, check_null_ptr, validator_version};
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
 use clap_sys::factory::preset_discovery::{
     CLAP_PRESET_DISCOVERY_IS_DEMO_CONTENT, CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT, CLAP_PRESET_DISCOVERY_IS_FAVORITE,
     CLAP_PRESET_DISCOVERY_IS_USER_CONTENT, CLAP_PRESET_DISCOVERY_LOCATION_FILE, CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN,
@@ -18,6 +17,7 @@ use std::fmt::Display;
 use std::path::Path;
 use std::pin::Pin;
 use std::thread::ThreadId;
+use time::OffsetDateTime;
 
 #[derive(Debug)]
 pub struct Indexer {
@@ -289,7 +289,7 @@ pub struct Soundpack {
     pub homepage_url: Option<String>,
     pub vendor: Option<String>,
     pub image_path: Option<String>,
-    pub release_timestamp: Option<DateTime<Utc>>,
+    pub release_timestamp: Option<OffsetDateTime>,
 }
 
 impl Soundpack {

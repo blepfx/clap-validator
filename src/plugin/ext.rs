@@ -16,6 +16,7 @@ pub mod params;
 pub mod preset_load;
 pub mod state;
 pub mod surround;
+pub mod tail;
 
 /// An abstraction for a CLAP plugin extension. `P` here is the plugin type. In practice, this is
 /// either `Plugin` or `PluginAudioThread`. Abstractions for main thread functions will implement

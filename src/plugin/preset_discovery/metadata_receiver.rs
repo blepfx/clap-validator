@@ -5,7 +5,6 @@
 use super::{Flags, LocationValue};
 use crate::util::{self, check_null_ptr};
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
 use clap_sys::factory::preset_discovery::{
     CLAP_PRESET_DISCOVERY_IS_DEMO_CONTENT, CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT, CLAP_PRESET_DISCOVERY_IS_FAVORITE,
     CLAP_PRESET_DISCOVERY_IS_USER_CONTENT, clap_preset_discovery_metadata_receiver,
@@ -19,6 +18,7 @@ use std::ffi::{c_char, c_void};
 use std::fmt::Display;
 use std::pin::Pin;
 use std::thread::ThreadId;
+use time::OffsetDateTime;
 
 /// An implementation of the preset discovery's metadata receiver. This borrows a
 /// `Result<PresetFile>` because the important work is done when this object is dropped. When this
@@ -94,8 +94,8 @@ struct PartialPreset {
     pub flags: Option<Flags>,
     pub creators: Vec<String>,
     pub description: Option<String>,
-    pub creation_time: Option<DateTime<Utc>>,
-    pub modification_time: Option<DateTime<Utc>>,
+    pub creation_time: Option<OffsetDateTime>,
+    pub modification_time: Option<OffsetDateTime>,
     pub features: Vec<String>,
     pub extra_info: BTreeMap<String, String>,
 }
@@ -200,8 +200,10 @@ pub struct Preset {
     pub flags: PresetFlags,
     pub creators: Vec<String>,
     pub description: Option<String>,
-    pub creation_time: Option<DateTime<Utc>>,
-    pub modification_time: Option<DateTime<Utc>>,
+
+    pub creation_time: Option<OffsetDateTime>,
+    pub modification_time: Option<OffsetDateTime>,
+
     pub features: Vec<String>,
     pub extra_info: BTreeMap<String, String>,
 }

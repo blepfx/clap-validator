@@ -379,7 +379,6 @@ impl ValidationResult {
     pub fn union(mut self, other: Self) -> Self {
         self.plugin_library_tests.extend(other.plugin_library_tests);
         self.plugin_tests.extend(other.plugin_tests);
-
         self
     }
 }

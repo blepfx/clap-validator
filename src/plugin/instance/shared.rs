@@ -1,4 +1,12 @@
-use crate::plugin::instance::{CallbackEvent, Plugin, PluginStatus};
+use crate::plugin::ext::Extension;
+use crate::plugin::ext::audio_ports::AudioPorts;
+use crate::plugin::ext::latency::Latency;
+use crate::plugin::ext::note_ports::NotePorts;
+use crate::plugin::ext::params::Params;
+use crate::plugin::ext::preset_load::PresetLoad;
+use crate::plugin::ext::state::State;
+use crate::plugin::ext::tail::Tail;
+use crate::plugin::instance::{CallbackEvent, MainThreadTask, Plugin, PluginStatus};
 use crate::plugin::preset_discovery::LocationValue;
 use crate::util::{self, check_null_ptr, clap_call, validator_version};
 use anyhow::{Context, Result};
@@ -10,6 +18,7 @@ use clap_sys::ext::preset_load::{CLAP_EXT_PRESET_LOAD, clap_host_preset_load};
 use clap_sys::ext::state::{CLAP_EXT_STATE, clap_host_state};
 use clap_sys::ext::tail::{CLAP_EXT_TAIL, clap_host_tail};
 use clap_sys::ext::thread_check::{CLAP_EXT_THREAD_CHECK, clap_host_thread_check};
+use clap_sys::ext::thread_pool::{CLAP_EXT_THREAD_POOL, clap_host_thread_pool};
 use clap_sys::ext::voice_info::{CLAP_EXT_VOICE_INFO, clap_host_voice_info};
 use clap_sys::factory::plugin_factory::clap_plugin_factory;
 use clap_sys::factory::preset_discovery::clap_preset_discovery_location_kind;
@@ -18,15 +27,25 @@ use clap_sys::id::clap_id;
 use clap_sys::plugin::clap_plugin;
 use clap_sys::version::CLAP_VERSION;
 use crossbeam::atomic::AtomicCell;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::ffi::{CStr, c_char, c_void};
-use std::pin::Pin;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 
+thread_local! {
+    static IS_OS_MAIN_THREAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub unsafe fn mark_current_thread_as_os_main_thread() {
+    IS_OS_MAIN_THREAD.with(|cell| {
+        cell.set(true);
+    });
+}
+
 /// Plugin instance state that is shared between the main thread, audio thread and any external unmanaged threads.
 /// This struct contains the `clap_host` and its extensions, as well as fields for tracking the plugin's state.
-pub struct InstanceShared {
+pub struct PluginShared {
     pub task_sender: Sender<MainThreadTask>,
     pub callback_sender: Sender<CallbackEvent>,
     pub callback_error: Mutex<Option<String>>,
@@ -50,36 +69,29 @@ pub struct InstanceShared {
 
     clap_plugin: *const clap_plugin,
     clap_host: clap_host,
-    clap_host_audio_ports: clap_host_audio_ports,
-    clap_host_note_ports: clap_host_note_ports,
-    clap_host_params: clap_host_params,
-    clap_host_preset_load: clap_host_preset_load,
-    clap_host_state: clap_host_state,
-    clap_host_thread_check: clap_host_thread_check,
-    clap_host_latency: clap_host_latency,
-    clap_host_tail: clap_host_tail,
-    clap_host_voice_info: clap_host_voice_info,
 }
 
-/// Information about a plugin instance's main thread.
-pub struct InstanceMainThread {
-    pub callback_receiver: Receiver<CallbackEvent>,
-    pub task_receiver: Receiver<MainThreadTask>,
-}
+unsafe impl Send for PluginShared {}
+unsafe impl Sync for PluginShared {}
 
-pub enum MainThreadTask {
-    Dispatch { func: fn(&Plugin, *mut ()), data: *mut () },
-    CallbackRequest,
-    StopAudioThread,
-}
+impl PluginShared {
+    /// Create a plugin instance and return the still uninitialized plugin. Returns an error if the
+    /// plugin could not be created. The plugin instance will be registered with the host, and
+    /// unregistered when this object is dropped again.
+    ///
+    /// # Panics
+    /// This MUST be called on the OS main thread (if applicable).
+    ///
+    /// # Safety
+    /// The `factory` object must be valid.
+    pub unsafe fn create_plugin<'a>(factory: &clap_plugin_factory, plugin_id: &CStr) -> Result<Plugin<'a>> {
+        assert!(IS_OS_MAIN_THREAD.with(|cell| cell.get()), "not on main thread");
 
-impl InstanceShared {
-    pub unsafe fn new(factory: &clap_plugin_factory, plugin_id: &CStr) -> Result<(Pin<Arc<Self>>, InstanceMainThread)> {
         let main_thread = std::thread::current().id();
         let (callback_sender, callback_receiver) = channel();
         let (task_sender, task_receiver) = channel();
 
-        let shared = Arc::pin(InstanceShared {
+        let shared = Arc::pin(PluginShared {
             task_sender,
             callback_sender,
             callback_error: Mutex::new(None),
@@ -104,46 +116,7 @@ impl InstanceShared {
                 request_process: Some(Self::request_process),
                 request_callback: Some(Self::request_callback),
             },
-
-            clap_host_audio_ports: clap_host_audio_ports {
-                is_rescan_flag_supported: Some(Self::ext_audio_ports_is_rescan_flag_supported),
-                rescan: Some(Self::ext_audio_ports_rescan),
-            },
-            clap_host_note_ports: clap_host_note_ports {
-                supported_dialects: Some(Self::ext_note_ports_supported_dialects),
-                rescan: Some(Self::ext_note_ports_rescan),
-            },
-            clap_host_preset_load: clap_host_preset_load {
-                on_error: Some(Self::ext_preset_load_on_error),
-                loaded: Some(Self::ext_preset_load_loaded),
-            },
-            clap_host_params: clap_host_params {
-                rescan: Some(Self::ext_params_rescan),
-                clear: Some(Self::ext_params_clear),
-                request_flush: Some(Self::ext_params_request_flush),
-            },
-            clap_host_state: clap_host_state {
-                mark_dirty: Some(Self::ext_state_mark_dirty),
-            },
-            clap_host_thread_check: clap_host_thread_check {
-                is_main_thread: Some(Self::ext_thread_check_is_main_thread),
-                is_audio_thread: Some(Self::ext_thread_check_is_audio_thread),
-            },
-            clap_host_latency: clap_host_latency {
-                changed: Some(Self::ext_latency_changed),
-            },
-            clap_host_tail: clap_host_tail {
-                changed: Some(Self::ext_tail_changed),
-            },
-            clap_host_voice_info: clap_host_voice_info {
-                changed: Some(Self::ext_voice_info_changed),
-            },
         });
-
-        let main = InstanceMainThread {
-            callback_receiver,
-            task_receiver,
-        };
 
         // Now that the Arc is pinned in memory, we can store a pointer to it in the clap_host struct
         // so it can be retrieved in host callbacks
@@ -167,7 +140,14 @@ impl InstanceShared {
             (&raw const shared.clap_plugin).cast_mut().write(clap_plugin);
         }
 
-        Ok((shared, main))
+        Ok(Plugin {
+            shared,
+            callback_receiver,
+            task_receiver,
+
+            _library: std::marker::PhantomData,
+            _thread: std::marker::PhantomData,
+        })
     }
 
     pub fn clap_host_ptr(&self) -> *const clap_host {
@@ -181,7 +161,7 @@ impl InstanceShared {
     #[track_caller]
     unsafe fn from_clap_host<'a>(host: *const clap_host) -> &'a Self {
         unsafe {
-            let state = (*host).host_data as *const InstanceShared;
+            let state = (*host).host_data as *const PluginShared;
             &*state
         }
     }
@@ -240,31 +220,106 @@ impl InstanceShared {
         }
     }
 
+    /// Checks whether the plugin has the required extension(s). If it does not, then an error
+    /// will be set. Subsequent errors will not overwrite earlier ones.
+    fn assert_has_extension(&self, function_name: &str, ids: &[&CStr]) {
+        if self.status.load() == PluginStatus::Uninitialized {
+            self.set_callback_error(format!("'{}' called while the plugin is uninitialized.", function_name));
+            return;
+        }
+
+        for id in ids {
+            let extension_ptr = unsafe {
+                clap_call! { self.clap_plugin_ptr()=>get_extension(self.clap_plugin_ptr(), id.as_ptr()) }
+            };
+
+            if !extension_ptr.is_null() {
+                return; // found it!
+            }
+        }
+
+        self.set_callback_error(format!(
+            "'{}' called without the required extension: {}",
+            function_name,
+            ids[0].to_string_lossy()
+        ));
+    }
+}
+
+// Extensions
+impl PluginShared {
+    const EXT_AUDIO_PORTS: clap_host_audio_ports = clap_host_audio_ports {
+        is_rescan_flag_supported: Some(Self::ext_audio_ports_is_rescan_flag_supported),
+        rescan: Some(Self::ext_audio_ports_rescan),
+    };
+
+    const EXT_NOTE_PORTS: clap_host_note_ports = clap_host_note_ports {
+        supported_dialects: Some(Self::ext_note_ports_supported_dialects),
+        rescan: Some(Self::ext_note_ports_rescan),
+    };
+
+    const EXT_PRESET_LOAD: clap_host_preset_load = clap_host_preset_load {
+        on_error: Some(Self::ext_preset_load_on_error),
+        loaded: Some(Self::ext_preset_load_loaded),
+    };
+
+    const EXT_PARAMS: clap_host_params = clap_host_params {
+        rescan: Some(Self::ext_params_rescan),
+        clear: Some(Self::ext_params_clear),
+        request_flush: Some(Self::ext_params_request_flush),
+    };
+
+    const EXT_STATE: clap_host_state = clap_host_state {
+        mark_dirty: Some(Self::ext_state_mark_dirty),
+    };
+
+    const EXT_THREAD_CHECK: clap_host_thread_check = clap_host_thread_check {
+        is_audio_thread: Some(Self::ext_thread_check_is_audio_thread),
+        is_main_thread: Some(Self::ext_thread_check_is_main_thread),
+    };
+
+    const EXT_THREAD_POOL: clap_host_thread_pool = clap_host_thread_pool {
+        request_exec: Some(Self::ext_thread_pool_request_exec),
+    };
+
+    const EXT_LATENCY: clap_host_latency = clap_host_latency {
+        changed: Some(Self::ext_latency_changed),
+    };
+
+    const EXT_TAIL: clap_host_tail = clap_host_tail {
+        changed: Some(Self::ext_tail_changed),
+    };
+
+    const EXT_VOICE_INFO: clap_host_voice_info = clap_host_voice_info {
+        changed: Some(Self::ext_voice_info_changed),
+    };
+
     unsafe extern "C" fn get_extension(host: *const clap_host, extension_id: *const c_char) -> *const c_void {
-        //check_null_ptr!(host, (*host).host_data, extension_id);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        check_null_ptr!(host, (*host).host_data, extension_id);
 
         // Right now there's no way to have the host only expose certain extensions. We can always
         // add that when test cases need it.
         let extension_id_cstr = unsafe { CStr::from_ptr(extension_id) };
         if extension_id_cstr == CLAP_EXT_AUDIO_PORTS {
-            &this.clap_host_audio_ports as *const _ as *const c_void
+            &Self::EXT_AUDIO_PORTS as *const _ as *const c_void
         } else if extension_id_cstr == CLAP_EXT_NOTE_PORTS {
-            &this.clap_host_note_ports as *const _ as *const c_void
+            &Self::EXT_NOTE_PORTS as *const _ as *const c_void
         } else if extension_id_cstr == CLAP_EXT_PRESET_LOAD {
-            &this.clap_host_preset_load as *const _ as *const c_void
+            &Self::EXT_PRESET_LOAD as *const _ as *const c_void
         } else if extension_id_cstr == CLAP_EXT_PARAMS {
-            &this.clap_host_params as *const _ as *const c_void
+            &Self::EXT_PARAMS as *const _ as *const c_void
         } else if extension_id_cstr == CLAP_EXT_STATE {
-            &this.clap_host_state as *const _ as *const c_void
+            &Self::EXT_STATE as *const _ as *const c_void
         } else if extension_id_cstr == CLAP_EXT_THREAD_CHECK {
-            &this.clap_host_thread_check as *const _ as *const c_void
+            &Self::EXT_THREAD_CHECK as *const _ as *const c_void
+        } else if extension_id_cstr == CLAP_EXT_THREAD_POOL {
+            &Self::EXT_THREAD_POOL as *const _ as *const c_void
         } else if extension_id_cstr == CLAP_EXT_LATENCY {
-            &this.clap_host_latency as *const _ as *const c_void
+            &Self::EXT_LATENCY as *const _ as *const c_void
         } else if extension_id_cstr == CLAP_EXT_TAIL {
-            &this.clap_host_tail as *const _ as *const c_void
+            &Self::EXT_TAIL as *const _ as *const c_void
         } else if extension_id_cstr == CLAP_EXT_VOICE_INFO {
-            &this.clap_host_voice_info as *const _ as *const c_void
+            &Self::EXT_VOICE_INFO as *const _ as *const c_void
         } else {
             std::ptr::null()
         }
@@ -272,7 +327,7 @@ impl InstanceShared {
 
     unsafe extern "C" fn request_restart(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
 
         // This flag will be reset at the start of one of the `ProcessingTest::run*` functions, and
         // in the multi-iteration run function it will trigger a deactivate->reactivate cycle
@@ -282,7 +337,7 @@ impl InstanceShared {
 
     unsafe extern "C" fn request_process(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
 
         // Handling this within the context of the validator would be a bit messy. Do plugins use
         // this?
@@ -292,7 +347,7 @@ impl InstanceShared {
 
     unsafe extern "C" fn request_callback(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
 
         // This this is either handled by `handle_callbacks_blocking()` while the audio thread is
         // active, or by an explicit call to `handle_callbacks_once()`. We print a warning if the
@@ -304,18 +359,22 @@ impl InstanceShared {
 
     unsafe extern "C" fn ext_audio_ports_is_rescan_flag_supported(host: *const clap_host, _flag: u32) -> bool {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_audio_ports::is_rescan_flag_supported()");
+        this.assert_has_extension("clap_host_audio_ports::is_rescan_flag_supported()", AudioPorts::IDS);
+
         log::trace!("'clap_host_audio_ports::is_rescan_flag_supported()' was called");
         true
     }
 
     unsafe extern "C" fn ext_audio_ports_rescan(host: *const clap_host, flags: u32) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_audio_ports::rescan()");
+        this.assert_has_extension("clap_host_audio_ports::rescan()", AudioPorts::IDS);
+
         log::trace!("'clap_host_audio_ports::rescan()' was called");
 
         if flags & CLAP_AUDIO_PORTS_RESCAN_NAMES != 0 {
@@ -333,9 +392,11 @@ impl InstanceShared {
 
     unsafe extern "C" fn ext_note_ports_supported_dialects(host: *const clap_host) -> clap_note_dialect {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_note_ports::supported_dialects()");
+        this.assert_has_extension("clap_host_note_ports::supported_dialects()", NotePorts::IDS);
+
         log::trace!("'clap_host_note_ports::supported_dialects()' was called");
 
         CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI | CLAP_NOTE_DIALECT_MIDI_MPE
@@ -343,9 +404,11 @@ impl InstanceShared {
 
     unsafe extern "C" fn ext_note_ports_rescan(host: *const clap_host, flags: u32) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_note_ports::rescan()");
+        this.assert_has_extension("clap_host_note_ports::rescan()", NotePorts::IDS);
+
         log::trace!("'clap_host_note_ports::rescan()' was called");
 
         if flags & CLAP_NOTE_PORTS_RESCAN_NAMES != 0 {
@@ -373,9 +436,10 @@ impl InstanceShared {
         msg: *const c_char,
     ) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_preset_load::on_error()");
+        this.assert_has_extension("clap_host_preset_load::on_error()", PresetLoad::IDS);
 
         let location = unsafe { LocationValue::new(location_kind, location) }
             .context("'clap_host_preset_load::on_error()' called with invalid location parameters");
@@ -409,9 +473,10 @@ impl InstanceShared {
         load_key: *const c_char,
     ) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_preset_load::loaded()");
+        this.assert_has_extension("clap_host_preset_load::loaded()", PresetLoad::IDS);
 
         let location = unsafe { LocationValue::new(location_kind, location) }
             .context("'clap_host_preset_load::loaded()' called with invalid location parameters");
@@ -430,9 +495,11 @@ impl InstanceShared {
 
     unsafe extern "C" fn ext_params_rescan(host: *const clap_host, flags: clap_param_rescan_flags) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_params::rescan()");
+        this.assert_has_extension("clap_host_params::rescan()", Params::IDS);
+
         log::trace!("'clap_host_params::rescan()' was called");
 
         if flags & CLAP_PARAM_RESCAN_VALUES != 0 {
@@ -460,45 +527,54 @@ impl InstanceShared {
 
     unsafe extern "C" fn ext_params_clear(host: *const clap_host, _param_id: clap_id, _flags: clap_param_clear_flags) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_params::clear()");
+        this.assert_has_extension("clap_host_params::clear()", Params::IDS);
+
         log::debug!("TODO: Handle 'clap_host_params::clear()'");
     }
 
     unsafe extern "C" fn ext_params_request_flush(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
 
         this.assert_not_audio_thread("clap_host_params::request_flush()");
+        this.assert_has_extension("clap_host_params::request_flush()", Params::IDS);
+
         log::trace!("'clap_host_params::request_flush()' was called");
         this.callback_sender.send(CallbackEvent::RequestFlush).unwrap();
     }
 
     unsafe extern "C" fn ext_state_mark_dirty(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_state::mark_dirty()");
+        this.assert_has_extension("clap_host_state::mark_dirty()", State::IDS);
+
         log::trace!("'clap_host_state::mark_dirty()' was called");
         this.callback_sender.send(CallbackEvent::StateMarkDirty).unwrap();
     }
 
     unsafe extern "C" fn ext_thread_check_is_main_thread(host: *const clap_host) -> bool {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
         this.main_thread_id == std::thread::current().id()
     }
 
     unsafe extern "C" fn ext_thread_check_is_audio_thread(host: *const clap_host) -> bool {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
         this.audio_thread_id.load() == Some(std::thread::current().id())
     }
 
     unsafe extern "C" fn ext_latency_changed(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
+
+        this.assert_main_thread("clap_host_latency::changed()");
+        this.assert_has_extension("clap_host_latency::changed()", Latency::IDS);
 
         if this.status.load() != PluginStatus::Activating {
             this.set_callback_error(
@@ -506,29 +582,44 @@ impl InstanceShared {
             );
         }
 
-        this.assert_main_thread("clap_host_latency::changed()");
         log::trace!("'clap_host_latency::changed()' was called");
         this.callback_sender.send(CallbackEvent::LatencyChanged).unwrap();
     }
 
     unsafe extern "C" fn ext_tail_changed(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+        let this = unsafe { PluginShared::from_clap_host(host) };
 
         this.assert_audio_thread("clap_host_tail::changed()");
+        this.assert_has_extension("clap_host_tail::changed()", Tail::IDS);
+
         log::trace!("'clap_host_tail::changed()' was called");
         this.callback_sender.send(CallbackEvent::TailChanged).unwrap();
     }
 
     unsafe extern "C" fn ext_voice_info_changed(host: *const clap_host) {
         check_null_ptr!(host, (*host).host_data);
-        let this = unsafe { InstanceShared::from_clap_host(host) };
+
+        let this = unsafe { PluginShared::from_clap_host(host) };
 
         this.assert_main_thread("clap_host_voice_info::changed()");
+        //this.assert_has_extension("clap_host_voice_info::changed()", VoiceInfo::IDS);
+
         log::trace!("'clap_host_voice_info::changed()' was called");
         this.callback_sender.send(CallbackEvent::VoiceInfoChanged).unwrap();
     }
-}
 
-unsafe impl Send for InstanceShared {}
-unsafe impl Sync for InstanceShared {}
+    unsafe extern "C" fn ext_thread_pool_request_exec(host: *const clap_host, num_tasks: u32) -> bool {
+        check_null_ptr!(host, (*host).host_data);
+        let this = unsafe { PluginShared::from_clap_host(host) };
+
+        this.assert_audio_thread("clap_host_thread_pool::request_exec()");
+        this.assert_has_extension("clap_host_thread_pool::request_exec()", &[CLAP_EXT_THREAD_POOL]);
+
+        (0..num_tasks).into_par_iter().for_each(|index| {
+            log::trace!("Executing thread pool task {index} of {num_tasks}");
+        });
+
+        true
+    }
+}

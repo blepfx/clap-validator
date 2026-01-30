@@ -1,8 +1,11 @@
 use crate::params::{PolySynthParamModulations, PolySynthParams};
 use crate::poly_oscillator::PolyOscillator;
+use clack_extensions::audio_ports_activation::{
+    PluginAudioPortsActivation, PluginAudioPortsActivationImpl, PluginAudioPortsActivationSetImpl, SampleSize,
+};
 use clack_extensions::audio_ports_config::{
     AudioPortConfigWriter, AudioPortsConfiguration, MainPortInfo, PluginAudioPortsConfig, PluginAudioPortsConfigImpl,
-    PluginAudioPortsConfigInfoImpl,
+    PluginAudioPortsConfigInfo, PluginAudioPortsConfigInfoImpl,
 };
 use clack_extensions::configurable_audio_ports::{
     AudioPortsRequestList, PluginConfigurableAudioPorts, PluginConfigurableAudioPortsImpl,
@@ -32,6 +35,8 @@ impl Plugin for PolySynthPlugin {
             .register::<PluginParams>()
             .register::<PluginState>()
             .register::<PluginAudioPortsConfig>()
+            .register::<PluginAudioPortsConfigInfo>()
+            .register::<PluginAudioPortsActivation>()
             .register::<PluginConfigurableAudioPorts>();
     }
 }
@@ -60,6 +65,7 @@ impl DefaultPluginFactory for PolySynthPlugin {
         Ok(PolySynthPluginMainThread {
             shared,
             config: ClapId::new(2),
+            active: true,
         })
     }
 }
@@ -268,6 +274,33 @@ impl PluginConfigurableAudioPortsImpl for PolySynthPluginMainThread<'_> {
     }
 }
 
+impl PluginAudioPortsActivationImpl for PolySynthPluginMainThread<'_> {
+    fn can_activate_while_processing(&mut self) -> bool {
+        false
+    }
+}
+
+impl PluginAudioPortsActivationSetImpl for PolySynthPluginMainThread<'_> {
+    fn set_active(&mut self, is_input: bool, port_index: u32, is_active: bool, sample_size: SampleSize) -> bool {
+        if is_input || port_index != 0 {
+            return false;
+        }
+
+        if sample_size == SampleSize::Float64 {
+            return false;
+        }
+
+        self.active = is_active;
+        true
+    }
+}
+
+impl PluginAudioPortsActivationSetImpl for PolySynthAudioProcessor<'_> {
+    fn set_active(&mut self, _: bool, _: u32, _: bool, _: SampleSize) -> bool {
+        false
+    }
+}
+
 pub struct PolySynthPluginShared {
     params: PolySynthParams,
 }
@@ -277,6 +310,7 @@ impl PluginShared<'_> for PolySynthPluginShared {}
 pub struct PolySynthPluginMainThread<'a> {
     shared: &'a PolySynthPluginShared,
     config: ClapId,
+    active: bool,
 }
 
 impl<'a> PluginMainThread<'a, PolySynthPluginShared> for PolySynthPluginMainThread<'a> {}

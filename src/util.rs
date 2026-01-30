@@ -1,13 +1,13 @@
 //! Miscellaneous functions for data conversions.
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, TimeZone, Utc};
 use clap_sys::timestamp::{CLAP_TIMESTAMP_UNKNOWN, clap_timestamp};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use std::ffi::CString;
 use std::os::raw::c_char;
 use std::path::PathBuf;
 use std::{ffi::CStr, sync::OnceLock};
+use time::OffsetDateTime;
 
 /// Assert that the specified pointers are non-null. Panics if this is not the case.
 macro_rules! check_null_ptr {
@@ -129,17 +129,16 @@ pub fn c_char_slice_to_string(slice: &[c_char]) -> Result<String> {
         .map(String::from)
 }
 
-/// Convert a `clap_timestamp` to an `Option<DateTime<Utc>>`. A value of `CLAP_TIMESTAMP_UNKNOWN`
+/// Convert a `clap_timestamp` to an `Option<OffsetDateTime>`. A value of `CLAP_TIMESTAMP_UNKNOWN`
 /// gets translated to `None`.
-pub fn parse_timestamp(timestamp: clap_timestamp) -> Result<Option<DateTime<Utc>>> {
+pub fn parse_timestamp(timestamp: clap_timestamp) -> Result<Option<OffsetDateTime>> {
     let parsed = if timestamp == CLAP_TIMESTAMP_UNKNOWN {
         None
     } else {
-        Some(match Utc.timestamp_millis_opt(timestamp as i64) {
-            chrono::LocalResult::Single(datetime) => datetime,
-            // This shouldn't happen
-            _ => anyhow::bail!("Could not parse the timestamp."),
-        })
+        Some(
+            OffsetDateTime::from_unix_timestamp_nanos(timestamp as i128 * 1_000_000)
+                .map_err(|_| anyhow::anyhow!("Could not parse the timestamp."))?,
+        )
     };
 
     Ok(parsed)
@@ -167,6 +166,48 @@ pub fn validator_version() -> &'static CStr {
     VERSION
         .get_or_init(|| CString::new(env!("CARGO_PKG_VERSION")).unwrap())
         .as_c_str()
+}
+
+pub fn install_panic_hook() {
+    std::panic::set_hook(Box::new(move |info| {
+        let backtrace = std::backtrace::Backtrace::capture();
+        let backtrace = if backtrace.status() == std::backtrace::BacktraceStatus::Disabled {
+            String::from(". Set RUST_BACKTRACE=1 for a backtrace.")
+        } else {
+            format!("\n{}", backtrace)
+        };
+
+        let thread = std::thread::current();
+        let thread = thread.name().unwrap_or("<unnamed>");
+
+        let msg = match info.payload().downcast_ref::<&'static str>() {
+            Some(s) => *s,
+            None => match info.payload().downcast_ref::<String>() {
+                Some(s) => &**s,
+                None => "Box<Any>",
+            },
+        };
+
+        match info.location() {
+            Some(location) => {
+                log::error!(
+                    target: "panic", "thread '{}' panicked at '{}': {}:{}{}",
+                    thread,
+                    msg,
+                    location.file(),
+                    location.line(),
+                    backtrace
+                );
+            }
+            None => log::error!(
+                target: "panic",
+                "thread '{}' panicked at '{}'{:?}",
+                thread,
+                msg,
+                backtrace
+            ),
+        }
+    }));
 }
 
 impl<T: ?Sized> IteratorExt for T where T: Iterator {}

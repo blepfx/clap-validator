@@ -2,7 +2,7 @@
 
 use super::{Plugin, PluginStatus};
 use crate::plugin::ext::Extension;
-use crate::plugin::instance::{InstanceShared, MainThreadTask};
+use crate::plugin::instance::{MainThreadTask, PluginShared};
 use crate::util::clap_call;
 use anyhow::Result;
 use clap_sys::plugin::clap_plugin;
@@ -13,14 +13,14 @@ use clap_sys::process::{
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::ptr::NonNull;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
 
 /// An audio thread equivalent to [`Plugin`]. This version only allows audio thread functions to be
 /// called. It can be constructed using [`Plugin::on_audio_thread()`].
 pub struct PluginAudioThread<'a> {
     /// Information about this plugin instance stored on the host. This keeps track of things like
     /// audio thread IDs, whether the plugin has pending callbacks, and what state it is in.
-    shared: Pin<Arc<InstanceShared>>,
+    shared: Pin<Arc<PluginShared>>,
 
     _plugin_marker: PhantomData<&'a Plugin<'a>>,
 
@@ -31,7 +31,7 @@ pub struct PluginAudioThread<'a> {
 
 /// The equivalent of `clap_process_status`, minus the `CLAP_PROCESS_ERROR` value as this is already
 /// treated as an error by `PluginAudioThread::process()`.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProcessStatus {
     Continue,
     ContinueIfNotQuiet,
@@ -47,7 +47,7 @@ impl Drop for PluginAudioThread<'_> {
 }
 
 impl<'a> PluginAudioThread<'a> {
-    pub(super) fn new(shared: Pin<Arc<InstanceShared>>) -> PluginAudioThread<'a> {
+    pub(super) fn new(shared: Pin<Arc<PluginShared>>) -> PluginAudioThread<'a> {
         shared.audio_thread_id.store(Some(std::thread::current().id()));
         PluginAudioThread {
             shared,
@@ -67,14 +67,13 @@ impl<'a> PluginAudioThread<'a> {
     }
 
     /// Get a reference to the plugin's shared state.
-    pub fn shared(&self) -> &Pin<Arc<InstanceShared>> {
+    pub fn shared(&self) -> &Pin<Arc<PluginShared>> {
         &self.shared
     }
 
     /// Get the _audio thread_ extension abstraction for the extension `T`, if the plugin supports
     /// this extension. Returns `None` if it does not. The plugin needs to be initialized using
     /// [`init()`][Self::init()] before this may be called.
-    #[allow(unused)]
     pub fn get_extension<T: Extension<&'a Self>>(&'a self) -> Option<T> {
         self.status().assert_is_not(PluginStatus::Uninitialized);
 
@@ -94,38 +93,20 @@ impl<'a> PluginAudioThread<'a> {
 
     /// Dispatch a task to be executed on the main thread. This is a blocking call that will wait
     /// for the task to complete and return its result.
-    pub fn send_main_thread<F: FnOnce(&Plugin) -> T + Send, T: Send>(&self, callback: F) -> T {
-        struct Scope<'a, F, T> {
-            callback: F,
-            mutex: &'a Mutex<Option<T>>,
-            condvar: &'a Condvar,
-        }
-
-        let mutex = Mutex::new(None);
-        let condvar = Condvar::new();
-        let scope = Scope {
-            callback,
-            mutex: &mutex,
-            condvar: &condvar,
-        };
+    ///
+    /// TODO: this could be optimized and the 'static requirement dropped.
+    pub fn dispatch_main<F: FnOnce(&Plugin) -> T + Send + 'static, T: Send + 'static>(&self, callback: F) -> T {
+        let (send, recv) = std::sync::mpsc::sync_channel(0);
 
         self.shared
             .task_sender
-            .send(MainThreadTask::Dispatch {
-                data: &scope as *const _ as _,
-                func: |plugin, data| {
-                    let scope = unsafe { data.cast::<Scope<F, T>>().read() };
-                    scope.mutex.lock().unwrap().replace((scope.callback)(plugin));
-                    scope.condvar.notify_one();
-                },
-            })
+            .send(MainThreadTask::Dispatch(Box::new(move |plugin| {
+                let result = callback(plugin);
+                send.send(result).unwrap();
+            })))
             .unwrap();
 
-        condvar
-            .wait_while(mutex.lock().unwrap(), |x| x.is_none())
-            .unwrap()
-            .take()
-            .unwrap()
+        recv.recv().unwrap()
     }
 
     /// Prepare for audio processing. Returns an error if the plugin returned `false`. See

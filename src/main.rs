@@ -73,9 +73,8 @@ fn main() -> ExitCode {
     )
     .expect("Could not initialize logger");
 
-    log_panics::Config::new()
-        .backtrace_mode(log_panics::BacktraceMode::Resolved)
-        .install_panic_hook();
+    // Install the panic hook to log panics instead of printing them to stderr.
+    util::install_panic_hook();
 
     // Mark the main thread as such for plugin instance creation checks.
     unsafe {

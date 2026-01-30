@@ -1,5 +1,8 @@
 //! Data structures and functions surrounding audio processing.
-use crate::plugin::instance::{PluginAudioThread, PluginStatus};
+use crate::plugin::{
+    ext::tail::Tail,
+    instance::{PluginAudioThread, PluginStatus, ProcessStatus},
+};
 use anyhow::Result;
 use clap_sys::process::*;
 use std::pin::Pin;
@@ -14,6 +17,8 @@ pub use transport::*;
 
 pub struct ProcessScope<'a> {
     plugin: &'a PluginAudioThread<'a>,
+    plugin_tail: Option<Tail<'a>>,
+
     buffer: &'a mut AudioBuffers,
 
     events_input: Pin<Box<EventQueue>>,
@@ -37,8 +42,9 @@ impl<'a> ProcessScope<'a> {
 
         Ok(ProcessScope {
             plugin,
-            buffer,
+            plugin_tail: plugin.get_extension(),
 
+            buffer,
             events_input: EventQueue::new(),
             events_output: EventQueue::new(),
             transport: TransportState::dummy(),
@@ -76,11 +82,11 @@ impl<'a> ProcessScope<'a> {
         }
     }
 
-    pub fn run(&mut self) -> Result<()> {
+    pub fn run(&mut self) -> Result<ProcessStatus> {
         self.run_with_block_size(self.buffer.len())
     }
 
-    pub fn run_with_block_size(&mut self, samples: u32) -> Result<()> {
+    pub fn run_with_block_size(&mut self, samples: u32) -> Result<ProcessStatus> {
         assert!(samples > 0 && samples <= self.buffer.len());
 
         // check for requested restart
@@ -91,8 +97,11 @@ impl<'a> ProcessScope<'a> {
         // check state, activate if needed
         if self.plugin.status() == PluginStatus::Deactivated {
             self.plugin.shared().requested_restart.store(false);
+
+            let sample_rate = self.sample_rate;
+            let buffer_size = self.buffer.len();
             self.plugin
-                .send_main_thread(|plugin| plugin.activate(self.sample_rate, 1, self.buffer.len()))?;
+                .dispatch_main(move |plugin| plugin.activate(sample_rate, 1, buffer_size))?;
         }
 
         // start processing if needed
@@ -128,7 +137,7 @@ impl<'a> ProcessScope<'a> {
         // run processing
         let transport = self.transport.as_clap_transport(0);
         let (inputs, outputs) = self.buffer.clap_buffers();
-        self.plugin.process(&clap_process {
+        let status = self.plugin.process(&clap_process {
             steady_time: self.transport.sample_pos.map_or(-1, |f| f as i64),
             frames_count: samples,
             transport: if self.transport.is_freerun {
@@ -149,7 +158,15 @@ impl<'a> ProcessScope<'a> {
         self.transport.advance(samples as i64, self.sample_rate());
 
         // check output audio buffers for NaNs or infinities
-        check_process_call_consistency(self.buffer.buffers(), &original_buffers, self.output_queue(), samples)
+        check_process_call_consistency(self.buffer.buffers(), &original_buffers, self.output_queue(), samples)?;
+
+        if status == ProcessStatus::Tail && self.plugin_tail.is_none() {
+            anyhow::bail!(
+                "Plugin returned `CLAP_PROCESS_TAIL` process status but does not implement the 'tail' extension."
+            );
+        }
+
+        Ok(status)
     }
 
     pub fn restart(&mut self) {
@@ -158,7 +175,7 @@ impl<'a> ProcessScope<'a> {
         }
 
         if self.plugin.status() == PluginStatus::Activated {
-            self.plugin.send_main_thread(|plugin| {
+            self.plugin.dispatch_main(|plugin| {
                 plugin.deactivate();
             });
         }

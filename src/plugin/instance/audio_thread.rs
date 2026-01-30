@@ -67,7 +67,7 @@ impl<'a> PluginAudioThread<'a> {
     }
 
     /// Get a reference to the plugin's shared state.
-    pub fn shared(&self) -> &Pin<Arc<PluginShared>> {
+    pub fn shared(&self) -> &PluginShared {
         &self.shared
     }
 

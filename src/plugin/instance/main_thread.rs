@@ -60,14 +60,11 @@ impl Drop for Plugin<'_> {
         // Make sure the plugin is in the correct state before it gets destroyed
         match self.status() {
             PluginStatus::Uninitialized | PluginStatus::Deactivated => (),
-            PluginStatus::Activated => self.deactivate(),
-            status => log::warn!(
+            status => panic!(
                 "The plugin was in an invalid state '{status:?}' when the instance got dropped, this is a \
                  clap-validator bug"
             ),
         }
-
-        self.handle_callback_unchecked();
 
         let plugin = self.as_ptr();
         unsafe {
@@ -99,19 +96,18 @@ impl<'lib> Plugin<'lib> {
         self.shared.status.load()
     }
 
-    /// Handle any pending main-thread callbacks for this plugin.
+    /// Handle any pending main-thread callbacks for this plugin and pending callback events.
     /// Returns an error if there is a callback error pending.
-    pub fn handle_callback(&self) -> Result<()> {
-        self.handle_callback_unchecked();
+    pub fn poll_callback(&self, mut f: impl FnMut(CallbackEvent)) -> Result<()> {
+        self.poll_callback_unchecked();
 
         if let Some(error) = self.shared.callback_error.lock().unwrap().take() {
             anyhow::bail!(error);
         }
 
-        // TODO:
-        // while let Ok(event) = self.shared.callback_receiver.lock().unwrap().recv() {
-        //     println!("{:?}", event);
-        // }
+        while let Ok(event) = self.callback_receiver.try_recv() {
+            f(event);
+        }
 
         Ok(())
     }
@@ -156,7 +152,7 @@ impl<'lib> Plugin<'lib> {
             while let Ok(task) = self.task_receiver.recv() {
                 match task {
                     MainThreadTask::Dispatch(func) => func(self),
-                    MainThreadTask::CallbackRequest => self.handle_callback_unchecked(),
+                    MainThreadTask::CallbackRequest => self.poll_callback_unchecked(),
                     MainThreadTask::StopAudioThread => break,
                 }
             }
@@ -165,7 +161,7 @@ impl<'lib> Plugin<'lib> {
             thread.join()
         });
 
-        self.handle_callback_unchecked();
+        self.poll_callback_unchecked();
         result.flatten().unwrap_or_else(|e| resume_unwind(e))
     }
 
@@ -233,7 +229,7 @@ impl<'lib> Plugin<'lib> {
         self.shared.status.store(PluginStatus::Deactivated);
     }
 
-    fn handle_callback_unchecked(&self) {
+    fn poll_callback_unchecked(&self) {
         if self.shared.requested_callback.swap(false) {
             let plugin = self.as_ptr();
             unsafe {

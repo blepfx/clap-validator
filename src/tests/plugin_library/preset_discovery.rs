@@ -123,7 +123,7 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
             // successful, but it doesn't matter if the plugin doesn't have any audio ports
             let audio_ports = plugin.get_extension::<AudioPorts>();
             plugin
-                .handle_callback()
+                .poll_callback(|_| {})
                 .context("An error occured during a host callback")?;
 
             let audio_ports_config = audio_ports
@@ -150,7 +150,7 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
                 // In case the plugin uses `clap_host_preset_load::on_error()` to report an error,
                 // we will check that first before making sure the preset loaded correctly. This
                 // might otherwise mask the error message.
-                plugin.handle_callback().with_context(|| {
+                plugin.poll_callback(|_| {}).with_context(|| {
                     format!(
                         "An error occurred while loading the preset '{}' for plugin '{}'",
                         preset.name, plugin_id
@@ -171,12 +171,12 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
                     })?;
 
                 plugin
-                    .handle_callback()
+                    .poll_callback(|_| {})
                     .with_context(|| format!("An error occured during a host callback made by '{plugin_id}'"))?;
             }
 
             plugin
-                .handle_callback()
+                .poll_callback(|_| {})
                 .with_context(|| format!("An error occured during a host callback made by '{plugin_id}'"))?;
         }
     }

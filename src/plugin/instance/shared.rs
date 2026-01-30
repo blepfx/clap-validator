@@ -33,14 +33,10 @@ use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 
-thread_local! {
-    static IS_OS_MAIN_THREAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
+static OS_MAIN_THREAD: AtomicCell<Option<ThreadId>> = AtomicCell::new(None);
 
 pub unsafe fn mark_current_thread_as_os_main_thread() {
-    IS_OS_MAIN_THREAD.with(|cell| {
-        cell.set(true);
-    });
+    OS_MAIN_THREAD.store(Some(std::thread::current().id()));
 }
 
 /// Plugin instance state that is shared between the main thread, audio thread and any external unmanaged threads.
@@ -85,7 +81,10 @@ impl PluginShared {
     /// # Safety
     /// The `factory` object must be valid.
     pub unsafe fn create_plugin<'a>(factory: &clap_plugin_factory, plugin_id: &CStr) -> Result<Plugin<'a>> {
-        assert!(IS_OS_MAIN_THREAD.with(|cell| cell.get()), "not on main thread");
+        assert!(
+            OS_MAIN_THREAD.load() == Some(std::thread::current().id()),
+            "not on main thread"
+        );
 
         let main_thread = std::thread::current().id();
         let (callback_sender, callback_receiver) = channel();

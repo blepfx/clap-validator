@@ -1,6 +1,6 @@
 use crate::plugin::ext::Extension;
 use crate::plugin::ext::ambisonic::Ambisonic;
-use crate::plugin::ext::audio_ports::is_audio_port_type_consistent;
+use crate::plugin::ext::audio_ports::check_audio_port_type_consistent;
 use crate::plugin::ext::surround::Surround;
 use crate::plugin::instance::Plugin;
 use crate::util::{c_char_slice_to_string, clap_call};
@@ -65,8 +65,8 @@ impl<'a> Extension<&'a Plugin<'a>> for AudioPortsConfigInfo<'a> {
 
 impl AudioPortsConfig<'_> {
     pub fn enumerate(&self) -> Result<Vec<AudioPortsConfigConfig>> {
-        let has_ambisonic = self.plugin.get_extension::<Ambisonic>().is_some();
-        let has_surround = self.plugin.get_extension::<Surround>().is_some();
+        let ext_ambisonic = self.plugin.get_extension::<Ambisonic>();
+        let ext_surround = self.plugin.get_extension::<Surround>();
 
         let audio_ports_config = self.audio_ports_config.as_ptr();
         let plugin = self.plugin.as_ptr();
@@ -76,47 +76,55 @@ impl AudioPortsConfig<'_> {
 
         (0..count)
             .map(|i| unsafe {
-                let mut dst = clap_audio_ports_config { ..zeroed() };
-                let result = clap_call! { audio_ports_config=>get(plugin, i, &mut dst) };
+                let mut info = clap_audio_ports_config { ..zeroed() };
+                let result = clap_call! { audio_ports_config=>get(plugin, i, &mut info) };
                 if !result {
                     anyhow::bail!("audio_ports_config::get({}) returned false", i);
                 }
 
-                if dst.has_main_input {
-                    is_audio_port_type_consistent(
-                        if dst.main_input_port_type.is_null() {
-                            None
-                        } else {
-                            Some(CStr::from_ptr(dst.main_input_port_type))
-                        },
-                        dst.main_input_channel_count,
-                        has_ambisonic,
-                        has_surround,
+                if info.has_main_input {
+                    let port_type = if info.main_input_port_type.is_null() {
+                        None
+                    } else {
+                        Some(CStr::from_ptr(info.main_input_port_type))
+                    };
+
+                    check_audio_port_type_consistent(
+                        true,
+                        0,
+                        port_type,
+                        info.main_input_channel_count,
+                        ext_ambisonic.as_ref(),
+                        ext_surround.as_ref(),
                     )
-                    .with_context(|| format!("Inconsistent channel count for main input port for config {i}"))?;
+                    .with_context(|| format!("Inconsistent main input port info for config {i}"))?;
                 }
 
-                if dst.has_main_output {
-                    is_audio_port_type_consistent(
-                        if dst.main_output_port_type.is_null() {
-                            None
-                        } else {
-                            Some(CStr::from_ptr(dst.main_output_port_type))
-                        },
-                        dst.main_output_channel_count,
-                        has_ambisonic,
-                        has_surround,
+                if info.has_main_output {
+                    let port_type = if info.main_output_port_type.is_null() {
+                        None
+                    } else {
+                        Some(CStr::from_ptr(info.main_output_port_type))
+                    };
+
+                    check_audio_port_type_consistent(
+                        false,
+                        0,
+                        port_type,
+                        info.main_output_channel_count,
+                        ext_ambisonic.as_ref(),
+                        ext_surround.as_ref(),
                     )
-                    .with_context(|| format!("Inconsistent channel count for main output port for config {i}"))?;
+                    .with_context(|| format!("Inconsistent main output port info for config {i}"))?;
                 }
 
                 Ok(AudioPortsConfigConfig {
-                    id: dst.id,
-                    name: c_char_slice_to_string(&dst.name)?,
-                    input_port_count: dst.input_port_count,
-                    output_port_count: dst.output_port_count,
-                    main_input_channel_count: dst.has_main_input.then_some(dst.main_input_channel_count),
-                    main_output_channel_count: dst.has_main_output.then_some(dst.main_output_channel_count),
+                    id: info.id,
+                    name: c_char_slice_to_string(&info.name)?,
+                    input_port_count: info.input_port_count,
+                    output_port_count: info.output_port_count,
+                    main_input_channel_count: info.has_main_input.then_some(info.main_input_channel_count),
+                    main_output_channel_count: info.has_main_output.then_some(info.main_output_channel_count),
                 })
             })
             .collect()

@@ -50,7 +50,9 @@ pub fn test_process_audio_basic(library: &PluginLibrary, plugin_id: &str, in_pla
         Ok(())
     })?;
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -84,7 +86,9 @@ pub fn test_process_audio_double(library: &PluginLibrary, plugin_id: &str, in_pl
         .context("Error while querying 'note-ports' IO configuration")?
         .unwrap_or_default();
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     let has_double_support = audio_ports_config
         .inputs
@@ -119,7 +123,9 @@ pub fn test_process_audio_double(library: &PluginLibrary, plugin_id: &str, in_pl
         Ok(())
     })?;
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -191,7 +197,9 @@ pub fn test_process_note_out_of_place(
         Ok(())
     })?;
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -245,7 +253,9 @@ pub fn test_process_varying_sample_rates(library: &PluginLibrary, plugin_id: &st
             .with_context(|| format!("Error while processing with {:.2}hz sample rate", sample_rate))?;
     }
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -296,7 +306,9 @@ pub fn test_process_varying_block_sizes(library: &PluginLibrary, plugin_id: &str
             .with_context(|| format!("Error while processing with buffer size of {}", buffer_size))?;
     }
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -350,7 +362,9 @@ pub fn test_process_random_block_sizes(library: &PluginLibrary, plugin_id: &str)
         Ok(())
     })?;
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -441,7 +455,9 @@ pub fn test_process_audio_constant_mask(library: &PluginLibrary, plugin_id: &str
         Ok(())
     })?;
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     if !has_received_constant_flag && has_received_constant_output {
         return Ok(TestStatus::Warning {
@@ -523,7 +539,9 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
         Ok(TestStatus::Success { details: None })
     })?;
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     Ok(result)
 }

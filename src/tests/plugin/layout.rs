@@ -189,7 +189,9 @@ pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) 
             })?;
     }
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -327,7 +329,9 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
             })?;
     }
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     if checks_passed == 0 {
         return Ok(TestStatus::Warning {

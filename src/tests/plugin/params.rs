@@ -69,7 +69,9 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
         }
     };
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     let param_infos = params
         .info()
@@ -141,7 +143,9 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
         }
     }
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     if num_supported_value_to_text == 0 || num_supported_text_to_value == 0 {
         return Ok(TestStatus::Skipped {
@@ -191,7 +195,9 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str, snap_to_b
         }
     };
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     let audio_ports_config = audio_ports
         .map(|ports| ports.config())
@@ -275,7 +281,9 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str, snap_to_b
         std::mem::swap(&mut previous_events, &mut current_events);
     }
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -302,7 +310,9 @@ pub fn test_param_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &str)
         }
     };
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     let audio_ports_config = audio_ports
         .map(|ports| ports.config())
@@ -354,7 +364,9 @@ pub fn test_param_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &str)
         })?;
     }
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -409,7 +421,9 @@ pub fn test_param_fuzz_modulation(library: &PluginLibrary, plugin_id: &str) -> R
         Ok(())
     })?;
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -437,7 +451,9 @@ pub fn test_param_set_wrong_namespace(library: &PluginLibrary, plugin_id: &str) 
         }
     };
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     let param_infos = params
         .info()
@@ -477,7 +493,9 @@ pub fn test_param_set_wrong_namespace(library: &PluginLibrary, plugin_id: &str) 
         .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
         .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     if actual_param_values == initial_param_values {
         Ok(TestStatus::Success { details: None })
@@ -508,7 +526,9 @@ pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Re
         }
     };
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     let param_infos = params
         .info()
@@ -530,7 +550,9 @@ pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Re
         }
     }
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }

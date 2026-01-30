@@ -81,7 +81,7 @@ pub enum PluginTestCase {
     TransportNull,
     #[strum(serialize = "transport-fuzz")]
     TransportFuzz,
-    #[strum(serialize = "transport-sample-accurate")]
+    #[strum(serialize = "transport-fuzz-sample-accurate")]
     TransportFuzzSampleAccurate,
 }
 

@@ -1,8 +1,10 @@
-use crate::plugin::{ext::Extension, instance::Plugin};
-use clap_sys::ext::ambisonic::{CLAP_EXT_AMBISONIC, CLAP_EXT_AMBISONIC_COMPAT, clap_plugin_ambisonic};
-use std::{ffi::CStr, ptr::NonNull};
+use crate::{
+    plugin::{ext::Extension, instance::Plugin},
+    util::clap_call,
+};
+use clap_sys::ext::ambisonic::*;
+use std::{ffi::CStr, mem::zeroed, ptr::NonNull};
 
-#[allow(unused)]
 pub struct Ambisonic<'a> {
     plugin: &'a Plugin<'a>,
     ambisonic: NonNull<clap_plugin_ambisonic>,
@@ -17,6 +19,27 @@ impl<'a> Extension<&'a Plugin<'a>> for Ambisonic<'a> {
         Self {
             plugin,
             ambisonic: extension_struct,
+        }
+    }
+}
+
+impl<'a> Ambisonic<'a> {
+    pub fn is_config_supported(&self, config: &clap_ambisonic_config) -> bool {
+        let ambisonic = self.ambisonic.as_ptr();
+        let plugin = self.plugin.as_ptr();
+        unsafe {
+            clap_call! { ambisonic=>is_config_supported(plugin, config) }
+        }
+    }
+
+    pub fn get_config(&self, is_input: bool, port_index: u32) -> Option<clap_ambisonic_config> {
+        let ambisonic = self.ambisonic.as_ptr();
+        let plugin = self.plugin.as_ptr();
+
+        unsafe {
+            let mut config = clap_ambisonic_config { ..zeroed() };
+            let result = clap_call! { ambisonic=>get_config(plugin, is_input, port_index, &mut config) };
+            if result { Some(config) } else { None }
         }
     }
 }

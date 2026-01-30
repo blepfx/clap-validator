@@ -307,7 +307,6 @@ impl AudioBuffers {
     }
 
     /// Fill the input buffers with white noise ([-1, 1], denormals are snapped to zero).
-    /// Output buffers are filled with random NaN values to detect if they have been written to.
     pub fn randomize(&mut self, prng: &mut Pcg32) {
         for buffer in self.buffers_mut() {
             if buffer.is_input() {

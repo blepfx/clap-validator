@@ -56,7 +56,9 @@ pub fn test_transport_null(library: &PluginLibrary, plugin_id: &str) -> Result<T
         Ok(())
     })?;
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -103,7 +105,9 @@ pub fn test_transport_fuzz(library: &PluginLibrary, plugin_id: &str) -> Result<T
         Ok(())
     })?;
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -188,7 +192,9 @@ pub fn test_transport_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &
             })?;
     }
 
-    plugin.handle_callback().context("An error occured during a callback")?;
+    plugin
+        .poll_callback(|_| {})
+        .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
 }

@@ -34,7 +34,7 @@ pub fn test_process_audio_basic(library: &PluginLibrary, plugin_id: &str, in_pla
     };
 
     let mut audio_buffers = if in_place {
-        AudioBuffers::new_in_place_f32(&audio_ports_config, BUFFER_SIZE)
+        AudioBuffers::new_in_place_f32(&audio_ports_config, BUFFER_SIZE)?
     } else {
         AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE)
     };
@@ -43,7 +43,7 @@ pub fn test_process_audio_basic(library: &PluginLibrary, plugin_id: &str, in_pla
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         for _ in 0..5 {
-            process.audio_buffers().randomize(&mut prng);
+            process.audio_buffers().fill_white_noise(&mut prng);
             process.run()?;
         }
 
@@ -51,7 +51,7 @@ pub fn test_process_audio_basic(library: &PluginLibrary, plugin_id: &str, in_pla
     })?;
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
@@ -87,7 +87,7 @@ pub fn test_process_audio_double(library: &PluginLibrary, plugin_id: &str, in_pl
         .unwrap_or_default();
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     let has_double_support = audio_ports_config
@@ -104,7 +104,7 @@ pub fn test_process_audio_double(library: &PluginLibrary, plugin_id: &str, in_pl
 
     let mut note_rng = NoteGenerator::new(&note_ports_config);
     let mut audio_buffers = if in_place {
-        AudioBuffers::new_in_place_f64(&audio_ports_config, BUFFER_SIZE)
+        AudioBuffers::new_in_place_f64(&audio_ports_config, BUFFER_SIZE)?
     } else {
         AudioBuffers::new_out_of_place_f64(&audio_ports_config, BUFFER_SIZE)
     };
@@ -113,7 +113,7 @@ pub fn test_process_audio_double(library: &PluginLibrary, plugin_id: &str, in_pl
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         for _ in 0..5 {
-            process.audio_buffers().randomize(&mut prng);
+            process.audio_buffers().fill_white_noise(&mut prng);
             process
                 .input_queue()
                 .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
@@ -124,7 +124,7 @@ pub fn test_process_audio_double(library: &PluginLibrary, plugin_id: &str, in_pl
     })?;
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
@@ -187,7 +187,7 @@ pub fn test_process_note_out_of_place(
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         for _ in 0..5 {
-            process.audio_buffers().randomize(&mut prng);
+            process.audio_buffers().fill_white_noise(&mut prng);
             process
                 .input_queue()
                 .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
@@ -198,7 +198,7 @@ pub fn test_process_note_out_of_place(
     })?;
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
@@ -241,7 +241,7 @@ pub fn test_process_varying_sample_rates(library: &PluginLibrary, plugin_id: &st
                 let mut process = ProcessScope::with_sample_rate(&plugin, &mut audio_buffers, sample_rate)?;
 
                 for _ in 0..5 {
-                    process.audio_buffers().randomize(&mut prng);
+                    process.audio_buffers().fill_white_noise(&mut prng);
                     process
                         .input_queue()
                         .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
@@ -254,7 +254,7 @@ pub fn test_process_varying_sample_rates(library: &PluginLibrary, plugin_id: &st
     }
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
@@ -294,7 +294,7 @@ pub fn test_process_varying_block_sizes(library: &PluginLibrary, plugin_id: &str
                 let num_iters = (32768 / buffer_size).min(5);
 
                 for _ in 0..num_iters {
-                    process.audio_buffers().randomize(&mut prng);
+                    process.audio_buffers().fill_white_noise(&mut prng);
                     process
                         .input_queue()
                         .add_events(note_rng.generate_events(&mut prng, buffer_size));
@@ -307,7 +307,7 @@ pub fn test_process_varying_block_sizes(library: &PluginLibrary, plugin_id: &str
     }
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
@@ -350,7 +350,7 @@ pub fn test_process_random_block_sizes(library: &PluginLibrary, plugin_id: &str)
                 1
             };
 
-            process.audio_buffers().randomize(&mut prng);
+            process.audio_buffers().fill_white_noise(&mut prng);
             process
                 .input_queue()
                 .add_events(note_rng.generate_events(&mut prng, buffer_size));
@@ -363,7 +363,7 @@ pub fn test_process_random_block_sizes(library: &PluginLibrary, plugin_id: &str)
     })?;
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
@@ -402,15 +402,15 @@ pub fn test_process_audio_constant_mask(library: &PluginLibrary, plugin_id: &str
     let mut has_received_constant_flag = false;
 
     let mut check_buffers = |buffers: &AudioBuffers| -> Result<()> {
-        for buffer in buffers.buffers() {
-            let Some(output) = buffer.port().as_output() else {
+        for buffer in buffers.iter() {
+            let Some(output) = buffer.port().output() else {
                 continue;
             };
 
             for channel in 0..buffer.channels() {
-                let is_constant = (0..buffer.len()).all(|sample| buffer.get(channel, sample) == buffer.get(channel, 0)); // TODO: relax, allow small variations?
-
-                let marked_constant = buffers.get_output_constant_mask(output).is_channel_constant(channel);
+                let is_constant =
+                    (0..buffer.samples()).all(|sample| buffer.get(channel, sample) == buffer.get(channel, 0)); // TODO: relax, allow small variations?
+                let marked_constant = buffer.get_output_constant_mask().is_channel_constant(channel);
 
                 if marked_constant && !is_constant {
                     anyhow::bail!(
@@ -440,13 +440,13 @@ pub fn test_process_audio_constant_mask(library: &PluginLibrary, plugin_id: &str
         check_buffers(process.audio_buffers())?;
 
         // block 2: randomize inputs, see if the plugin tracks constant channels
-        process.audio_buffers().randomize(&mut prng);
+        process.audio_buffers().fill_white_noise(&mut prng);
         process.run()?;
         check_buffers(process.audio_buffers())?;
 
         // block 3-40: silent inputs again, see if the plugin updates the constant mask accordingly
         // 40 blocks to give the output tail to fully decay to silence if there is any reverb/delay
-        process.audio_buffers().silence_inputs();
+        process.audio_buffers().fill_silence();
         for _ in 3..=40 {
             process.run()?;
             check_buffers(process.audio_buffers())?;
@@ -456,7 +456,7 @@ pub fn test_process_audio_constant_mask(library: &PluginLibrary, plugin_id: &str
     })?;
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     if !has_received_constant_flag && has_received_constant_output {
@@ -499,32 +499,54 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         // first run, "control" run
-        process.audio_buffers().randomize(&mut new_prng());
+        process.audio_buffers().fill_white_noise(&mut new_prng());
         process
             .input_queue()
             .add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
         process.run()?;
-        let output_control = process.audio_buffers().clone();
+
+        let output_control = process
+            .audio_buffers()
+            .iter()
+            .filter(|x| x.port().output().is_some())
+            .cloned()
+            .collect::<Vec<_>>();
 
         // second run, deactivate and reactivate the plugin, see if the output changes
         process.restart();
-        process.audio_buffers().randomize(&mut new_prng());
+        process.audio_buffers().fill_white_noise(&mut new_prng());
         process
             .input_queue()
             .add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
         process.run()?;
-        let output_reactivated = process.audio_buffers().clone();
+
+        let output_reactivated = process
+            .audio_buffers()
+            .iter()
+            .filter(|x| x.port().output().is_some())
+            .cloned()
+            .collect::<Vec<_>>();
 
         // third run, reset the plugin, see if the output matches the control run
         process.reset();
-        process.audio_buffers().randomize(&mut new_prng());
+        process.audio_buffers().fill_white_noise(&mut new_prng());
         process
             .input_queue()
             .add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
         process.run()?;
-        let output_reset = process.audio_buffers().clone();
 
-        if !output_control.is_same(&output_reactivated) {
+        let output_reset = process
+            .audio_buffers()
+            .iter()
+            .filter(|x| x.port().output().is_some())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if output_control
+            .iter()
+            .zip(output_reactivated.iter())
+            .any(|(a, b)| !a.is_same(b))
+        {
             return Ok(TestStatus::Warning {
                 details: Some(String::from(
                     "Plugin output does not seem to be deterministic after reactivation",
@@ -532,7 +554,11 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
             });
         }
 
-        if !output_reactivated.is_same(&output_reset) {
+        if output_control
+            .iter()
+            .zip(output_reset.iter())
+            .any(|(a, b)| !a.is_same(b))
+        {
             anyhow::bail!("Plugin output differs after reset");
         }
 
@@ -540,7 +566,7 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
     })?;
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     Ok(result)

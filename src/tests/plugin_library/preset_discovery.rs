@@ -123,7 +123,7 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
             // successful, but it doesn't matter if the plugin doesn't have any audio ports
             let audio_ports = plugin.get_extension::<AudioPorts>();
             plugin
-                .poll_callback(|_| {})
+                .poll_callback(|_| Ok(()))
                 .context("An error occured during a host callback")?;
 
             let audio_ports_config = audio_ports
@@ -134,26 +134,26 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
 
             let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, 512);
 
-            for LoadablePreset {
-                location,
-                load_key,
-                preset,
-            } in presets
-            {
+            for preset in presets {
                 // TODO: We now always deactivate the plugin before loading presets, but presets can
                 //       be loaded at any point, even when the plugin is processing audio. Test
                 //       this.
                 let load_result = preset_load
-                    .from_location(&location, load_key.as_deref())
-                    .with_context(|| format!("Could not load the preset '{}' for plugin '{}'", preset.name, plugin_id));
+                    .from_location(&preset.location, preset.load_key.as_deref())
+                    .with_context(|| {
+                        format!(
+                            "Could not load the preset '{}' for plugin '{}'",
+                            preset.preset.name, plugin_id
+                        )
+                    });
 
                 // In case the plugin uses `clap_host_preset_load::on_error()` to report an error,
                 // we will check that first before making sure the preset loaded correctly. This
                 // might otherwise mask the error message.
-                plugin.poll_callback(|_| {}).with_context(|| {
+                plugin.poll_callback(|_| Ok(())).with_context(|| {
                     format!(
                         "An error occurred while loading the preset '{}' for plugin '{}'",
-                        preset.name, plugin_id
+                        preset.preset.name, plugin_id
                     )
                 })?;
                 // See above
@@ -171,12 +171,12 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
                     })?;
 
                 plugin
-                    .poll_callback(|_| {})
+                    .poll_callback(|_| Ok(()))
                     .with_context(|| format!("An error occured during a host callback made by '{plugin_id}'"))?;
             }
 
             plugin
-                .poll_callback(|_| {})
+                .poll_callback(|_| Ok(()))
                 .with_context(|| format!("An error occured during a host callback made by '{plugin_id}'"))?;
         }
     }

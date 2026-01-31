@@ -49,7 +49,7 @@ pub fn test_transport_null(library: &PluginLibrary, plugin_id: &str) -> Result<T
             process
                 .input_queue()
                 .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
-            process.audio_buffers().randomize(&mut prng);
+            process.audio_buffers().fill_white_noise(&mut prng);
             process.run()?;
         }
 
@@ -57,7 +57,7 @@ pub fn test_transport_null(library: &PluginLibrary, plugin_id: &str) -> Result<T
     })?;
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
@@ -98,7 +98,7 @@ pub fn test_transport_fuzz(library: &PluginLibrary, plugin_id: &str) -> Result<T
             process
                 .input_queue()
                 .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
-            process.audio_buffers().randomize(&mut prng);
+            process.audio_buffers().fill_white_noise(&mut prng);
             process.run()?;
         }
 
@@ -106,7 +106,7 @@ pub fn test_transport_fuzz(library: &PluginLibrary, plugin_id: &str) -> Result<T
     })?;
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
@@ -175,7 +175,7 @@ pub fn test_transport_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &
 
                     current_sample -= BUFFER_SIZE;
 
-                    process.audio_buffers().randomize(&mut prng);
+                    process.audio_buffers().fill_white_noise(&mut prng);
                     process
                         .input_queue()
                         .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
@@ -193,7 +193,7 @@ pub fn test_transport_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &
     }
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })

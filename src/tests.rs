@@ -23,7 +23,7 @@ use strum::IntoEnumIterator;
 
 mod plugin;
 mod plugin_library;
-pub mod rng;
+mod rng;
 
 pub use plugin::PluginTestCase;
 pub use plugin_library::PluginLibraryTestCase;

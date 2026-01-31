@@ -7,7 +7,9 @@ use crate::plugin::library::PluginLibrary;
 use crate::plugin::process::{AudioBuffers, ProcessScope};
 use crate::tests::TestStatus;
 use crate::tests::rng::{NoteGenerator, new_prng};
+use crate::util::{cstr_ptr_to_mandatory_string, cstr_ptr_to_string};
 use anyhow::{Context, Result};
+use clap_sys::ext::audio_ports::clap_audio_port_info;
 use rand::Rng;
 use rand::seq::SliceRandom;
 use rand_pcg::Pcg32;
@@ -76,13 +78,13 @@ pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) 
                 .inputs
                 .first()
                 .filter(|x| x.is_main)
-                .map(|x| x.num_channels);
+                .map(|x| x.channel_count);
 
             let main_output_channels = config_audio_ports
                 .outputs
                 .first()
                 .filter(|x| x.is_main)
-                .map(|x| x.num_channels);
+                .map(|x| x.channel_count);
 
             anyhow::ensure!(
                 config_audio_ports.inputs.len() as u32 == config_audio_ports_config.input_port_count,
@@ -162,17 +164,59 @@ pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) 
                 config_audio_ports_config.id,
             );
 
-            // TODO: check info
+            for is_input in [true, false] {
+                let count = if is_input {
+                    config_audio_ports_config.input_port_count
+                } else {
+                    config_audio_ports_config.output_port_count
+                };
+
+                for index in 0..count {
+                    let info_apci = audio_ports_config_info
+                        .get_raw_port_info(config_audio_ports_config.id, is_input, index)
+                        .with_context(|| {
+                            format!(
+                                "Could not get info for {} port {} of configuration '{}' ({}) from \
+                                 'audio-ports-config-info'",
+                                if is_input { "input" } else { "output" },
+                                index,
+                                config_audio_ports_config.name,
+                                config_audio_ports_config.id,
+                            )
+                        })?;
+
+                    let info_ap = audio_ports.get_raw_port_info(is_input, index).with_context(|| {
+                        format!(
+                            "Could not get info for {} port {} of configuration '{}' ({}) from 'audio-ports'",
+                            if is_input { "input" } else { "output" },
+                            index,
+                            config_audio_ports_config.name,
+                            config_audio_ports_config.id,
+                        )
+                    })?;
+
+                    check_mismatch_audio_port_info(&info_apci, &info_ap).with_context(|| {
+                        format!(
+                            "Mismatch between info queried via 'audio-ports-config-info' and 'audio-ports' for {} \
+                             port {} of configuration '{}' ({})",
+                            if is_input { "input" } else { "output" },
+                            index,
+                            config_audio_ports_config.name,
+                            config_audio_ports_config.id,
+                        )
+                    })?;
+                }
+            }
         }
 
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
-                let mut audio_buffers = AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE);
+                let mut audio_buffers = AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE)?;
                 let mut note_rng = NoteGenerator::new(&note_ports_config);
                 let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
                 for _ in 0..5 {
-                    process.audio_buffers().randomize(&mut prng);
+                    process.audio_buffers().fill_white_noise(&mut prng);
                     process
                         .input_queue()
                         .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
@@ -190,7 +234,7 @@ pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) 
     }
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
@@ -307,12 +351,12 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
 
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
-                let mut audio_buffers = AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE);
+                let mut audio_buffers = AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE)?;
                 let mut note_rng = NoteGenerator::new(&note_ports_config);
                 let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
                 for _ in 0..5 {
-                    process.audio_buffers().randomize(&mut prng);
+                    process.audio_buffers().fill_white_noise(&mut prng);
                     process
                         .input_queue()
                         .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
@@ -330,13 +374,13 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
     }
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     if checks_passed == 0 {
         return Ok(TestStatus::Warning {
             details: Some(String::from(
-                "Tried 200 random audio port layouts, but none was accepted.",
+                "Tried 200 random audio port layouts, but none were accepted.",
             )),
         });
     }
@@ -385,4 +429,50 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
     };
 
     Ok(TestStatus::Success { details: None })
+}
+
+fn check_mismatch_audio_port_info(info_left: &clap_audio_port_info, info_right: &clap_audio_port_info) -> Result<()> {
+    if info_left.id != info_right.id {
+        anyhow::bail!("ID mismatch: {} vs {}", info_left.id, info_right.id);
+    }
+
+    if info_left.channel_count != info_right.channel_count {
+        anyhow::bail!(
+            "Channel count mismatch: {} vs {}",
+            info_left.channel_count,
+            info_right.channel_count
+        );
+    }
+
+    if info_left.flags != info_right.flags {
+        anyhow::bail!("Flags mismatch");
+    }
+
+    let (name_left, name_right) = unsafe {
+        (
+            cstr_ptr_to_mandatory_string(info_left.name.as_ptr())?,
+            cstr_ptr_to_mandatory_string(info_right.name.as_ptr())?,
+        )
+    };
+
+    if name_left != name_right {
+        anyhow::bail!("Name mismatch: {:?} vs {:?}", name_left, name_right);
+    }
+
+    let (port_type_left, port_type_right) = unsafe {
+        (
+            cstr_ptr_to_string(info_left.port_type)?,
+            cstr_ptr_to_string(info_right.port_type)?,
+        )
+    };
+
+    if port_type_left != port_type_right {
+        anyhow::bail!(
+            "Port type mismatch: {:?} vs {:?}",
+            port_type_left.as_deref().unwrap_or("<null>"),
+            port_type_right.as_deref().unwrap_or("<null>")
+        );
+    }
+
+    Ok(())
 }

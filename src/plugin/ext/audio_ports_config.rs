@@ -5,6 +5,7 @@ use crate::plugin::ext::surround::Surround;
 use crate::plugin::instance::Plugin;
 use crate::util::{c_char_slice_to_string, clap_call};
 use anyhow::{Context, Result};
+use clap_sys::ext::audio_ports::clap_audio_port_info;
 use clap_sys::ext::audio_ports_config::*;
 use clap_sys::id::clap_id;
 use std::ffi::CStr;
@@ -152,6 +153,27 @@ impl AudioPortsConfigInfo<'_> {
 
         unsafe {
             clap_call! { audio_ports_config_info=>current_config(plugin) }
+        }
+    }
+
+    /// Get the raw audio port information for the given port index. This does not perform any
+    /// consistency checks.
+    pub fn get_raw_port_info(
+        &self,
+        config_id: clap_id,
+        is_input: bool,
+        port_index: u32,
+    ) -> Option<clap_audio_port_info> {
+        let audio_ports_config_info = self.audio_ports_config_info.as_ptr();
+        let plugin = self.plugin.as_ptr();
+
+        unsafe {
+            let mut info = clap_audio_port_info { ..zeroed() };
+            if !clap_call! { audio_ports_config_info=>get(plugin, config_id, port_index, is_input, &mut info) } {
+                return None;
+            }
+
+            Some(info)
         }
     }
 }

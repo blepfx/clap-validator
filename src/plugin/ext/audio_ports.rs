@@ -9,9 +9,10 @@ use anyhow::{Context, Result};
 use clap_sys::ext::ambisonic::CLAP_PORT_AMBISONIC;
 use clap_sys::ext::audio_ports::*;
 use clap_sys::ext::surround::CLAP_PORT_SURROUND;
-use clap_sys::id::CLAP_INVALID_ID;
-use std::collections::HashMap;
+use clap_sys::id::{CLAP_INVALID_ID, clap_id};
+use std::collections::HashSet;
 use std::ffi::CStr;
+use std::mem::zeroed;
 use std::ptr::NonNull;
 
 /// Abstraction for the `audio-ports` extension covering the main thread functionality.
@@ -30,17 +31,19 @@ pub struct AudioPortConfig {
 }
 
 /// The configuration for a single audio port.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AudioPort {
+    /// Stable ID of the audio port.
+    pub id: clap_id,
+
     /// Whether this is the main audio port.
     pub is_main: bool,
 
     /// The number of channels for an audio port.
-    pub num_channels: u32,
+    pub channel_count: u32,
 
-    /// The index if the output/input port this input/output port should be connected to. This is
-    /// the index in the other **port list**, not a stable ID (which have already been translated).
-    pub in_place_pair_idx: Option<usize>,
+    /// The stable ID of the output/input port this input/output port should be connected to.
+    pub in_place_pair: Option<clap_id>,
 
     /// Supports 64 bit processing
     pub supports_double_sample_size: bool,
@@ -78,69 +81,38 @@ impl AudioPorts<'_> {
             )
         };
 
-        // Audio ports have a stable ID attribute that can be used to connect input and output ports
-        // so the host can do in-place processing. This uses stable IDs rather than the indices in
-        // the list. To make it easier for us, we'll translate those stable IDs to vector indices.
-        // These two hashmaps are keyed by the port's stable ID, and the value is a pair containing
-        // the port's index in the input/output port vector, and the stable ID of its in-place pair
-        // port.
-        let mut input_stable_index_pairs: HashMap<u32, (usize, u32)> = HashMap::new();
-        let mut output_stable_index_pairs: HashMap<u32, (usize, u32)> = HashMap::new();
-
         for index in 0..num_inputs {
-            let mut info: clap_audio_port_info = unsafe { std::mem::zeroed() };
-            let success = unsafe {
-                clap_call! { audio_ports=>get(plugin, index, true, &mut info) }
+            let info = match self.get_raw_port_info(false, index) {
+                Some(info) => info,
+                None => {
+                    anyhow::bail!(
+                        "Plugin returned false when querying audio port info for input port {index} (out of \
+                         {num_inputs} total)."
+                    );
+                }
             };
 
-            if !success {
-                anyhow::bail!(
-                    "Plugin returned an error when querying input audio port {index} ({num_inputs} total input ports)."
-                );
-            }
-
-            // We'll convert these stable IDs to vector indices later
-            if input_stable_index_pairs
-                .insert(info.id, (index as usize, info.in_place_pair))
-                .is_some()
-            {
-                anyhow::bail!(
-                    "The stable ID of input audio port {index} (id={}) is a duplicate.",
-                    info.id
-                );
-            }
-
-            config
-                .inputs
-                .push(check_audio_port_info_valid(self.plugin, true, index, &info)?);
+            config.inputs.push(
+                check_audio_port_info_valid(self.plugin, true, index, &info)
+                    .with_context(|| format!("Inconsistent port info for input audio port {index}"))?,
+            );
         }
 
         for index in 0..num_outputs {
-            let mut info: clap_audio_port_info = unsafe { std::mem::zeroed() };
-            let success = unsafe {
-                clap_call! { audio_ports=>get(plugin, index, false, &mut info) }
+            let info = match self.get_raw_port_info(false, index) {
+                Some(info) => info,
+                None => {
+                    anyhow::bail!(
+                        "Plugin returned false when querying audio port info for output port {index} (out of \
+                         {num_outputs} total)."
+                    );
+                }
             };
 
-            if !success {
-                anyhow::bail!(
-                    "Plugin returned an error when querying output audio port {index} ({num_outputs} total output \
-                     ports)."
-                );
-            }
-
-            if output_stable_index_pairs
-                .insert(info.id, (index as usize, info.in_place_pair))
-                .is_some()
-            {
-                anyhow::bail!(
-                    "The stable ID of output audio port {index} (id={}) is a duplicate.",
-                    info.id
-                );
-            }
-
-            config
-                .outputs
-                .push(check_audio_port_info_valid(self.plugin, false, index, &info)?);
+            config.outputs.push(
+                check_audio_port_info_valid(self.plugin, false, index, &info)
+                    .with_context(|| format!("Inconsistent port info for output audio port {index}"))?,
+            );
         }
 
         let has_single_precision_requires_common_port = config
@@ -164,76 +136,40 @@ impl AudioPorts<'_> {
             );
         }
 
-        // Now we need to convert the stable in-place pair indices to vector indices
-        for (input_stable_id, (input_port_idx, pair_stable_id)) in input_stable_index_pairs
-            .iter()
-            .filter(|(_, (_, pair_stable_id))| *pair_stable_id != CLAP_INVALID_ID)
-        {
-            match output_stable_index_pairs
-                .iter()
-                .find(|(output_stable_id, (_, _))| *output_stable_id == pair_stable_id)
-            {
-                // This relation should be symmetrical
-                Some((_, (pair_output_port_idx, output_pair_stable_id)))
-                    if output_pair_stable_id == input_stable_id =>
-                {
-                    config.inputs[*input_port_idx].in_place_pair_idx = Some(*pair_output_port_idx);
-                    config.outputs[*pair_output_port_idx].in_place_pair_idx = Some(*input_port_idx);
-                }
-                Some((output_stable_id, (pair_output_port_idx, output_pair_stable_id))) => {
-                    anyhow::bail!(
-                        "Input port {input_port_idx} with stable ID {input_stable_id} is connected to output port \
-                         {pair_output_port_idx} with stable ID {output_stable_id} through an in-place pair, but the \
-                         relation is not symmetrical. The output port reports to have an in-place pair with stable ID \
-                         {output_pair_stable_id}."
-                    )
-                }
-                None => anyhow::bail!(
-                    "Input port {input_port_idx} with stable ID {input_stable_id} claims to be connected to an output \
-                     port with stable ID {pair_stable_id} through an in-place pair, but this port does not exist."
-                ),
-            }
-        }
+        // check for duplicate stable IDs
+        for is_input in [true, false] {
+            let mut ids = HashSet::new();
+            let ports = if is_input { &config.inputs } else { &config.outputs };
 
-        // This needs to be repeated for output ports that are connected to input ports in case an
-        // output port has a stable ID pair but the corresponding input port does not
-        for (output_stable_id, (output_port_idx, pair_stable_id)) in output_stable_index_pairs
-            .iter()
-            .filter(|(_, (_, pair_stable_id))| *pair_stable_id != CLAP_INVALID_ID)
-        {
-            match input_stable_index_pairs
-                .iter()
-                .find(|(input_stable_id, (_, _))| *input_stable_id == pair_stable_id)
-            {
-                Some((_, (pair_input_port_idx, input_pair_stable_id))) if input_pair_stable_id == output_stable_id => {
-                    // We should have already done this. If this is not the case, then this is an
-                    // error in the validator
-                    assert_eq!(
-                        config.inputs[*output_port_idx].in_place_pair_idx,
-                        Some(*pair_input_port_idx)
-                    );
-                    assert_eq!(
-                        config.inputs[*pair_input_port_idx].in_place_pair_idx,
-                        Some(*output_port_idx)
-                    );
-                }
-                Some((input_stable_id, (pair_input_port_idx, input_pair_stable_id))) => {
+            for (index, port) in ports.iter().enumerate() {
+                if !ids.insert(port.id) {
                     anyhow::bail!(
-                        "Output port {output_port_idx} with stable ID {output_stable_id} is connected to input port \
-                         {pair_input_port_idx} with stable ID {input_stable_id} through an in-place pair, but the \
-                         relation is not symmetrical. The input port reports to have an in-place pair with stable ID \
-                         {input_pair_stable_id}."
-                    )
+                        "Found {} audio port ({}) with a duplicate ID ({}).",
+                        if is_input { "input" } else { "output" },
+                        index,
+                        port.id
+                    );
                 }
-                None => anyhow::bail!(
-                    "Output port {output_port_idx} with stable ID {output_stable_id} claims to be connected to an \
-                     input port with stable ID {pair_stable_id} through an in-place pair, but this port does not \
-                     exist."
-                ),
             }
         }
 
         Ok(config)
+    }
+
+    /// Get the raw audio port information for the given port index. This does not perform any
+    /// consistency checks.
+    pub fn get_raw_port_info(&self, is_input: bool, port_index: u32) -> Option<clap_audio_port_info> {
+        let audio_ports = self.audio_ports.as_ptr();
+        let plugin = self.plugin.as_ptr();
+
+        unsafe {
+            let mut info = clap_audio_port_info { ..zeroed() };
+            if !clap_call! { audio_ports=>get(plugin, port_index, is_input, &mut info) } {
+                return None;
+            }
+
+            Some(info)
+        }
     }
 }
 
@@ -245,6 +181,24 @@ pub fn check_audio_port_info_valid(
 ) -> Result<AudioPort> {
     let ext_ambisonic = plugin.get_extension::<Ambisonic>();
     let ext_surround = plugin.get_extension::<Surround>();
+
+    if info.id == CLAP_INVALID_ID {
+        anyhow::bail!("The stable ID is `CLAP_INVALID_ID`.");
+    }
+
+    // if the main port flag is set, the port index must be 0
+    let is_main = (info.flags & CLAP_AUDIO_PORT_IS_MAIN) != 0;
+    if is_main && port_index != 0 {
+        anyhow::bail!("Port is marked as main, but it is not the first port in the list.");
+    }
+
+    let supports_double_sample_size = (info.flags & CLAP_AUDIO_PORT_SUPPORTS_64BITS) != 0;
+    let requires_common_sample_size = (info.flags & CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE) != 0;
+    let prefers_double_sample_size = (info.flags & CLAP_AUDIO_PORT_PREFERS_64BITS) != 0;
+
+    if !supports_double_sample_size && prefers_double_sample_size {
+        anyhow::bail!("Port prefers 64-bit sample size, but does not support it.");
+    }
 
     let port_type = if info.port_type.is_null() {
         None
@@ -260,38 +214,17 @@ pub fn check_audio_port_info_valid(
         info.channel_count,
         ext_ambisonic.as_ref(),
         ext_surround.as_ref(),
-    )
-    .with_context(|| {
-        format!(
-            "Inconsistent port info for {} port {port_index}",
-            if is_input { "input" } else { "output" }
-        )
-    })?;
-
-    // if the main port flag is set, the port index must be 0
-    let is_main = (info.flags & CLAP_AUDIO_PORT_IS_MAIN) != 0;
-    if is_main && port_index != 0 {
-        anyhow::bail!(
-            "{} audio port {port_index} is marked as main, but it is not the first port in the list.",
-            if is_input { "Input" } else { "Output" }
-        );
-    }
-
-    let supports_double_sample_size = (info.flags & CLAP_AUDIO_PORT_SUPPORTS_64BITS) != 0;
-    let requires_common_sample_size = (info.flags & CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE) != 0;
-    let prefers_double_sample_size = (info.flags & CLAP_AUDIO_PORT_PREFERS_64BITS) != 0;
-
-    if !supports_double_sample_size && prefers_double_sample_size {
-        anyhow::bail!(
-            "{} audio port {port_index} prefers 64-bit sample size, but does not support it.",
-            if is_input { "Input" } else { "Output" }
-        );
-    }
+    )?;
 
     Ok(AudioPort {
+        id: info.id,
         is_main: (info.flags & CLAP_AUDIO_PORT_IS_MAIN) != 0,
-        num_channels: info.channel_count,
-        in_place_pair_idx: None,
+        channel_count: info.channel_count,
+        in_place_pair: if info.in_place_pair == CLAP_INVALID_ID {
+            None
+        } else {
+            Some(info.in_place_pair)
+        },
 
         supports_double_sample_size,
         requires_common_sample_size,

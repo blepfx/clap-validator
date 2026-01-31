@@ -70,7 +70,7 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
     };
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     let param_infos = params
@@ -144,7 +144,7 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
     }
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     if num_supported_value_to_text == 0 || num_supported_text_to_value == 0 {
@@ -196,7 +196,7 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str, snap_to_b
     };
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     let audio_ports_config = audio_ports
@@ -235,7 +235,7 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str, snap_to_b
             process.input_queue().add_events(current_events.clone().unwrap());
 
             for _ in 0..FUZZ_RUNS_PER_PERMUTATION {
-                process.audio_buffers().randomize(&mut prng);
+                process.audio_buffers().fill_white_noise(&mut prng);
                 process
                     .input_queue()
                     .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
@@ -282,7 +282,7 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str, snap_to_b
     }
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
@@ -311,7 +311,7 @@ pub fn test_param_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &str)
     };
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     let audio_ports_config = audio_ports
@@ -353,7 +353,7 @@ pub fn test_param_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &str)
 
                 // Audio and MIDI/note events are randomized in accordance to what the plugin
                 // supports
-                process.audio_buffers().randomize(&mut prng);
+                process.audio_buffers().fill_white_noise(&mut prng);
                 process
                     .input_queue()
                     .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
@@ -365,7 +365,7 @@ pub fn test_param_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &str)
     }
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
@@ -411,7 +411,7 @@ pub fn test_param_fuzz_modulation(library: &PluginLibrary, plugin_id: &str) -> R
     plugin.on_audio_thread(|plugin| -> Result<()> {
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
-        process.audio_buffers().randomize(&mut prng);
+        process.audio_buffers().fill_white_noise(&mut prng);
         process
             .input_queue()
             .add_events(param_fuzzer.generate_events(&mut prng, process.max_block_size()));
@@ -422,7 +422,7 @@ pub fn test_param_fuzz_modulation(library: &PluginLibrary, plugin_id: &str) -> R
     })?;
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })
@@ -452,7 +452,7 @@ pub fn test_param_set_wrong_namespace(library: &PluginLibrary, plugin_id: &str) 
     };
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     let param_infos = params
@@ -480,7 +480,7 @@ pub fn test_param_set_wrong_namespace(library: &PluginLibrary, plugin_id: &str) 
         let mut buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
         let mut process = ProcessScope::new(&plugin, &mut buffers)?;
 
-        process.audio_buffers().randomize(&mut prng);
+        process.audio_buffers().fill_white_noise(&mut prng);
         process.input_queue().add_events(random_param_set_events);
         process.run()
     })?;
@@ -494,7 +494,7 @@ pub fn test_param_set_wrong_namespace(library: &PluginLibrary, plugin_id: &str) 
         .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     if actual_param_values == initial_param_values {
@@ -527,7 +527,7 @@ pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Re
     };
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     let param_infos = params
@@ -551,7 +551,7 @@ pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Re
     }
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     Ok(TestStatus::Success { details: None })

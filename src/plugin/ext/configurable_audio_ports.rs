@@ -1,6 +1,7 @@
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
 use crate::util::clap_call;
+use clap_sys::ext::ambisonic::clap_ambisonic_config;
 use clap_sys::ext::audio_ports::{CLAP_PORT_MONO, CLAP_PORT_STEREO};
 use clap_sys::ext::configurable_audio_ports::{
     CLAP_EXT_CONFIGURABLE_AUDIO_PORTS, CLAP_EXT_CONFIGURABLE_AUDIO_PORTS_COMPAT, clap_audio_port_configuration_request,
@@ -15,6 +16,26 @@ pub struct AudioPortsRequest {
     pub is_input: bool,
     pub port_index: u32,
     pub channel_count: u32,
+}
+
+/// Different types of port details that can be requested.
+#[derive(Debug, Clone)]
+pub enum AudioPortsRequestInfo {
+    Mono,
+    Stereo,
+
+    Untyped {
+        channel_count: u32,
+    },
+
+    Ambisonic {
+        channel_count: u32,
+        config: clap_ambisonic_config,
+    },
+
+    Surround {
+        channel_map: Vec<u8>,
+    },
 }
 
 pub struct ConfigurableAudioPorts<'a> {

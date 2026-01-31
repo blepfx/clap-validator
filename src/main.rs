@@ -78,7 +78,7 @@ fn main() -> ExitCode {
 
     // Mark the main thread as such for plugin instance creation checks.
     unsafe {
-        plugin::instance::mark_current_thread_as_os_main_thread();
+        plugin::library::mark_current_thread_as_os_main_thread();
     }
 
     let result = match cli.command {

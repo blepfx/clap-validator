@@ -17,13 +17,16 @@ pub mod preset_load;
 pub mod state;
 pub mod surround;
 pub mod tail;
+pub mod thread_pool;
+pub mod voice_info;
 
 /// An abstraction for a CLAP plugin extension. `P` here is the plugin type. In practice, this is
-/// either `Plugin` or `PluginAudioThread`. Abstractions for main thread functions will implement
-/// this trait for `Plugin`, and abstractions for audio thread functions will implement this trait
-/// for `PluginAudioThread`.
+/// either `Plugin`, `PluginShared` or `PluginAudioThread`. Abstractions for main thread functions will implement
+/// this trait for `Plugin`, abstractions for audio thread functions will implement this trait
+/// for `PluginAudioThread` and abstractions for thread-safe functions will implement this trait for
+/// `PluginShared`.
 pub trait Extension<P> {
-    /// The C-string IDs for the extension.
+    /// The list of C-string IDs for the extension.
     const IDS: &'static [&'static CStr];
 
     /// The type of the C-struct for the extension.

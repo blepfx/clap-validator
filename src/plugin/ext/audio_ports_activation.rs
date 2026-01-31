@@ -26,6 +26,7 @@ impl<'a> Extension<&'a Plugin<'a>> for AudioPortsActivation<'a> {
 
 impl<'a> AudioPortsActivation<'a> {
     /// TODO: extra test where we do this while processing
+    #[allow(unused)]
     pub fn can_activate_while_processing(&self) -> bool {
         let audio_ports_activation = self.audio_ports_activation.as_ptr();
         let plugin = self.plugin.as_ptr();

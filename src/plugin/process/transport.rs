@@ -119,6 +119,9 @@ impl TransportState {
 pub struct ConstantMask(pub u64);
 
 impl ConstantMask {
+    pub const DYNAMIC: Self = ConstantMask(0);
+    pub const CONSTANT: Self = ConstantMask(u64::MAX);
+
     /// Check if the specified channel marked as constant.
     pub fn is_channel_constant(&self, channel: u32) -> bool {
         self.0 & 1u64.unbounded_shl(channel) != 0

@@ -93,12 +93,12 @@ impl<'lib> Plugin<'lib> {
 
     /// The plugin's current initialization status.
     pub fn status(&self) -> PluginStatus {
-        self.shared.status.load()
+        self.shared.status()
     }
 
     /// Handle any pending main-thread callbacks for this plugin and pending callback events.
     /// Returns an error if there is a callback error pending.
-    pub fn poll_callback(&self, mut f: impl FnMut(CallbackEvent)) -> Result<()> {
+    pub fn poll_callback(&self, mut f: impl FnMut(CallbackEvent) -> Result<()>) -> Result<()> {
         self.poll_callback_unchecked();
 
         if let Some(error) = self.shared.callback_error.lock().unwrap().take() {
@@ -106,7 +106,7 @@ impl<'lib> Plugin<'lib> {
         }
 
         while let Ok(event) = self.callback_receiver.try_recv() {
-            f(event);
+            f(event)?;
         }
 
         Ok(())

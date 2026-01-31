@@ -63,7 +63,7 @@ impl<'a> PluginAudioThread<'a> {
 
     /// Get the plugin's current initialization status.
     pub fn status(&self) -> PluginStatus {
-        self.shared.status.load()
+        self.shared.status()
     }
 
     /// Get a reference to the plugin's shared state.
@@ -135,10 +135,14 @@ impl<'a> PluginAudioThread<'a> {
     pub fn process(&self, process_data: &clap_process) -> Result<ProcessStatus> {
         self.status().assert_is(PluginStatus::Processing);
 
+        self.shared.is_currently_in_process_call.store(true);
+
         let plugin = self.as_ptr();
         let result = unsafe {
             clap_call! { plugin=>process(plugin, process_data) }
         };
+
+        self.shared.is_currently_in_process_call.store(false);
 
         match result {
             CLAP_PROCESS_ERROR => {

@@ -44,7 +44,7 @@ pub fn test_state_invalid_empty(library: &PluginLibrary, plugin_id: &str) -> Res
     let result = state.load(&[]);
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     match result {
@@ -78,7 +78,7 @@ pub fn test_state_invalid_random(library: &PluginLibrary, plugin_id: &str) -> Re
     };
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     let mut random_data = vec![0u8; 1024 * 1024];
@@ -90,7 +90,7 @@ pub fn test_state_invalid_random(library: &PluginLibrary, plugin_id: &str) -> Re
     }
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     match succeeded {
@@ -150,7 +150,7 @@ pub fn test_state_reproducibility_basic(
         };
 
         plugin
-            .poll_callback(|_| {})
+            .poll_callback(|_| Ok(()))
             .context("An error occured during a callback")?;
 
         let param_infos = params
@@ -181,7 +181,7 @@ pub fn test_state_reproducibility_basic(
             let mut buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
             let mut process = ProcessScope::new(&plugin, &mut buffers)?;
 
-            process.audio_buffers().randomize(&mut prng);
+            process.audio_buffers().fill_white_noise(&mut prng);
             process.input_queue().add_events(random_param_set_events);
             process.run()
         })?;
@@ -197,7 +197,7 @@ pub fn test_state_reproducibility_basic(
         let expected_state = state.save()?;
 
         plugin
-            .poll_callback(|_| {})
+            .poll_callback(|_| Ok(()))
             .context("An error occured during a callback")?;
 
         (expected_state, expected_param_values)
@@ -238,13 +238,13 @@ pub fn test_state_reproducibility_basic(
     };
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     state.load(&expected_state)?;
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     let actual_param_values: BTreeMap<clap_id, f64> = expected_param_values
@@ -273,7 +273,7 @@ pub fn test_state_reproducibility_basic(
     let actual_state = state.save()?;
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     if actual_state == expected_state {
@@ -330,7 +330,7 @@ pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str
         };
 
         plugin
-            .poll_callback(|_| {})
+            .poll_callback(|_| Ok(()))
             .context("An error occured during a callback")?;
 
         let param_infos = params
@@ -356,7 +356,7 @@ pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str
         params.flush(&input_events, &output_events);
 
         plugin
-            .poll_callback(|_| {})
+            .poll_callback(|_| Ok(()))
             .context("An error occured during a callback")?;
 
         // We'll compare against these values in that second pass
@@ -367,7 +367,7 @@ pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str
         let expected_state = state.save()?;
 
         plugin
-            .poll_callback(|_| {})
+            .poll_callback(|_| Ok(()))
             .context("An error occured during a callback")?;
 
         // Plugins with no parameters at all should of course not trigger this error
@@ -423,7 +423,7 @@ pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str
     };
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     // NOTE: We can reuse random parameter set events, except that the cookie pointers may be
@@ -431,6 +431,7 @@ pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str
     let param_infos = params
         .info()
         .context("Failure while fetching the plugin's parameters")?;
+
     let mut new_random_param_set_events = old_random_param_set_events;
     for event in new_random_param_set_events.iter_mut() {
         match event {
@@ -454,7 +455,7 @@ pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str
         let mut buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
         let mut process = ProcessScope::new(&plugin, &mut buffers)?;
 
-        process.audio_buffers().randomize(&mut prng);
+        process.audio_buffers().fill_white_noise(&mut prng);
         process.input_queue().add_events(new_random_param_set_events);
         process.run()
     })?;
@@ -481,7 +482,7 @@ pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str
     let actual_state = state.save()?;
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     if actual_state == expected_state {
@@ -550,7 +551,7 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
             let mut buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
             let mut process = ProcessScope::new(&plugin, &mut buffers)?;
 
-            process.audio_buffers().randomize(&mut prng);
+            process.audio_buffers().fill_white_noise(&mut prng);
             process.input_queue().add_events(random_param_set_events);
             process.run()
         })?;
@@ -566,7 +567,7 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
         let expected_state = state.save()?;
 
         plugin
-            .poll_callback(|_| {})
+            .poll_callback(|_| Ok(()))
             .context("An error occured during a callback")?;
 
         (expected_state, expected_param_values)
@@ -606,14 +607,14 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
     };
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     // This is a buffered load that only loads 17 bytes at a time. Why 17? Because.
     const BUFFERED_LOAD_MAX_BYTES: usize = 17;
     state.load_buffered(&expected_state, BUFFERED_LOAD_MAX_BYTES)?;
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     let actual_param_values: BTreeMap<clap_id, f64> = expected_param_values
@@ -640,7 +641,7 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
     let actual_state = state.save_buffered(BUFFERED_SAVE_MAX_BYTES)?;
 
     plugin
-        .poll_callback(|_| {})
+        .poll_callback(|_| Ok(()))
         .context("An error occured during a callback")?;
 
     if actual_state == expected_state {

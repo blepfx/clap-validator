@@ -6,7 +6,7 @@ use crate::plugin::process::EventQueue;
 use crate::util::{self, c_char_slice_to_string, clap_call};
 use anyhow::{Context, Result};
 use clap_sys::ext::params::*;
-use clap_sys::id::clap_id;
+use clap_sys::id::{CLAP_INVALID_ID, clap_id};
 use clap_sys::string_sizes::CLAP_NAME_SIZE;
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString, c_void};
@@ -149,7 +149,11 @@ impl Params<'_> {
             };
 
             if !success {
-                anyhow::bail!("Plugin returned an error when querying parameter {i} ({num_params} total parameters).");
+                anyhow::bail!("Plugin returned false when querying parameter {i} ({num_params} total parameters).");
+            }
+
+            if info.id == CLAP_INVALID_ID {
+                anyhow::bail!("The stable ID for parameter {i} is `CLAP_INVALID_ID`.");
             }
 
             let name = util::c_char_slice_to_string(&info.name)
@@ -164,6 +168,7 @@ impl Params<'_> {
                     &name, info.id
                 )
             })?;
+
             if module.starts_with('/') {
                 anyhow::bail!(
                     "The module name for parameter '{}' (stable ID {}) starts with a leading slash: '{}'.",
@@ -171,14 +176,18 @@ impl Params<'_> {
                     info.id,
                     module
                 )
-            } else if module.ends_with('/') {
+            }
+
+            if module.ends_with('/') {
                 anyhow::bail!(
                     "The module name for parameter '{}' (stable ID {}) ends with a trailing slash: '{}'.",
                     &name,
                     info.id,
                     module
                 )
-            } else if module.contains("//") {
+            }
+
+            if module.contains("//") {
                 anyhow::bail!(
                     "The module name for parameter '{}' (stable ID {}) contains multiple subsequent slashes: '{}'.",
                     &name,
@@ -187,7 +196,6 @@ impl Params<'_> {
                 )
             }
 
-            let range = info.min_value..=info.max_value;
             if info.min_value > info.max_value {
                 anyhow::bail!(
                     "Parameter '{}' (stable ID {}) has a minimum value ({:?}) that's higher than it's maximum value \
@@ -198,16 +206,18 @@ impl Params<'_> {
                     info.max_value
                 )
             }
-            if !range.contains(&info.default_value) {
+
+            if !(info.min_value..=info.max_value).contains(&info.default_value) {
                 anyhow::bail!(
                     "Parameter '{}' (stable ID {}) has a default value ({:?}) that falls outside of its value range \
                      ({:?}).",
                     &name,
                     info.id,
                     info.default_value,
-                    &range
+                    info.min_value..=info.max_value
                 )
             }
+
             if (info.flags & CLAP_PARAM_IS_STEPPED) != 0 {
                 if info.min_value != info.min_value.trunc() {
                     anyhow::bail!(
@@ -228,6 +238,7 @@ impl Params<'_> {
                     )
                 }
             }
+
             if (info.flags & CLAP_PARAM_IS_BYPASS) != 0 {
                 match bypass_parameter_id {
                     Some(bypass_parameter_id) => anyhow::bail!(
@@ -265,6 +276,7 @@ impl Params<'_> {
                     info.id
                 )
             }
+
             if (info.flags & CLAP_PARAM_IS_MODULATABLE) == 0
                 && (info.flags
                     & (CLAP_PARAM_IS_MODULATABLE_PER_NOTE_ID
@@ -280,12 +292,13 @@ impl Params<'_> {
                     info.id
                 )
             }
+
             if ((info.flags & CLAP_PARAM_IS_READONLY) != 0)
                 && ((info.flags & CLAP_PARAM_IS_AUTOMATABLE) != 0 || (info.flags & CLAP_PARAM_IS_MODULATABLE) != 0)
             {
                 anyhow::bail!(
-                    "Parameter '{}' (stable ID {}) has the CLAP_PARAM_IS_READONLY flag set, but it is also marked as \
-                     automatable or modulatable. This is likely a bug.",
+                    "Parameter '{}' (stable ID {}) has the 'CLAP_PARAM_IS_READONLY' flag set, but it is also marked \
+                     as automatable or modulatable. This is likely a bug.",
                     &name,
                     info.id
                 )
@@ -294,10 +307,11 @@ impl Params<'_> {
             let processed_info = Param {
                 name,
                 cookie: info.cookie,
-                range,
+                range: info.min_value..=info.max_value,
                 default: info.default_value,
                 flags: info.flags,
             };
+
             if result.insert(info.id, processed_info).is_some() {
                 anyhow::bail!("The plugin contains multiple parameters with stable ID {}.", info.id);
             }
@@ -315,7 +329,6 @@ impl Params<'_> {
         // This may only be called on the audio thread when the plugin is active. This object is the
         // main thread interface for the parameters extension.
         self.status().assert_inactive();
-
         assert!(input_events.is_sorted(), "Input event queue must be sorted.");
 
         let params = self.params.as_ptr();

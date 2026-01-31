@@ -10,12 +10,14 @@ use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_fact
 use clap_sys::factory::preset_discovery::{CLAP_PRESET_DISCOVERY_FACTORY_ID, clap_preset_discovery_factory};
 use clap_sys::plugin::clap_plugin_descriptor;
 use clap_sys::version::clap_version;
+use crossbeam::atomic::AtomicCell;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::ffi::CString;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
+use std::thread::ThreadId;
 
 /// A CLAP plugin library built from a CLAP plugin's entry point. This can be used to iterate over
 /// all plugins exposed by the library and to initialize plugins.
@@ -250,6 +252,10 @@ impl PluginLibrary {
     /// [`metadata()`][Self::metadata()]. The returned plugin has not yet been initialized, and
     /// `destroy()` will be called automatically when the object is dropped.
     pub fn create_plugin(&self, id: &str) -> Result<Plugin<'_>> {
+        if OS_MAIN_THREAD.load() != Some(std::thread::current().id()) {
+            anyhow::bail!("Plugins must be created from the OS main thread.");
+        }
+
         let entry_point =
             get_clap_entry_point(&self.library).expect("A Plugin was constructed for a plugin with no entry point");
 
@@ -265,7 +271,7 @@ impl PluginLibrary {
         }
 
         let id_cstring = CString::new(id).context("Plugin ID contained null bytes")?;
-        unsafe { PluginShared::create_plugin(&*plugin_factory, &id_cstring) }
+        unsafe { PluginShared::create_plugin(plugin_factory, &id_cstring) }
     }
 
     /// Returns the plugin's preset discovery factory, if it has one.
@@ -310,4 +316,10 @@ fn get_clap_entry_point(library: &libloading::Library) -> Result<&clap_plugin_en
     }
 
     Ok(unsafe { &**entry_point })
+}
+
+static OS_MAIN_THREAD: AtomicCell<Option<ThreadId>> = AtomicCell::new(None);
+
+pub unsafe fn mark_current_thread_as_os_main_thread() {
+    OS_MAIN_THREAD.store(Some(std::thread::current().id()));
 }

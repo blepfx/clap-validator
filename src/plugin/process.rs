@@ -57,7 +57,7 @@ impl<'a> ProcessScope<'a> {
     }
 
     pub fn max_block_size(&self) -> u32 {
-        self.buffer.len()
+        self.buffer.samples()
     }
 
     pub fn input_queue(&self) -> &EventQueue {
@@ -83,11 +83,11 @@ impl<'a> ProcessScope<'a> {
     }
 
     pub fn run(&mut self) -> Result<ProcessStatus> {
-        self.run_with_block_size(self.buffer.len())
+        self.run_with_block_size(self.max_block_size())
     }
 
     pub fn run_with_block_size(&mut self, samples: u32) -> Result<ProcessStatus> {
-        assert!(samples > 0 && samples <= self.buffer.len());
+        assert!(samples > 0 && samples <= self.buffer.samples());
 
         // check for requested restart
         if self.plugin.shared().requested_restart.load() {
@@ -99,7 +99,7 @@ impl<'a> ProcessScope<'a> {
             self.plugin.shared().requested_restart.store(false);
 
             let sample_rate = self.sample_rate;
-            let buffer_size = self.buffer.len();
+            let buffer_size = self.buffer.samples();
             self.plugin
                 .dispatch_main(move |plugin| plugin.activate(sample_rate, 1, buffer_size))?;
         }
@@ -125,32 +125,33 @@ impl<'a> ProcessScope<'a> {
 
         // prepare output audio buffers for processing
         // this is used to detect uninitialized output buffers
-        for buffer in self.buffer.buffers_mut() {
-            if buffer.is_output_only() {
+        for buffer in self.buffer.iter_mut() {
+            if buffer.port().input().is_none() {
                 buffer.fill(CHECK_NAN_F32, CHECK_NAN_F64);
             }
         }
 
         // save original buffers for consistency check
-        let original_buffers = self.buffer.buffers().to_owned();
+        let original_buffers = self.buffer[..].to_owned();
 
         // run processing
-        let transport = self.transport.as_clap_transport(0);
-        let (inputs, outputs) = self.buffer.clap_buffers();
-        let status = self.plugin.process(&clap_process {
-            steady_time: self.transport.sample_pos.map_or(-1, |f| f as i64),
-            frames_count: samples,
-            transport: if self.transport.is_freerun {
-                std::ptr::null()
-            } else {
-                &transport as *const _
-            },
-            audio_inputs: inputs.as_ptr(),
-            audio_outputs: outputs.as_mut_ptr(),
-            audio_inputs_count: inputs.len() as u32,
-            audio_outputs_count: outputs.len() as u32,
-            in_events: self.events_input.vtable_input(),
-            out_events: self.events_output.vtable_output(),
+        let status = self.buffer.process(|inputs, outputs| {
+            let transport = self.transport.as_clap_transport(0);
+            self.plugin.process(&clap_process {
+                steady_time: self.transport.sample_pos.map_or(-1, |f| f as i64),
+                frames_count: samples,
+                transport: if self.transport.is_freerun {
+                    std::ptr::null()
+                } else {
+                    &transport as *const _
+                },
+                audio_inputs: inputs.as_ptr(),
+                audio_outputs: outputs.as_mut_ptr(),
+                audio_inputs_count: inputs.len() as u32,
+                audio_outputs_count: outputs.len() as u32,
+                in_events: self.events_input.vtable_input(),
+                out_events: self.events_output.vtable_output(),
+            })
         })?;
 
         // clear input event queue and advance transport
@@ -158,7 +159,7 @@ impl<'a> ProcessScope<'a> {
         self.transport.advance(samples as i64, self.sample_rate());
 
         // check output audio buffers for NaNs or infinities
-        check_process_call_consistency(self.buffer.buffers(), &original_buffers, self.output_queue(), samples)?;
+        check_process_call_consistency(&self.buffer[..], &original_buffers, self.output_queue(), samples)?;
 
         if status == ProcessStatus::Tail && self.plugin_tail.is_none() {
             anyhow::bail!(
@@ -234,8 +235,8 @@ fn check_process_call_consistency(
                 if let Some((sample, channel_idx, sample_idx)) = maybe_non_finite {
                     let is_subnormal = sample.either(|x| x.is_subnormal(), |x| x.is_subnormal());
                     let is_unwritten = sample.either(
-                        |x| x.to_bits() == CHECK_NAN_F64.to_bits(),
                         |x| x.to_bits() == CHECK_NAN_F32.to_bits(),
+                        |x| x.to_bits() == CHECK_NAN_F64.to_bits(),
                     );
 
                     if is_subnormal {

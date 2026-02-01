@@ -3,13 +3,10 @@
 use super::{Plugin, PluginStatus};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::{CallbackEvent, MainThreadTask, PluginShared};
-use crate::util::clap_call;
+use crate::plugin::util::clap_call;
 use anyhow::Result;
 use clap_sys::plugin::clap_plugin;
-use clap_sys::process::{
-    CLAP_PROCESS_CONTINUE, CLAP_PROCESS_CONTINUE_IF_NOT_QUIET, CLAP_PROCESS_ERROR, CLAP_PROCESS_SLEEP,
-    CLAP_PROCESS_TAIL, clap_process,
-};
+use clap_sys::process::*;
 use std::any::Any;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;

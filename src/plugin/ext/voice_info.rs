@@ -1,6 +1,6 @@
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
-use crate::util::clap_call;
+use crate::plugin::util::clap_call;
 use clap_sys::ext::voice_info::*;
 use std::ffi::CStr;
 use std::mem::zeroed;

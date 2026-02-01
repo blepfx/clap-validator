@@ -1,6 +1,6 @@
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::{Plugin, PluginStatus};
-use crate::util::clap_call;
+use crate::plugin::util::clap_call;
 use clap_sys::ext::latency::{CLAP_EXT_LATENCY, clap_plugin_latency};
 use std::ffi::CStr;
 use std::ptr::NonNull;

@@ -43,9 +43,7 @@ pub fn test_state_invalid_empty(library: &PluginLibrary, plugin_id: &str) -> Res
 
     let result = state.load(&[]);
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     match result {
         Ok(_) => Ok(TestStatus::Warning {
@@ -77,9 +75,7 @@ pub fn test_state_invalid_random(library: &PluginLibrary, plugin_id: &str) -> Re
         }
     };
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     let mut random_data = vec![0u8; 1024 * 1024];
     let mut succeeded = false;
@@ -89,9 +85,7 @@ pub fn test_state_invalid_random(library: &PluginLibrary, plugin_id: &str) -> Re
         succeeded |= state.load(&random_data).is_ok();
     }
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     match succeeded {
         false => Ok(TestStatus::Success { details: None }),
@@ -149,9 +143,7 @@ pub fn test_state_reproducibility_basic(
             }
         };
 
-        plugin
-            .poll_callback(|_| Ok(()))
-            .context("An error occured during a callback")?;
+        plugin.poll_callback(|_| Ok(()))?;
 
         let param_infos = params
             .info()
@@ -196,9 +188,7 @@ pub fn test_state_reproducibility_basic(
 
         let expected_state = state.save()?;
 
-        plugin
-            .poll_callback(|_| Ok(()))
-            .context("An error occured during a callback")?;
+        plugin.poll_callback(|_| Ok(()))?;
 
         (expected_state, expected_param_values)
     };
@@ -237,15 +227,11 @@ pub fn test_state_reproducibility_basic(
         }
     };
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     state.load(&expected_state)?;
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     let actual_param_values: BTreeMap<clap_id, f64> = expected_param_values
         .keys()
@@ -272,9 +258,7 @@ pub fn test_state_reproducibility_basic(
     // Now for the moment of truth
     let actual_state = state.save()?;
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     if actual_state == expected_state {
         Ok(TestStatus::Success { details: None })
@@ -329,9 +313,7 @@ pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str
             }
         };
 
-        plugin
-            .poll_callback(|_| Ok(()))
-            .context("An error occured during a callback")?;
+        plugin.poll_callback(|_| Ok(()))?;
 
         let param_infos = params
             .info()
@@ -355,9 +337,7 @@ pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str
         input_events.add_events(random_param_set_events.clone());
         params.flush(&input_events, &output_events);
 
-        plugin
-            .poll_callback(|_| Ok(()))
-            .context("An error occured during a callback")?;
+        plugin.poll_callback(|_| Ok(()))?;
 
         // We'll compare against these values in that second pass
         let expected_param_values: BTreeMap<clap_id, f64> = param_infos
@@ -366,9 +346,7 @@ pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str
             .collect::<Result<BTreeMap<clap_id, f64>>>()?;
         let expected_state = state.save()?;
 
-        plugin
-            .poll_callback(|_| Ok(()))
-            .context("An error occured during a callback")?;
+        plugin.poll_callback(|_| Ok(()))?;
 
         // Plugins with no parameters at all should of course not trigger this error
         if expected_param_values == initial_param_values && !random_param_set_events.is_empty() {
@@ -422,9 +400,7 @@ pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str
         }
     };
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     // NOTE: We can reuse random parameter set events, except that the cookie pointers may be
     //       different if the plugin uses those. So we need to update these cookies first.
@@ -481,9 +457,7 @@ pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str
 
     let actual_state = state.save()?;
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     if actual_state == expected_state {
         Ok(TestStatus::Success { details: None })
@@ -566,9 +540,7 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
         // treating this as the ground truth.
         let expected_state = state.save()?;
 
-        plugin
-            .poll_callback(|_| Ok(()))
-            .context("An error occured during a callback")?;
+        plugin.poll_callback(|_| Ok(()))?;
 
         (expected_state, expected_param_values)
     };
@@ -606,16 +578,12 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
         }
     };
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     // This is a buffered load that only loads 17 bytes at a time. Why 17? Because.
     const BUFFERED_LOAD_MAX_BYTES: usize = 17;
     state.load_buffered(&expected_state, BUFFERED_LOAD_MAX_BYTES)?;
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     let actual_param_values: BTreeMap<clap_id, f64> = expected_param_values
         .keys()
@@ -640,9 +608,7 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
     const BUFFERED_SAVE_MAX_BYTES: usize = 23;
     let actual_state = state.save_buffered(BUFFERED_SAVE_MAX_BYTES)?;
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     if actual_state == expected_state {
         Ok(TestStatus::Success { details: None })

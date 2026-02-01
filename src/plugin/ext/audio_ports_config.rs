@@ -3,7 +3,7 @@ use crate::plugin::ext::ambisonic::Ambisonic;
 use crate::plugin::ext::audio_ports::check_audio_port_type_consistent;
 use crate::plugin::ext::surround::Surround;
 use crate::plugin::instance::Plugin;
-use crate::util::{c_char_slice_to_string, clap_call};
+use crate::plugin::util::{c_char_slice_to_string, clap_call};
 use anyhow::{Context, Result};
 use clap_sys::ext::audio_ports::clap_audio_port_info;
 use clap_sys::ext::audio_ports_config::*;

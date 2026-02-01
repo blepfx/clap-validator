@@ -8,7 +8,7 @@ use std::ptr::NonNull;
 use super::Extension;
 use crate::plugin::instance::Plugin;
 use crate::plugin::preset_discovery::LocationValue;
-use crate::util::clap_call;
+use crate::plugin::util::clap_call;
 
 /// Abstraction for the `preset-load` extension covering the main thread functionality.
 pub struct PresetLoad<'a> {

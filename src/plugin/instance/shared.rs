@@ -1,3 +1,4 @@
+use crate::panic::fail_test;
 use crate::plugin::ext::Extension;
 use crate::plugin::ext::audio_ports::AudioPorts;
 use crate::plugin::ext::latency::Latency;
@@ -10,7 +11,7 @@ use crate::plugin::ext::thread_pool::ThreadPool;
 use crate::plugin::ext::voice_info::VoiceInfo;
 use crate::plugin::instance::{CallbackEvent, MainThreadTask, Plugin, PluginStatus};
 use crate::plugin::preset_discovery::LocationValue;
-use crate::util::{self, check_null_ptr, clap_call, validator_version};
+use crate::plugin::util::{self, clap_call, object_tracker, validator_version};
 use anyhow::{Context, Result};
 use clap_sys::ext::audio_ports::*;
 use clap_sys::ext::latency::*;
@@ -31,6 +32,7 @@ use clap_sys::version::CLAP_VERSION;
 use crossbeam::atomic::AtomicCell;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::ffi::{CStr, c_char, c_void};
+use std::mem::offset_of;
 use std::ptr::NonNull;
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -41,7 +43,7 @@ use std::thread::ThreadId;
 pub struct PluginShared {
     pub task_sender: Sender<MainThreadTask>,
     pub callback_sender: Sender<CallbackEvent>,
-    pub callback_error: Mutex<Option<String>>,
+    pub callback_error: Mutex<Option<anyhow::Error>>,
 
     /// The plugin's current state in terms of activation and processing status.
     pub status: AtomicCell<PluginStatus>,
@@ -70,6 +72,12 @@ pub struct PluginShared {
 
 unsafe impl Send for PluginShared {}
 unsafe impl Sync for PluginShared {}
+
+impl Drop for PluginShared {
+    fn drop(&mut self) {
+        object_tracker::untrack(self.clap_host_ptr());
+    }
+}
 
 impl PluginShared {
     /// Create a plugin instance and return the still uninitialized plugin. Returns an error if the
@@ -118,6 +126,9 @@ impl PluginShared {
                 .cast_mut()
                 .write(&*shared as *const _ as *mut std::ffi::c_void);
         }
+
+        // Add the clap_host to the tracker so it can be validated in callbacks
+        object_tracker::track(shared.clap_host_ptr());
 
         let clap_plugin = unsafe {
             clap_call! {
@@ -177,15 +188,24 @@ impl PluginShared {
     fn wrap<R>(host: *const clap_host, function_name: &str, f: impl FnOnce(&Self) -> Result<R>) -> Option<R> {
         log::trace!("'{}' was called by the plugin", function_name);
 
-        check_null_ptr!(host, (*host).host_data);
-        let state = unsafe { &*((*host).host_data as *const PluginShared) };
+        let state = unsafe {
+            if let Err(e) = object_tracker::check(host) {
+                fail_test!("{}: {}", function_name, e);
+            }
+
+            if (*host).host_data.wrapping_byte_add(offset_of!(Self, clap_host)) != host as *mut _ {
+                fail_test!("{}: Malformed 'clap_host.host_data' pointer", function_name);
+            }
+
+            &*((*host).host_data as *const Self)
+        };
 
         match f(state) {
             Ok(result) => Some(result),
             Err(error) => {
                 let mut guard = state.callback_error.lock().unwrap();
                 if guard.is_none() {
-                    *guard = Some(format!("{}: {}", function_name, error));
+                    *guard = Some(error.context(function_name.to_string()));
                 }
 
                 None
@@ -245,9 +265,10 @@ impl PluginShared {
     /// Checks whether the plugin has the required extension(s). If it does not, then an error
     /// will be set. Subsequent errors will not overwrite earlier ones.
     fn assert_has_extension(&self, ids: &[&CStr]) -> Result<()> {
-        if self.status() == PluginStatus::Uninitialized {
-            anyhow::bail!("Called while the plugin is uninitialized.");
-        }
+        anyhow::ensure!(
+            self.status() != PluginStatus::Uninitialized,
+            "Called while the plugin is uninitialized"
+        );
 
         for id in ids {
             let extension_ptr = unsafe {
@@ -312,34 +333,41 @@ impl PluginShared {
     };
 
     unsafe extern "C" fn clap_get_extension(host: *const clap_host, extension_id: *const c_char) -> *const c_void {
-        check_null_ptr!(host, (*host).host_data, extension_id);
-
         // Right now there's no way to have the host only expose certain extensions. We can always
         // add that when test cases need it.
-        let extension_id_cstr = unsafe { CStr::from_ptr(extension_id) };
-        if extension_id_cstr == CLAP_EXT_AUDIO_PORTS {
-            &Self::EXT_AUDIO_PORTS as *const _ as *const c_void
-        } else if extension_id_cstr == CLAP_EXT_NOTE_PORTS {
-            &Self::EXT_NOTE_PORTS as *const _ as *const c_void
-        } else if extension_id_cstr == CLAP_EXT_PRESET_LOAD {
-            &Self::EXT_PRESET_LOAD as *const _ as *const c_void
-        } else if extension_id_cstr == CLAP_EXT_PARAMS {
-            &Self::EXT_PARAMS as *const _ as *const c_void
-        } else if extension_id_cstr == CLAP_EXT_STATE {
-            &Self::EXT_STATE as *const _ as *const c_void
-        } else if extension_id_cstr == CLAP_EXT_THREAD_CHECK {
-            &Self::EXT_THREAD_CHECK as *const _ as *const c_void
-        } else if extension_id_cstr == CLAP_EXT_THREAD_POOL {
-            &Self::EXT_THREAD_POOL as *const _ as *const c_void
-        } else if extension_id_cstr == CLAP_EXT_LATENCY {
-            &Self::EXT_LATENCY as *const _ as *const c_void
-        } else if extension_id_cstr == CLAP_EXT_TAIL {
-            &Self::EXT_TAIL as *const _ as *const c_void
-        } else if extension_id_cstr == CLAP_EXT_VOICE_INFO {
-            &Self::EXT_VOICE_INFO as *const _ as *const c_void
-        } else {
-            std::ptr::null()
-        }
+        Self::wrap(host, "clap_host::get_extension", |_| {
+            if extension_id.is_null() {
+                anyhow::bail!("Null extension ID");
+            }
+
+            let extension_id_cstr = unsafe { CStr::from_ptr(extension_id) };
+            let extension_ptr = if extension_id_cstr == CLAP_EXT_AUDIO_PORTS {
+                &Self::EXT_AUDIO_PORTS as *const _ as *const c_void
+            } else if extension_id_cstr == CLAP_EXT_NOTE_PORTS {
+                &Self::EXT_NOTE_PORTS as *const _ as *const c_void
+            } else if extension_id_cstr == CLAP_EXT_PRESET_LOAD {
+                &Self::EXT_PRESET_LOAD as *const _ as *const c_void
+            } else if extension_id_cstr == CLAP_EXT_PARAMS {
+                &Self::EXT_PARAMS as *const _ as *const c_void
+            } else if extension_id_cstr == CLAP_EXT_STATE {
+                &Self::EXT_STATE as *const _ as *const c_void
+            } else if extension_id_cstr == CLAP_EXT_THREAD_CHECK {
+                &Self::EXT_THREAD_CHECK as *const _ as *const c_void
+            } else if extension_id_cstr == CLAP_EXT_THREAD_POOL {
+                &Self::EXT_THREAD_POOL as *const _ as *const c_void
+            } else if extension_id_cstr == CLAP_EXT_LATENCY {
+                &Self::EXT_LATENCY as *const _ as *const c_void
+            } else if extension_id_cstr == CLAP_EXT_TAIL {
+                &Self::EXT_TAIL as *const _ as *const c_void
+            } else if extension_id_cstr == CLAP_EXT_VOICE_INFO {
+                &Self::EXT_VOICE_INFO as *const _ as *const c_void
+            } else {
+                std::ptr::null()
+            };
+
+            Ok(extension_ptr)
+        })
+        .unwrap_or_default()
     }
 
     unsafe extern "C" fn clap_request_restart(host: *const clap_host) {
@@ -383,9 +411,10 @@ impl PluginShared {
             }
 
             if flags & !CLAP_AUDIO_PORTS_RESCAN_NAMES != 0 {
-                if this.status() > PluginStatus::Activated {
-                    anyhow::bail!("Called while the plugin is activate");
-                }
+                anyhow::ensure!(
+                    this.status() <= PluginStatus::Activated,
+                    "Called while the plugin is active"
+                );
 
                 this.callback_sender.send(CallbackEvent::AudioPortsRescanAll).unwrap();
             }
@@ -413,9 +442,10 @@ impl PluginShared {
             }
 
             if flags & CLAP_NOTE_PORTS_RESCAN_ALL != 0 {
-                if this.status() > PluginStatus::Activated {
-                    anyhow::bail!("Called while the plugin is activate");
-                }
+                anyhow::ensure!(
+                    this.status() <= PluginStatus::Activated,
+                    "Called while the plugin is active"
+                );
 
                 this.callback_sender.send(CallbackEvent::NotePortsRescanAll).unwrap();
             }
@@ -595,10 +625,7 @@ impl PluginShared {
             );
 
             let extension = this.get_extension::<ThreadPool>().unwrap();
-            (0..num_tasks).into_par_iter().for_each(|index| {
-                extension.exec(index);
-            });
-
+            (0..num_tasks).into_par_iter().for_each(|index| extension.exec(index));
             Ok(true)
         })
         .unwrap_or(false)

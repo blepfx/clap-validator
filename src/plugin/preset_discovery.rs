@@ -1,13 +1,14 @@
 //! An abstraction for the preset discovery factory.
 
+use super::library::PluginLibrary;
+use super::util::{self, clap_call};
 use anyhow::{Context, Result};
 use clap_sys::factory::preset_discovery::{clap_preset_discovery_factory, clap_preset_discovery_provider_descriptor};
+use clap_sys::timestamp::{CLAP_TIMESTAMP_UNKNOWN, clap_timestamp};
 use clap_sys::version::{clap_version, clap_version_is_compatible};
 use std::collections::HashSet;
 use std::ptr::NonNull;
-
-use super::library::PluginLibrary;
-use crate::util::{self, clap_call};
+use time::OffsetDateTime;
 
 mod indexer;
 mod metadata_receiver;
@@ -50,7 +51,14 @@ pub struct ProviderMetadata {
 
 impl ProviderMetadata {
     /// Parse the metadata from a `clap_preset_discovery_provider_descriptor`.
-    pub fn from_descriptor(descriptor: &clap_preset_discovery_provider_descriptor) -> Result<Self> {
+    pub unsafe fn from_descriptor(descriptor: *const clap_preset_discovery_provider_descriptor) -> Result<Self> {
+        anyhow::ensure!(
+            !descriptor.is_null(),
+            "The preset discovery provider descriptor is a null pointer."
+        );
+
+        let descriptor = unsafe { &*descriptor };
+
         Ok(ProviderMetadata {
             version: (
                 descriptor.clap_version.major,
@@ -113,7 +121,7 @@ impl<'lib> PresetDiscoveryFactory<'lib> {
                 );
             }
 
-            metadata.push(ProviderMetadata::from_descriptor(unsafe { &*descriptor })?);
+            metadata.push(unsafe { ProviderMetadata::from_descriptor(descriptor)? });
         }
 
         // As a sanity check we'll make sure there are no duplicate IDs in here
@@ -143,4 +151,19 @@ impl<'lib> PresetDiscoveryFactory<'lib> {
 
         Provider::new(self, &metadata.id)
     }
+}
+
+/// Convert a `clap_timestamp` to an `Option<OffsetDateTime>`. A value of `CLAP_TIMESTAMP_UNKNOWN`
+/// gets translated to `None`.
+pub fn parse_timestamp(timestamp: clap_timestamp) -> Result<Option<OffsetDateTime>> {
+    let parsed = if timestamp == CLAP_TIMESTAMP_UNKNOWN {
+        None
+    } else {
+        Some(
+            OffsetDateTime::from_unix_timestamp_nanos(timestamp as i128 * 1_000_000)
+                .map_err(|_| anyhow::anyhow!("Could not parse the timestamp."))?,
+        )
+    };
+
+    Ok(parsed)
 }

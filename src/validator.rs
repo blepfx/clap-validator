@@ -3,6 +3,7 @@
 
 use crate::Verbosity;
 use crate::commands::validate::{SingleTestSettings, ValidatorSettings};
+use crate::panic::panic_message;
 use crate::plugin::library::{PluginLibrary, PluginMetadata};
 use crate::tests::{PluginLibraryTestCase, PluginTestCase, SerializedTest, TestCase, TestResult, TestStatus};
 use crate::util::{self, IteratorExt};
@@ -17,8 +18,9 @@ use std::fs;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use strum::IntoEnumIterator;
+use wait_timeout::ChildExt;
 
 /// The results of running the validation test suite on one or more plugins. Use the
 /// [`tally()`][Self::tally()] method to compute the number of successful and failed tests.
@@ -239,6 +241,8 @@ fn run_test<'a, T: TestCase<'a>>(
     })
 }
 
+const WAIT_TIMEOUT: Duration = Duration::from_secs(30);
+
 fn run_test_out_of_process<'a, T: TestCase<'a>>(
     test: &T,
     args: T::TestArgs,
@@ -283,13 +287,23 @@ fn run_test_out_of_process<'a, T: TestCase<'a>>(
         .context("Could not call clap-validator for out-of-process validation")?
         // The docs make it seem like this can only fail if the process isn't running, but if
         // spawn succeeds then this can never fail:
-        .wait()
+        .wait_timeout(WAIT_TIMEOUT)
         .context("Error while waiting on clap-validator to finish running the test")?;
 
-    if !exit_status.success() {
-        return Ok(TestStatus::Crashed {
-            details: exit_status.to_string(),
-        });
+    match exit_status {
+        None => {
+            return Ok(TestStatus::Crashed {
+                details: format!("Timed out after {} seconds", WAIT_TIMEOUT.as_secs()),
+            });
+        }
+
+        Some(status) if !status.success() => {
+            return Ok(TestStatus::Crashed {
+                details: status.to_string(),
+            });
+        }
+
+        _ => {}
     }
 
     // At this point, the child process _should_ have written its output to `output_file_path`,
@@ -311,19 +325,9 @@ fn run_test_in_process(test: impl FnOnce() -> Result<TestStatus>) -> TestStatus 
         Ok(Err(err)) => TestStatus::Failed {
             details: Some(format!("{err:#}")),
         },
-        Err(panic) => {
-            let message = if let Some(s) = panic.downcast_ref::<&str>() {
-                s.to_string()
-            } else if let Some(s) = panic.downcast_ref::<String>() {
-                s.clone()
-            } else {
-                "A panic occurred".to_string()
-            };
-
-            TestStatus::Crashed {
-                details: format!("{message}. This is a bug in clap-validator"),
-            }
-        }
+        Err(panic) => TestStatus::Crashed {
+            details: panic_message(&*panic),
+        },
     }
 }
 

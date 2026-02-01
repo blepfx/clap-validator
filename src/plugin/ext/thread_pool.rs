@@ -1,9 +1,9 @@
-use crate::{
-    plugin::{ext::Extension, instance::PluginShared},
-    util::clap_call,
-};
+use crate::plugin::ext::Extension;
+use crate::plugin::instance::PluginShared;
+use crate::plugin::util::clap_call;
 use clap_sys::ext::thread_pool::{CLAP_EXT_THREAD_POOL, clap_plugin_thread_pool};
-use std::{ffi::CStr, ptr::NonNull};
+use std::ffi::CStr;
+use std::ptr::NonNull;
 
 pub struct ThreadPool<'a> {
     plugin: &'a PluginShared,

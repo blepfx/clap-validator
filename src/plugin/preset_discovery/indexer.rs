@@ -1,21 +1,18 @@
 //! The indexer abstraction for a CLAP plugin's preset discovery factory. During initialization the
 //! plugin fills this object with its supported locations, file types, and sound packs.
 
-use crate::util::{self, check_null_ptr, validator_version};
+use crate::panic::fail_test;
+use crate::plugin::preset_discovery::parse_timestamp;
+use crate::plugin::util::{self, object_tracker, validator_version};
 use anyhow::{Context, Result};
-use clap_sys::factory::preset_discovery::{
-    CLAP_PRESET_DISCOVERY_IS_DEMO_CONTENT, CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT, CLAP_PRESET_DISCOVERY_IS_FAVORITE,
-    CLAP_PRESET_DISCOVERY_IS_USER_CONTENT, CLAP_PRESET_DISCOVERY_LOCATION_FILE, CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN,
-    clap_preset_discovery_filetype, clap_preset_discovery_indexer, clap_preset_discovery_location,
-    clap_preset_discovery_location_kind, clap_preset_discovery_soundpack,
-};
+use clap_sys::factory::preset_discovery::*;
 use clap_sys::version::CLAP_VERSION;
 use serde::Serialize;
-use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::Mutex;
 use std::thread::ThreadId;
 use time::OffsetDateTime;
 
@@ -24,13 +21,9 @@ pub struct Indexer {
     /// The thread ID for the thread this object was created on. This object is not thread-safe, so
     /// we'll assert that all callbacks are made from this thread.
     expected_thread_id: ThreadId,
-    /// A description of the first error encountered by this `Indexer`, if any. This is used to
-    /// store thread safety errors and other errors as the result of callbacks. In those cases we
-    /// can only handle the error after the callback has been mode.
-    callback_error: RefCell<Option<String>>,
 
     /// The data written to this object by the plugin.
-    results: RefCell<IndexerResults>,
+    result: Mutex<Result<IndexerResults>>,
 
     /// The vtable that's passed to the provider. The `indexer_data` field is populated with a
     /// pointer to this object.
@@ -62,7 +55,10 @@ pub struct FileType {
 
 impl FileType {
     /// Parse a `clap_preset_discovery_fileType`, returning an error if the data is not valid.
-    pub fn from_descriptor(descriptor: &clap_preset_discovery_filetype) -> Result<Self> {
+    pub unsafe fn from_descriptor(descriptor: *const clap_preset_discovery_filetype) -> Result<Self> {
+        anyhow::ensure!(!descriptor.is_null(), "Filetype is null");
+        let descriptor = unsafe { &*descriptor };
+
         let file_type = FileType {
             name: unsafe { util::cstr_ptr_to_mandatory_string(descriptor.name) }
                 .context("Error parsing the file extension's 'name' field")?,
@@ -146,7 +142,10 @@ impl Display for Flags {
 
 impl Location {
     /// Parse a `clap_preset_discovery_location`, returning an error if the data is not valid.
-    pub fn from_descriptor(descriptor: &clap_preset_discovery_location) -> Result<Self> {
+    pub unsafe fn from_descriptor(descriptor: *const clap_preset_discovery_location) -> Result<Self> {
+        anyhow::ensure!(!descriptor.is_null(), "Location is null");
+        let descriptor = unsafe { &*descriptor };
+
         Ok(Location {
             flags: Flags {
                 is_factory_content: (descriptor.flags & CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT) != 0,
@@ -294,7 +293,10 @@ pub struct Soundpack {
 
 impl Soundpack {
     /// Parse a `clap_preset_discovery_soundpack`, returning an error if the data is not valid.
-    pub fn from_descriptor(descriptor: &clap_preset_discovery_soundpack) -> Result<Self> {
+    pub unsafe fn from_descriptor(descriptor: *const clap_preset_discovery_soundpack) -> Result<Self> {
+        anyhow::ensure!(!descriptor.is_null(), "Soundpack is null");
+        let descriptor = unsafe { &*descriptor };
+
         Ok(Soundpack {
             flags: Flags {
                 is_factory_content: (descriptor.flags & CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT) != 0,
@@ -315,7 +317,7 @@ impl Soundpack {
                 .context("Error parsing the soundpack's 'vendor' field")?,
             image_path: unsafe { util::cstr_ptr_to_optional_string(descriptor.image_path) }
                 .context("Error parsing the soundpack's 'image_path' field")?,
-            release_timestamp: util::parse_timestamp(descriptor.release_timestamp)
+            release_timestamp: parse_timestamp(descriptor.release_timestamp)
                 .context("Error parsing the soundpack's 'release_timestamp' field")?,
         })
     }
@@ -323,22 +325,7 @@ impl Soundpack {
 
 impl Drop for Indexer {
     fn drop(&mut self) {
-        // The results will have been moved out of `self.results` when initializing the provider, so
-        // if this does contain values then the plugin did something shady
-        let results = self.results.borrow();
-        if !results.file_types.is_empty() || !results.locations.is_empty() || !results.soundpacks.is_empty() {
-            log::warn!(
-                "The plugin declared more file types, locations, or soundpacks after its initialization. This is \
-                 invalid behavior, but there is currently no test to check for this."
-            )
-        }
-
-        if let Some(error) = self.callback_error.borrow_mut().take() {
-            log::error!(
-                "The validator's 'clap_preset_indexer' has detected an error during a callback that is going to be \
-                 thrown away. This is a clap-validator bug. The error message is: {error}"
-            )
-        }
+        object_tracker::untrack(&self.clap_preset_discovery_indexer);
     }
 }
 
@@ -346,9 +333,7 @@ impl Indexer {
     pub fn new() -> Pin<Box<Self>> {
         let mut indexer = Box::pin(Self {
             expected_thread_id: std::thread::current().id(),
-            callback_error: RefCell::new(None),
-
-            results: RefCell::default(),
+            result: Mutex::new(Ok(IndexerResults::default())),
 
             clap_preset_discovery_indexer: clap_preset_discovery_indexer {
                 clap_version: CLAP_VERSION,
@@ -365,8 +350,8 @@ impl Indexer {
             },
         });
 
+        object_tracker::track(&indexer.clap_preset_discovery_indexer);
         indexer.clap_preset_discovery_indexer.indexer_data = &*indexer as *const Self as *mut c_void;
-
         indexer
     }
 
@@ -377,130 +362,138 @@ impl Indexer {
     }
 
     /// Get the values written to this indexer by the plugin during the
-    /// `clap_preset_discovery_provider::init()` call. Returns any error that would be returned by
-    /// [`callback_error_check()`][Self::callback_error_check()].
+    /// `clap_preset_discovery_provider::init()` call. This also checks for errors that
+    /// happened during the indexer callbacks.
     ///
-    /// This moves the values out of this object.
-    pub fn results(&self) -> Result<IndexerResults> {
-        self.callback_error_check()?;
-
-        Ok(std::mem::take(&mut self.results.borrow_mut()))
+    /// This can only be called once.
+    pub fn finish(&self) -> Result<IndexerResults> {
+        std::mem::replace(
+            &mut *self.result.lock().unwrap(),
+            Err(anyhow::anyhow!("Indexer already finished")),
+        )
     }
 
-    /// Check whether errors happened during the plugin's callbacks. Returns the first error if
-    /// there were any. Automatically called when calling [`results()`][Self::results()]. If there
-    /// are errors and this function is not called before the object is destroyed, an error will be
-    /// logged.
-    pub fn callback_error_check(&self) -> Result<()> {
-        match self.callback_error.borrow_mut().take() {
-            Some(err) => anyhow::bail!(err),
-            None => Ok(()),
+    #[track_caller]
+    fn wrap<R>(
+        indexer: *const clap_preset_discovery_indexer,
+        function_name: &str,
+        f: impl FnOnce(&Self) -> Result<R>,
+    ) -> Option<R> {
+        log::trace!("'{}' was called by the plugin", function_name);
+
+        let state = unsafe {
+            if indexer.is_null() || (*indexer).indexer_data.is_null() {
+                fail_test!(
+                    "'{}' was called with a null 'clap_preset_discovery_indexer' pointer",
+                    function_name
+                );
+            }
+
+            &*((*indexer).indexer_data as *const Self)
+        };
+
+        match f(state) {
+            Ok(result) => Some(result),
+            Err(error) => {
+                let mut guard = state.result.lock().unwrap();
+                if guard.is_ok() {
+                    *guard = Err(error.context(function_name.to_string()));
+                }
+
+                None
+            }
         }
     }
 
     /// Checks that this function is called from the same thread the indexer was created on. If it
     /// is not, then an error indicating this can be retrieved using
-    /// [`callback_error_check()`][Self::callback_error_check()]. Subsequent thread safety errors
+    /// [`check_errors()`][Self::check_errors()]. Subsequent thread safety errors
     /// will not overwrite earlier ones.
-    fn assert_same_thread(&self, function_name: &str) {
+    fn assert_same_thread(&self) -> Result<()> {
         let current_thread_id = std::thread::current().id();
-        if current_thread_id != self.expected_thread_id {
-            self.set_callback_error(format!(
-                "'{}' may only be called from the same thread the 'clap_preset_indexer' was created on (thread {:?}), \
-                 but it was called from thread {:?}",
-                function_name, self.expected_thread_id, current_thread_id
-            ));
-        }
-    }
+        anyhow::ensure!(
+            current_thread_id == self.expected_thread_id,
+            "A 'clap_preset_indexer::*' method may only be called from the same thread the 'clap_preset_indexer' was \
+             created on (thread {:?}), but it was called from thread {:?}",
+            self.expected_thread_id,
+            current_thread_id
+        );
 
-    /// Set the callback error field if it does not already contain a value. Earlier errors are not
-    /// overwritten.
-    fn set_callback_error(&self, error: impl Into<String>) {
-        let mut callback_error = self.callback_error.borrow_mut();
-        if callback_error.is_none() {
-            *callback_error = Some(error.into());
-        }
+        Ok(())
     }
 
     unsafe extern "C" fn declare_filetype(
         indexer: *const clap_preset_discovery_indexer,
         filetype: *const clap_preset_discovery_filetype,
     ) -> bool {
-        check_null_ptr!(indexer, (*indexer).indexer_data, filetype);
-        let this = unsafe { &*((*indexer).indexer_data as *const Self) };
+        Self::wrap(indexer, "clap_preset_discovery_indexer::declare_filetype", |this| {
+            this.assert_same_thread()?;
 
-        this.assert_same_thread("clap_preset_discovery_indexer::declare_filetype()");
-        match FileType::from_descriptor(unsafe { &*filetype }) {
-            Ok(file_type) => {
-                this.results.borrow_mut().file_types.push(file_type);
+            let mut results = this.result.lock().unwrap();
+            let Ok(results) = results.as_mut() else {
+                // The indexer has already been finished, or an error has occurred
+                // If the error has already occurred, we wont overwrite it
+                anyhow::bail!("Attempt to add to the indexer after the 'clap_preset_discovery_factory::init' call");
+            };
 
-                true
-            }
-            Err(err) => {
-                this.set_callback_error(format!(
-                    "Error in 'clap_preset_discovery_indexer::declare_filetype()' call: {err:#}"
-                ));
-
-                false
-            }
-        }
+            results.file_types.push(unsafe { FileType::from_descriptor(filetype)? });
+            Ok(true)
+        })
+        .unwrap_or(false)
     }
 
     unsafe extern "C" fn declare_location(
         indexer: *const clap_preset_discovery_indexer,
         location: *const clap_preset_discovery_location,
     ) -> bool {
-        check_null_ptr!(indexer, (*indexer).indexer_data, location);
-        let this = unsafe { &*((*indexer).indexer_data as *const Self) };
+        Self::wrap(indexer, "clap_preset_discovery_indexer::declare_location", |this| {
+            this.assert_same_thread()?;
 
-        this.assert_same_thread("clap_preset_discovery_indexer::declare_location()");
-        match Location::from_descriptor(unsafe { &*location }) {
-            Ok(location) => {
-                this.results.borrow_mut().locations.push(location);
+            let mut results = this.result.lock().unwrap();
+            let Ok(results) = results.as_mut() else {
+                // Same as above
+                anyhow::bail!("Attempt to add to the indexer after the 'clap_preset_discovery_factory::init' call");
+            };
 
-                true
-            }
-            Err(err) => {
-                this.set_callback_error(format!(
-                    "Error in 'clap_preset_discovery_indexer::declare_location()' call: {err:#}"
-                ));
-
-                false
-            }
-        }
+            results.locations.push(unsafe { Location::from_descriptor(location)? });
+            Ok(true)
+        })
+        .unwrap_or(false)
     }
 
     unsafe extern "C" fn declare_soundpack(
         indexer: *const clap_preset_discovery_indexer,
         soundpack: *const clap_preset_discovery_soundpack,
     ) -> bool {
-        check_null_ptr!(indexer, (*indexer).indexer_data, soundpack);
-        let this = unsafe { &*((*indexer).indexer_data as *const Self) };
+        Self::wrap(indexer, "clap_preset_discovery_indexer::declare_soundpack", |this| {
+            this.assert_same_thread()?;
 
-        this.assert_same_thread("clap_preset_discovery_indexer::declare_soundpack()");
-        match Soundpack::from_descriptor(unsafe { &*soundpack }) {
-            Ok(soundpack) => {
-                this.results.borrow_mut().soundpacks.push(soundpack);
+            let mut results = this.result.lock().unwrap();
+            let Ok(results) = results.as_mut() else {
+                // Same as above
+                anyhow::bail!("Attempt to add to the indexer after the 'clap_preset_discovery_factory::init' call");
+            };
 
-                true
-            }
-            Err(err) => {
-                this.set_callback_error(format!(
-                    "Error in 'clap_preset_discovery_indexer::declare_soundpack()' call: {err:#}"
-                ));
-
-                false
-            }
-        }
+            results
+                .soundpacks
+                .push(unsafe { Soundpack::from_descriptor(soundpack)? });
+            Ok(true)
+        })
+        .unwrap_or(false)
     }
 
     unsafe extern "C" fn get_extension(
         indexer: *const clap_preset_discovery_indexer,
         extension_id: *const c_char,
     ) -> *const c_void {
-        check_null_ptr!(indexer, (*indexer).indexer_data, extension_id);
+        Self::wrap(indexer, "clap_preset_discovery_indexer::get_extension", |_| {
+            if extension_id.is_null() {
+                anyhow::bail!("Null extension ID");
+            }
 
-        // There are currently no extensions for the preset discovery factory
-        std::ptr::null()
+            // There are currently no extensions for the preset discovery factory
+            Ok(std::ptr::null())
+        })
+        .unwrap_or_default()
     }
 }

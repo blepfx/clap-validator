@@ -1,4 +1,5 @@
-use clap_sys::{events::*, fixedpoint::*};
+use clap_sys::events::*;
+use clap_sys::fixedpoint::*;
 
 /// The current transport state. This can be modified between process calls to simulate
 /// transport changes.
@@ -115,7 +116,7 @@ impl TransportState {
 
 /// A constant mask for audio processing. Each bit represents whether the corresponding audio channel
 /// is constant (1) or not (0).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ConstantMask(pub u64);
 
 impl ConstantMask {
@@ -127,8 +128,14 @@ impl ConstantMask {
         self.0 & 1u64.unbounded_shl(channel) != 0
     }
 
-    pub fn are_first_n_channels_constant(&self, n: u32) -> bool {
+    pub fn are_all_channels_constant(&self, n: u32) -> bool {
         let mask = (1u64.unbounded_shl(n)).wrapping_sub(1);
         (self.0 & mask) == mask
+    }
+}
+
+impl std::fmt::Debug for ConstantMask {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ConstantMask(0b{:064b})", self.0)
     }
 }

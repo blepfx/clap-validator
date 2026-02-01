@@ -3,7 +3,7 @@
 use super::Extension;
 use crate::plugin::instance::{Plugin, PluginStatus};
 use crate::plugin::process::EventQueue;
-use crate::util::{self, c_char_slice_to_string, clap_call};
+use crate::plugin::util::{self, c_char_slice_to_string, clap_call};
 use anyhow::{Context, Result};
 use clap_sys::ext::params::*;
 use clap_sys::id::{CLAP_INVALID_ID, clap_id};

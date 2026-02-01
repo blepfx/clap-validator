@@ -2,8 +2,8 @@
 
 use super::instance::Plugin;
 use super::preset_discovery::PresetDiscoveryFactory;
+use super::util::{self, clap_call};
 use crate::plugin::instance::PluginShared;
-use crate::util::{self, clap_call};
 use anyhow::{Context, Result};
 use clap_sys::entry::clap_plugin_entry;
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};

@@ -122,9 +122,7 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
             // We'll try to run some audio through the plugin to make sure the preset change was
             // successful, but it doesn't matter if the plugin doesn't have any audio ports
             let audio_ports = plugin.get_extension::<AudioPorts>();
-            plugin
-                .poll_callback(|_| Ok(()))
-                .context("An error occured during a host callback")?;
+            plugin.poll_callback(|_| Ok(()))?;
 
             let audio_ports_config = audio_ports
                 .map(|ports| ports.config())

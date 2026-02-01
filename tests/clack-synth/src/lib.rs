@@ -1,5 +1,6 @@
 use crate::params::{PolySynthParamModulations, PolySynthParams};
 use crate::poly_oscillator::PolyOscillator;
+use clack_extensions::audio_ports::*;
 use clack_extensions::audio_ports_activation::{
     PluginAudioPortsActivation, PluginAudioPortsActivationImpl, PluginAudioPortsActivationSetImpl, SampleSize,
 };
@@ -10,8 +11,9 @@ use clack_extensions::audio_ports_config::{
 use clack_extensions::configurable_audio_ports::{
     AudioPortsRequestList, PluginConfigurableAudioPorts, PluginConfigurableAudioPortsImpl,
 };
+use clack_extensions::note_ports::*;
+use clack_extensions::params::*;
 use clack_extensions::state::PluginState;
-use clack_extensions::{audio_ports::*, note_ports::*, params::*};
 use clack_plugin::events::spaces::CoreEventSpace;
 use clack_plugin::prelude::*;
 use clack_plugin::process::ConstantMask;
@@ -110,6 +112,7 @@ impl<'a> PluginAudioProcessor<'a, PolySynthPluginShared, PolySynthPluginMainThre
 
         output_buffer.fill(0.0);
 
+        let mut is_non_silent = false;
         for event_batch in events.input.batch() {
             for event in event_batch.events() {
                 self.handle_event(event);
@@ -121,6 +124,8 @@ impl<'a> PluginAudioProcessor<'a, PolySynthPluginShared, PolySynthPluginMainThre
                 self.shared.params.get_volume(),
                 self.modulation_values.volume(),
             );
+
+            is_non_silent |= self.poly_osc.has_active_voices()
         }
 
         assert!(output_channels.channel_count() == self.channels);
@@ -135,13 +140,16 @@ impl<'a> PluginAudioProcessor<'a, PolySynthPluginShared, PolySynthPluginMainThre
             }
         }
 
-        if self.poly_osc.has_active_voices() {
-            Ok(ProcessStatus::Continue)
-        } else {
+        if !is_non_silent {
             audio
                 .output_port(0)
                 .unwrap()
                 .set_constant_mask(ConstantMask::FULLY_CONSTANT);
+        }
+
+        if self.poly_osc.has_active_voices() {
+            Ok(ProcessStatus::Continue)
+        } else {
             Ok(ProcessStatus::Sleep)
         }
     }

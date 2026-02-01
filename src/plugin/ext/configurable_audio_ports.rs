@@ -1,6 +1,6 @@
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
-use crate::util::clap_call;
+use crate::plugin::util::clap_call;
 use clap_sys::ext::ambisonic::{CLAP_PORT_AMBISONIC, clap_ambisonic_config};
 use clap_sys::ext::audio_ports::{CLAP_PORT_MONO, CLAP_PORT_STEREO};
 use clap_sys::ext::configurable_audio_ports::{

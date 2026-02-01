@@ -4,7 +4,7 @@ use super::Extension;
 use crate::plugin::ext::ambisonic::Ambisonic;
 use crate::plugin::ext::surround::Surround;
 use crate::plugin::instance::Plugin;
-use crate::util::clap_call;
+use crate::plugin::util::clap_call;
 use anyhow::{Context, Result};
 use clap_sys::ext::ambisonic::CLAP_PORT_AMBISONIC;
 use clap_sys::ext::audio_ports::*;

@@ -1,5 +1,9 @@
 //! A wrapper around `clap_preset_discovery_provider`.
 
+use super::indexer::{Indexer, IndexerResults};
+use super::metadata_receiver::{MetadataReceiver, PresetFile};
+use super::{Location, LocationValue, PresetDiscoveryFactory, ProviderMetadata};
+use crate::plugin::util::clap_call;
 use anyhow::{Context, Result};
 use clap_sys::factory::preset_discovery::clap_preset_discovery_provider;
 use std::collections::{BTreeMap, HashSet};
@@ -8,11 +12,6 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use walkdir::WalkDir;
-
-use super::indexer::{Indexer, IndexerResults};
-use super::metadata_receiver::{MetadataReceiver, PresetFile};
-use super::{Location, LocationValue, PresetDiscoveryFactory, ProviderMetadata};
-use crate::util::clap_call;
 
 /// A preset discovery provider created from a preset discovery factory. The provider is initialized
 /// and the declared contents are read when the object is created, and the provider is destroyed
@@ -80,9 +79,7 @@ impl<'a> Provider<'a> {
                 );
             }
 
-            // TODO: After this point the provider should not declare any more data. We don't
-            //       currently test for this.
-            indexer.results().with_context(|| {
+            indexer.finish().with_context(|| {
                 format!(
                     "Errors produced during 'clap_preset_discovery_indexer' callbacks made by the provider with ID \
                      '{provider_id}'"
@@ -106,11 +103,12 @@ impl<'a> Provider<'a> {
     pub fn descriptor(&self) -> Result<ProviderMetadata> {
         let provider = self.as_ptr();
         let descriptor = unsafe { (*provider).desc };
+
         if descriptor.is_null() {
             anyhow::bail!("The 'desc' field on the 'clap_preset_provider' struct is a null pointer.");
         }
 
-        ProviderMetadata::from_descriptor(unsafe { &*descriptor })
+        unsafe { ProviderMetadata::from_descriptor(descriptor) }
     }
 
     /// Get the raw pointer to the `clap_preset_discovery_provider` instance.
@@ -136,37 +134,28 @@ impl<'a> Provider<'a> {
         let mut crawl = |location: LocationValue| -> Result<()> {
             let (location_kind, location_ptr) = location.to_raw();
 
-            // There is no 'end of preset' kind of function in the metadata provider, so when
-            // the `MetadataReceiver` is dropped it may still need to write a preset file or
-            // emit some errors. That's why it borrows this result, and writes the output
-            // theere. This can happen during the drop.
-            let mut result = None;
-            {
-                let metadata_receiver = MetadataReceiver::new(&mut result, &location, location_flags);
-
-                let provider = self.as_ptr();
-                let success = unsafe {
-                    clap_call! {
-                        provider=>get_metadata(
-                            provider,
-                            location_kind,
-                            location_ptr,
-                            metadata_receiver.clap_preset_discovery_metadata_receiver_ptr()
-                        )
-                    }
-                };
-
-                if !success {
-                    // TODO: Is the plugin allowed to return false here? If it doesn't have any
-                    //       presets it should just not declare any, right?
-                    anyhow::bail!("The preset provider returned false when fetching metadata for {location}.",);
+            let metadata_receiver = MetadataReceiver::new(location.clone(), location_flags);
+            let provider = self.as_ptr();
+            let success = unsafe {
+                clap_call! {
+                    provider=>get_metadata(
+                        provider,
+                        location_kind,
+                        location_ptr,
+                        metadata_receiver.clap_preset_discovery_metadata_receiver_ptr()
+                    )
                 }
+            };
+
+            if !success {
+                anyhow::bail!("The preset provider returned false when fetching metadata for {location}.",);
             }
 
-            if let Some(preset_file) = result {
-                let preset_file =
-                    preset_file.with_context(|| format!("Error while fetching fetching metadata for {location}"))?;
+            let result = metadata_receiver
+                .finish()
+                .with_context(|| format!("Error while fetching fetching metadata for {location}"))?;
 
+            if let Some(preset_file) = result {
                 results.insert(location, preset_file);
             }
 

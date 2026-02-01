@@ -1,5 +1,9 @@
 //! Abstractions for interacting with the `state` extension.
 
+use super::Extension;
+use crate::panic::fail_test;
+use crate::plugin::instance::Plugin;
+use crate::plugin::util::clap_call;
 use anyhow::Result;
 use clap_sys::ext::state::{CLAP_EXT_STATE, clap_plugin_state};
 use clap_sys::stream::{clap_istream, clap_ostream};
@@ -8,10 +12,6 @@ use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
-
-use super::Extension;
-use crate::plugin::instance::Plugin;
-use crate::util::{check_null_ptr, clap_call};
 
 /// Abstraction for the `state` extension covering the main thread functionality.
 pub struct State<'a> {
@@ -175,10 +175,12 @@ impl<'a> InputStream<'a> {
 
     unsafe extern "C" fn read(stream: *const clap_istream, buffer: *mut c_void, size: u64) -> i64 {
         unsafe {
-            check_null_ptr!(stream, (*stream).ctx, buffer);
-            let this = &*((*stream).ctx as *const Self);
+            if stream.is_null() || (*stream).ctx.is_null() || buffer.is_null() {
+                fail_test!("'clap_istream::read' was called with a null pointer");
+            }
 
             // The reads may be limited to a certain buffering size to test the plugin's capabilities
+            let this = &*((*stream).ctx as *const Self);
             let size = match this.max_read_size {
                 Some(max_read_size) => size.min(max_read_size as u64),
                 None => size,
@@ -235,10 +237,12 @@ impl OutputStream {
 
     unsafe extern "C" fn write(stream: *const clap_ostream, buffer: *const c_void, size: u64) -> i64 {
         unsafe {
-            check_null_ptr!(stream, (*stream).ctx, buffer);
-            let this = &*((*stream).ctx as *const Self);
+            if stream.is_null() || (*stream).ctx.is_null() || buffer.is_null() {
+                fail_test!("'clap_ostream::write' was called with a null pointer");
+            }
 
             // The writes may be limited to a certain buffering size to test the plugin's capabilities
+            let this = &*((*stream).ctx as *const Self);
             let size = match this.max_write_size {
                 Some(max_write_size) => size.min(max_write_size as u64),
                 None => size,

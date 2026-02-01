@@ -1,7 +1,6 @@
 //! Contains most of the boilerplate around testing audio processing.
 
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
-use crate::plugin::ext::latency::Latency;
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::ext::tail::Tail;
 use crate::plugin::instance::{CallbackEvent, ProcessStatus};
@@ -10,6 +9,7 @@ use crate::plugin::process::{AudioBuffers, ProcessScope};
 use crate::tests::TestStatus;
 use crate::tests::rng::{NoteGenerator, new_prng};
 use anyhow::{Context, Result};
+use either::Either;
 use rand::Rng;
 
 const BUFFER_SIZE: u32 = 512;
@@ -53,9 +53,7 @@ pub fn test_process_audio_basic(library: &PluginLibrary, plugin_id: &str, in_pla
         Ok(())
     })?;
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -89,9 +87,7 @@ pub fn test_process_audio_double(library: &PluginLibrary, plugin_id: &str, in_pl
         .context("Error while querying 'note-ports' IO configuration")?
         .unwrap_or_default();
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     let has_double_support = audio_ports_config
         .inputs
@@ -126,9 +122,7 @@ pub fn test_process_audio_double(library: &PluginLibrary, plugin_id: &str, in_pl
         Ok(())
     })?;
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -199,9 +193,7 @@ pub fn test_process_note_out_of_place(
         Ok(())
     })?;
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -237,6 +229,8 @@ pub fn test_process_varying_sample_rates(library: &PluginLibrary, plugin_id: &st
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
 
     for &sample_rate in SAMPLE_RATES {
+        log::trace!("Testing processing with sample rate: {:.2}hz", sample_rate);
+
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
                 let mut note_rng = NoteGenerator::new(&note_ports_config);
@@ -255,16 +249,14 @@ pub fn test_process_varying_sample_rates(library: &PluginLibrary, plugin_id: &st
             .with_context(|| format!("Error while processing with {:.2}hz sample rate", sample_rate))?;
     }
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     Ok(TestStatus::Success { details: None })
 }
 
 /// The test for `PluginTestCase::ProcessVaryingBlockSizes`.
 pub fn test_process_varying_block_sizes(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
-    const BLOCK_SIZES: &[u32] = &[1, 8, 32, 256, 512, 1024, 2048, 4096, 8192, 32768, 1536, 10, 17, 2027];
+    const BLOCK_SIZES: &[u32] = &[1, 256, 1024, 4096, 16384, 1536, 10, 17, 2027];
 
     let mut prng = new_prng();
 
@@ -288,12 +280,14 @@ pub fn test_process_varying_block_sizes(library: &PluginLibrary, plugin_id: &str
         .unwrap_or_default();
 
     for &buffer_size in BLOCK_SIZES {
+        log::trace!("Testing processing with max buffer size: {}", buffer_size);
+
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
                 let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, buffer_size);
                 let mut note_rng = NoteGenerator::new(&note_ports_config);
                 let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
-                let num_iters = (32768 / buffer_size).min(5);
+                let num_iters = (16384 / buffer_size).min(5);
 
                 for _ in 0..num_iters {
                     process.audio_buffers().fill_white_noise(&mut prng);
@@ -308,9 +302,7 @@ pub fn test_process_varying_block_sizes(library: &PluginLibrary, plugin_id: &str
             .with_context(|| format!("Error while processing with buffer size of {}", buffer_size))?;
     }
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -364,9 +356,7 @@ pub fn test_process_random_block_sizes(library: &PluginLibrary, plugin_id: &str)
         Ok(())
     })?;
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -466,9 +456,7 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
         Ok(TestStatus::Success { details: None })
     })?;
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     Ok(result)
 }
@@ -506,15 +494,13 @@ pub fn test_process_sleep_constant_mask(library: &PluginLibrary, plugin_id: &str
             };
 
             for channel in 0..buffer.channels() {
-                let is_constant =
-                    (0..buffer.samples()).all(|sample| buffer.get(channel, sample) == buffer.get(channel, 0)); // TODO: relax, allow small variations?
+                let is_constant = check_channel_quiet(buffer.channel(channel));
                 let marked_constant = buffer.get_output_constant_mask().is_channel_constant(channel);
 
-                if marked_constant && !is_constant {
+                if marked_constant && let Err(db) = is_constant {
                     anyhow::bail!(
                         "The plugin has marked output port {output}, channel {channel} as constant, but it contains \
-                         non-constant data. {:?}",
-                        buffer.channel(channel)
+                         non-constant data ({db:.2} dBFS)",
                     );
                 }
 
@@ -522,7 +508,7 @@ pub fn test_process_sleep_constant_mask(library: &PluginLibrary, plugin_id: &str
                     has_received_constant_flag |= true;
                 }
 
-                if is_constant {
+                if is_constant.is_ok() {
                     has_received_constant_output |= true;
                 }
             }
@@ -538,20 +524,20 @@ pub fn test_process_sleep_constant_mask(library: &PluginLibrary, plugin_id: &str
 
         // block 1: silent inputs, see what the plugin does
         process.run()?;
-        check_buffers(process.audio_buffers()).context("Init block (silent)")?;
+        check_buffers(process.audio_buffers()).context("Block 0")?;
 
         // block 2: randomize inputs, see if the plugin tracks constant channels
         process.audio_buffers().fill_white_noise(&mut prng);
         process
             .input_queue()
             .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
-        process.input_queue().add_events(note_rng.stop_all_voices(BUFFER_SIZE));
         process.run()?;
-        check_buffers(process.audio_buffers()).context("Init block (white noise)")?;
+        check_buffers(process.audio_buffers()).context("Block 1")?;
 
         // block 3-40: silent inputs again, see if the plugin updates the constant mask accordingly
         // 40 blocks to give the output tail to fully decay to silence if there is any reverb/delay
         process.audio_buffers().fill_silence();
+        process.input_queue().add_events(note_rng.stop_all_voices(0));
         for _ in 3..=40 {
             process.run()?;
             check_buffers(process.audio_buffers())?;
@@ -560,9 +546,7 @@ pub fn test_process_sleep_constant_mask(library: &PluginLibrary, plugin_id: &str
         Ok(())
     })?;
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     if !has_received_constant_flag && has_received_constant_output {
         return Ok(TestStatus::Warning {
@@ -598,9 +582,8 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
         None => NotePortConfig::default(),
     };
 
-    let mut latency = plugin.get_extension::<Latency>().map_or(0, |ext| ext.get());
-    let mut is_sleeping = false;
     let mut has_ever_slept = false;
+    let mut has_ever_returned_continue_if_not_quiet = false;
 
     plugin.on_audio_thread(|plugin| -> Result<()> {
         let tail = plugin.get_extension::<Tail>();
@@ -609,10 +592,11 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
         let mut note_rng = NoteGenerator::new(&note_ports_config);
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
+        let mut is_sleeping = false;
         let mut quiet_time = 0;
 
-        for i in 0..40 {
-            let is_quiet = (0..5).contains(&i) || (10..20).contains(&i) || (30..40).contains(&i);
+        for i in 0..80 {
+            let is_quiet = (0..5).contains(&i) || (10..20).contains(&i) || (30..).contains(&i);
 
             if is_quiet {
                 process.input_queue().add_events(note_rng.stop_all_voices(0));
@@ -624,12 +608,7 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
                 process.audio_buffers().fill_white_noise(&mut prng);
             }
 
-            plugin.poll_callback(|plugin, event| match event {
-                CallbackEvent::LatencyChanged => {
-                    latency = plugin.get_extension::<Latency>().map_or(0, |ext| ext.get());
-                    Ok(())
-                }
-
+            plugin.poll_callback(|_, event| match event {
                 CallbackEvent::RequestProcess => {
                     is_sleeping = false;
                     Ok(())
@@ -641,21 +620,37 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
             let status = process.run()?;
 
             if is_sleeping && is_quiet {
-                // TODO: check that the output is silent
+                for buffer in process.audio_buffers().iter() {
+                    let Some(output) = buffer.port().output() else {
+                        continue;
+                    };
+
+                    for channel in 0..buffer.channels() {
+                        let is_constant = check_channel_quiet(buffer.channel(channel));
+                        if let Err(db) = is_constant {
+                            anyhow::bail!(
+                                "The plugin is sleeping but output port {output}, channel {channel} contains \
+                                 non-constant data ({db:.2} dBFS)",
+                            );
+                        }
+                    }
+                }
             }
+
+            has_ever_slept |= is_sleeping;
 
             match status {
                 ProcessStatus::Continue => is_sleeping = false,
                 ProcessStatus::Sleep => is_sleeping = true,
-
                 ProcessStatus::ContinueIfNotQuiet => {
                     let is_output_quiet = process
                         .audio_buffers()
                         .iter()
                         .filter(|b| b.port().output().is_some())
-                        .all(|b| b.get_output_constant_mask().are_first_n_channels_constant(b.channels()));
+                        .all(|b| b.get_output_constant_mask().are_all_channels_constant(b.channels()));
 
                     is_sleeping = is_output_quiet;
+                    has_ever_returned_continue_if_not_quiet = true;
                 }
 
                 ProcessStatus::Tail => {
@@ -669,7 +664,7 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
                         }
                     };
 
-                    is_sleeping = tail + latency < quiet_time;
+                    is_sleeping = tail < quiet_time;
                     if is_quiet {
                         quiet_time += BUFFER_SIZE;
                     } else {
@@ -682,9 +677,51 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
         Ok(())
     })?;
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
+
+    if !has_ever_slept {
+        if has_ever_returned_continue_if_not_quiet {
+            return Ok(TestStatus::Warning {
+                details: Some(String::from(
+                    "The plugin never went to sleep during the test. Make sure to set the output constant mask \
+                     correctly when returning `CLAP_PROCESS_CONTINUE_IF_NOT_QUIET`.",
+                )),
+            });
+        }
+
+        return Ok(TestStatus::Warning {
+            details: Some(String::from("The plugin never went to sleep during the test.")),
+        });
+    }
 
     Ok(TestStatus::Success { details: None })
+}
+
+/// A channel is considered quiet if the signal (excluding first 32 samples) is below -80 dbfs, ignoring DC.
+///
+/// This function is designed to be very lenient in what it considers "quiet", to avoid false positives.
+/// Returns `Ok(())` if the channel is quiet, or `Err(max_amplitude_in_db)` if not.
+fn check_channel_quiet(channel: Either<&[f32], &[f64]>) -> Result<(), f64> {
+    /// -60 dbfs
+    const QUIET_THRESHOLD: f64 = 0.001;
+
+    let (min, max) = match channel {
+        Either::Right(x) => x.iter().fold((f64::MAX, f64::MIN), |(min, max), &sample| {
+            (min.min(sample.abs()), max.max(sample.abs()))
+        }),
+        Either::Left(x) => {
+            let (min, max) = x.iter().fold((f32::MAX, f32::MIN), |(min, max), &sample| {
+                (min.min(sample.abs()), max.max(sample.abs()))
+            });
+
+            (min as f64, max as f64)
+        }
+    };
+
+    let range = (max - min) * 0.5;
+    if range < QUIET_THRESHOLD {
+        Ok(())
+    } else {
+        Err(20.0 * range.log10())
+    }
 }

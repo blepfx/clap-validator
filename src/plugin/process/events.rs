@@ -1,7 +1,8 @@
 use clap_sys::events::*;
-use std::{pin::Pin, sync::Mutex};
+use std::pin::Pin;
+use std::sync::Mutex;
 
-use crate::util::check_null_ptr;
+use crate::panic::fail_test;
 
 /// An event queue that can be used as either an input queue or an output queue. This is always
 /// allocated through a `Pin<Box<EventQueue>>` so the pointers are stable. The `VTable` type
@@ -98,7 +99,10 @@ impl EventQueue {
 
     unsafe extern "C" fn size(list: *const clap_input_events) -> u32 {
         unsafe {
-            check_null_ptr!(list, (*list).ctx);
+            if list.is_null() || (*list).ctx.is_null() {
+                fail_test!("'clap_input_events::size' was called with a null pointer");
+            }
+
             let this = &*((*list).ctx as *const Self);
             this.events.lock().unwrap().len() as u32
         }
@@ -106,9 +110,11 @@ impl EventQueue {
 
     unsafe extern "C" fn get(list: *const clap_input_events, index: u32) -> *const clap_event_header {
         unsafe {
-            check_null_ptr!(list, (*list).ctx);
-            let this = &*((*list).ctx as *const Self);
+            if list.is_null() || (*list).ctx.is_null() {
+                fail_test!("'clap_input_events::get' was called with a null pointer");
+            }
 
+            let this = &*((*list).ctx as *const Self);
             let events = this.events.lock().unwrap();
             match events.get(index as usize) {
                 Some(event) => event.header(),
@@ -125,13 +131,14 @@ impl EventQueue {
 
     unsafe extern "C" fn try_push(list: *const clap_output_events, event: *const clap_event_header) -> bool {
         unsafe {
-            check_null_ptr!(list, (*list).ctx, event);
-            let this = &*((*list).ctx as *const Self);
+            if list.is_null() || (*list).ctx.is_null() || event.is_null() {
+                fail_test!("'clap_output_events::try_push' was called with a null pointer");
+            }
 
             // The monotonicity of the plugin's event insertion order is checked as part of the output
             // consistency checks
+            let this = &*((*list).ctx as *const Self);
             this.events.lock().unwrap().push(Event::from_raw(event));
-
             true
         }
     }

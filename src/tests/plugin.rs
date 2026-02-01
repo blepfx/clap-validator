@@ -141,10 +141,13 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::ProcessSleepConstantMask => String::from(
                 "Processes random audio through the plugin with its default parameter values while setting the \
                  constant mask on silent blocks, and tests whether the output does not contain any non-finite or \
-                 subnormal values and that the plugin sets the constant mask correctly. Uses out-of-place audio \
-                 processing.",
+                 subnormal values and that the plugin sets the constant mask correctly",
             ),
-            PluginTestCase::ProcessSleepProcessStatus => String::from("TODO: write ts"),
+            PluginTestCase::ProcessSleepProcessStatus => String::from(
+                "Processes random audio through the plugin with its default parameter values while checking if the \
+                 output is consistent with the returned process status, and tests whether the output does not contain \
+                 any non-finite or subnormal values and that the plugin sets the process status correctly",
+            ),
             PluginTestCase::ProcessNoteOutOfPlaceBasic => String::from(
                 "Sends audio and random note and MIDI events to the plugin with its default parameter values and \
                  tests the output for consistency. Uses out-of-place audio processing.",
@@ -161,7 +164,7 @@ impl<'a> TestCase<'a> for PluginTestCase {
             ),
             PluginTestCase::ProcessVaryingBlockSizes => String::from(
                 "Processes random audio and random note events through the plugin with its default parameter values \
-                 while trying different maximum block sizes ranging from 1 to 32768, including non-power-of-two ones, \
+                 while trying different maximum block sizes ranging from 1 to 16k, including non-power-of-two ones, \
                  and tests whether the output does not contain any non-finite or subnormal values. Uses out-of-place \
                  audio processing.",
             ),

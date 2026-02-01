@@ -2,7 +2,7 @@
 
 use super::Extension;
 use crate::plugin::instance::Plugin;
-use crate::util::clap_call;
+use crate::plugin::util::clap_call;
 use anyhow::{Context, Result};
 use clap_sys::ext::note_ports::*;
 use clap_sys::id::CLAP_INVALID_ID;

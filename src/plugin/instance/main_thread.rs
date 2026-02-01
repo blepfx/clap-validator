@@ -1,20 +1,15 @@
-use crate::{
-    plugin::{
-        ext::Extension,
-        instance::{CallbackEvent, PluginAudioThread, PluginShared, PluginStatus},
-        library::PluginMetadata,
-    },
-    util::clap_call,
-};
+use crate::plugin::ext::Extension;
+use crate::plugin::instance::{CallbackEvent, PluginAudioThread, PluginShared, PluginStatus};
+use crate::plugin::library::PluginMetadata;
+use crate::plugin::util::clap_call;
 use anyhow::Result;
 use clap_sys::plugin::clap_plugin;
-use std::{
-    marker::PhantomData,
-    panic::resume_unwind,
-    pin::Pin,
-    ptr::NonNull,
-    sync::{Arc, mpsc::Receiver},
-};
+use std::marker::PhantomData;
+use std::panic::resume_unwind;
+use std::pin::Pin;
+use std::ptr::NonNull;
+use std::sync::Arc;
+use std::sync::mpsc::Receiver;
 
 pub enum MainThreadTask {
     Dispatch {
@@ -151,7 +146,7 @@ impl<'lib> Plugin<'lib> {
             let shared = self.shared.clone();
             let thread = s
                 .builder()
-                .name("audio_thread".into())
+                .name("audio-thread".into())
                 .spawn(move |_| f(PluginAudioThread::new(shared)))
                 .unwrap();
 

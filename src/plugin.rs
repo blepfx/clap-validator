@@ -5,3 +5,4 @@ pub mod instance;
 pub mod library;
 pub mod preset_discovery;
 pub mod process;
+pub mod util;

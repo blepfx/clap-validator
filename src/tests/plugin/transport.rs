@@ -1,17 +1,9 @@
-use crate::{
-    plugin::{
-        ext::{
-            audio_ports::{AudioPortConfig, AudioPorts},
-            note_ports::{NotePortConfig, NotePorts},
-        },
-        library::PluginLibrary,
-        process::{AudioBuffers, Event, ProcessScope, TransportState},
-    },
-    tests::{
-        TestStatus,
-        rng::{NoteGenerator, TransportFuzzer, new_prng},
-    },
-};
+use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
+use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
+use crate::plugin::library::PluginLibrary;
+use crate::plugin::process::{AudioBuffers, Event, ProcessScope, TransportState};
+use crate::tests::TestStatus;
+use crate::tests::rng::{NoteGenerator, TransportFuzzer, new_prng};
 use anyhow::{Context, Result};
 
 const BUFFER_SIZE: u32 = 128;
@@ -56,9 +48,7 @@ pub fn test_transport_null(library: &PluginLibrary, plugin_id: &str) -> Result<T
         Ok(())
     })?;
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -105,9 +95,7 @@ pub fn test_transport_fuzz(library: &PluginLibrary, plugin_id: &str) -> Result<T
         Ok(())
     })?;
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -192,9 +180,7 @@ pub fn test_transport_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &
             })?;
     }
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     Ok(TestStatus::Success { details: None })
 }

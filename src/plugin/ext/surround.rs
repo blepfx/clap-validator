@@ -1,9 +1,9 @@
-use crate::{
-    plugin::{ext::Extension, instance::Plugin},
-    util::clap_call,
-};
+use crate::plugin::ext::Extension;
+use crate::plugin::instance::Plugin;
+use crate::plugin::util::clap_call;
 use clap_sys::ext::surround::*;
-use std::{ffi::CStr, ptr::NonNull};
+use std::ffi::CStr;
+use std::ptr::NonNull;
 
 pub struct Surround<'a> {
     plugin: &'a Plugin<'a>,

@@ -1,9 +1,10 @@
-use crate::{
-    plugin::{ext::Extension, instance::Plugin},
-    util::clap_call,
-};
+use crate::plugin::ext::Extension;
+use crate::plugin::instance::Plugin;
+use crate::plugin::util::clap_call;
 use clap_sys::ext::ambisonic::*;
-use std::{ffi::CStr, mem::zeroed, ptr::NonNull};
+use std::ffi::CStr;
+use std::mem::zeroed;
+use std::ptr::NonNull;
 
 pub struct Ambisonic<'a> {
     plugin: &'a Plugin<'a>,

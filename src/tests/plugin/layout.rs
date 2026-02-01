@@ -5,9 +5,9 @@ use crate::plugin::ext::configurable_audio_ports::ConfigurableAudioPorts;
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::process::{AudioBuffers, ProcessScope};
+use crate::plugin::util::{cstr_ptr_to_mandatory_string, cstr_ptr_to_string};
 use crate::tests::TestStatus;
 use crate::tests::rng::{NoteGenerator, new_prng, random_layout_requests};
-use crate::util::{cstr_ptr_to_mandatory_string, cstr_ptr_to_string};
 use anyhow::{Context, Result};
 use clap_sys::ext::audio_ports::clap_audio_port_info;
 
@@ -230,9 +230,7 @@ pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) 
             })?;
     }
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     Ok(TestStatus::Success { details: None })
 }
@@ -333,9 +331,7 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
             })?;
     }
 
-    plugin
-        .poll_callback(|_| Ok(()))
-        .context("An error occured during a callback")?;
+    plugin.poll_callback(|_| Ok(()))?;
 
     if checks_passed == 0 {
         return Ok(TestStatus::Warning {

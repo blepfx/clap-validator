@@ -3,6 +3,7 @@ use std::process::ExitCode;
 
 mod commands;
 mod index;
+mod panic;
 mod plugin;
 mod tests;
 mod util;
@@ -74,7 +75,7 @@ fn main() -> ExitCode {
     .expect("Could not initialize logger");
 
     // Install the panic hook to log panics instead of printing them to stderr.
-    util::install_panic_hook();
+    panic::install_panic_hook();
 
     // Mark the main thread as such for plugin instance creation checks.
     unsafe {

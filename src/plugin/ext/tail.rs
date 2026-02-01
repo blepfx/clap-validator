@@ -1,6 +1,6 @@
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::PluginAudioThread;
-use crate::util::clap_call;
+use crate::plugin::util::clap_call;
 use clap_sys::ext::tail::{CLAP_EXT_TAIL, clap_plugin_tail};
 use std::ffi::CStr;
 use std::ptr::NonNull;

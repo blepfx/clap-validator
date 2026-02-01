@@ -1,9 +1,9 @@
-use crate::{
-    plugin::{ext::Extension, instance::Plugin},
-    util::clap_call,
-};
+use crate::plugin::ext::Extension;
+use crate::plugin::instance::Plugin;
+use crate::plugin::util::clap_call;
 use clap_sys::ext::audio_ports_activation::*;
-use std::{ffi::CStr, ptr::NonNull};
+use std::ffi::CStr;
+use std::ptr::NonNull;
 
 /// Abstraction for the `audio-ports-activation` extension covering the main thread functionality.
 pub struct AudioPortsActivation<'a> {

@@ -1,15 +1,14 @@
-use crate::plugin::{ext::audio_ports::AudioPortConfig, process::ConstantMask};
+use crate::plugin::ext::audio_ports::AudioPortConfig;
+use crate::plugin::process::ConstantMask;
 use anyhow::Result;
 use clap_sys::audio_buffer::*;
 use either::Either;
 use rand::Rng;
 use rand_pcg::Pcg32;
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-    ops::{Deref, DerefMut},
-    ptr::null_mut,
-};
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::ops::{Deref, DerefMut};
+use std::ptr::null_mut;
 
 /// Audio buffers for audio processing. These contain both input and output buffers, that can be either in-place
 /// or out-of-place, single or double precision.
@@ -161,6 +160,11 @@ impl AudioBuffers {
             if let Some(input) = buffer.port().input() {
                 self.clap_inputs[input].constant_mask = buffer.input_constant_mask.0;
                 self.clap_inputs[input].latency = buffer.input_latency;
+            }
+
+            if let Some(output) = buffer.port().output() {
+                self.clap_outputs[output].constant_mask = 0;
+                self.clap_outputs[output].latency = 0;
             }
         }
 

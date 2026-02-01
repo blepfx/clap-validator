@@ -126,4 +126,9 @@ impl ConstantMask {
     pub fn is_channel_constant(&self, channel: u32) -> bool {
         self.0 & 1u64.unbounded_shl(channel) != 0
     }
+
+    pub fn are_first_n_channels_constant(&self, n: u32) -> bool {
+        let mask = (1u64.unbounded_shl(n)).wrapping_sub(1);
+        (self.0 & mask) == mask
+    }
 }

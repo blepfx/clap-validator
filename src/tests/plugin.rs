@@ -37,8 +37,10 @@ pub enum PluginTestCase {
     ProcessAudioDoubleOutOfPlace,
     #[strum(serialize = "process-audio-double-in-place")]
     ProcessAudioDoubleInPlace,
-    #[strum(serialize = "process-audio-constant-mask")]
-    ProcessAudioConstantMask,
+    #[strum(serialize = "process-sleep-constant-mask")]
+    ProcessSleepConstantMask,
+    #[strum(serialize = "process-sleep-process-status")]
+    ProcessSleepProcessStatus,
     #[strum(serialize = "process-audio-reset-determinism")]
     ProcessAudioResetDeterminism,
     #[strum(serialize = "process-note-out-of-place-basic")]
@@ -136,12 +138,13 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  'audio-ports-config' extension.",
                 PluginTestCase::ProcessAudioBasicInPlace,
             ),
-            PluginTestCase::ProcessAudioConstantMask => String::from(
+            PluginTestCase::ProcessSleepConstantMask => String::from(
                 "Processes random audio through the plugin with its default parameter values while setting the \
                  constant mask on silent blocks, and tests whether the output does not contain any non-finite or \
                  subnormal values and that the plugin sets the constant mask correctly. Uses out-of-place audio \
                  processing.",
             ),
+            PluginTestCase::ProcessSleepProcessStatus => String::from("TODO: write ts"),
             PluginTestCase::ProcessNoteOutOfPlaceBasic => String::from(
                 "Sends audio and random note and MIDI events to the plugin with its default parameter values and \
                  tests the output for consistency. Uses out-of-place audio processing.",
@@ -278,8 +281,11 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::ProcessAudioDoubleInPlace => {
                 processing::test_process_audio_double(library, plugin_id, true)
             }
-            PluginTestCase::ProcessAudioConstantMask => {
-                processing::test_process_audio_constant_mask(library, plugin_id)
+            PluginTestCase::ProcessSleepConstantMask => {
+                processing::test_process_sleep_constant_mask(library, plugin_id)
+            }
+            PluginTestCase::ProcessSleepProcessStatus => {
+                processing::test_process_sleep_process_status(library, plugin_id)
             }
             PluginTestCase::ProcessAudioResetDeterminism => {
                 processing::test_process_audio_reset_determinism(library, plugin_id)

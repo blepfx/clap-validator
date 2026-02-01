@@ -2,7 +2,7 @@
 
 use super::{Plugin, PluginStatus};
 use crate::plugin::ext::Extension;
-use crate::plugin::instance::{MainThreadTask, PluginShared};
+use crate::plugin::instance::{CallbackEvent, MainThreadTask, PluginShared};
 use crate::util::clap_call;
 use anyhow::Result;
 use clap_sys::plugin::clap_plugin;
@@ -10,10 +10,14 @@ use clap_sys::process::{
     CLAP_PROCESS_CONTINUE, CLAP_PROCESS_CONTINUE_IF_NOT_QUIET, CLAP_PROCESS_ERROR, CLAP_PROCESS_SLEEP,
     CLAP_PROCESS_TAIL, clap_process,
 };
+use std::any::Any;
 use std::marker::PhantomData;
+use std::mem::MaybeUninit;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
+use std::sync::mpsc::SyncSender;
 
 /// An audio thread equivalent to [`Plugin`]. This version only allows audio thread functions to be
 /// called. It can be constructed using [`Plugin::on_audio_thread()`].
@@ -95,18 +99,36 @@ impl<'a> PluginAudioThread<'a> {
     /// for the task to complete and return its result.
     ///
     /// TODO: this could be optimized and the 'static requirement dropped.
-    pub fn dispatch_main<F: FnOnce(&Plugin) -> T + Send + 'static, T: Send + 'static>(&self, callback: F) -> T {
-        let (send, recv) = std::sync::mpsc::sync_channel(0);
+    pub fn on_main_thread<F: FnOnce(&Plugin) -> T + Send, T: Send + 'static>(&self, callback: F) -> T {
+        struct Context<F, T> {
+            sender: SyncSender<Result<T, Box<dyn Any + Send>>>,
+            callback: F,
+        }
+
+        let (sender, recv) = std::sync::mpsc::sync_channel(0);
+        let context = MaybeUninit::new(Context { sender, callback });
 
         self.shared
             .task_sender
-            .send(MainThreadTask::Dispatch(Box::new(move |plugin| {
-                let result = callback(plugin);
-                send.send(result).unwrap();
-            })))
+            .send(MainThreadTask::Dispatch {
+                data: context.as_ptr() as *mut (),
+                call: |plugin, data| {
+                    // Safety: we are the only ones with access to this pointer right now.
+                    let context = unsafe { (data as *mut Context<F, T>).read() };
+                    let result = catch_unwind(AssertUnwindSafe(|| (context.callback)(plugin)));
+                    context.sender.send(result).unwrap();
+                },
+            })
             .unwrap();
 
-        recv.recv().unwrap()
+        match recv.recv().unwrap() {
+            Ok(value) => value,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    }
+
+    pub fn poll_callback(&self, mut f: impl FnMut(&Plugin, CallbackEvent) -> Result<()> + Send) -> Result<()> {
+        self.on_main_thread(|plugin| plugin.poll_callback(|event| f(plugin, event)))
     }
 
     /// Prepare for audio processing. Returns an error if the plugin returned `false`. See

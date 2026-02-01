@@ -17,7 +17,11 @@ use std::{
 };
 
 pub enum MainThreadTask {
-    Dispatch(Box<dyn FnOnce(&Plugin) + Send>),
+    Dispatch {
+        call: fn(&Plugin<'_>, *mut ()),
+        data: *mut (),
+    },
+
     CallbackRequest,
     StopAudioThread,
 }
@@ -140,8 +144,11 @@ impl<'lib> Plugin<'lib> {
     /// then those will be handled concurrently.
     pub fn on_audio_thread<T: Send, F: FnOnce(PluginAudioThread) -> T + Send>(&self, f: F) -> T {
         let result = crossbeam::scope(|s| {
-            let shared = self.shared.clone();
+            if self.shared.audio_thread_id.load().is_some() {
+                panic!("An audio thread is already running for this plugin instance.");
+            }
 
+            let shared = self.shared.clone();
             let thread = s
                 .builder()
                 .name("audio_thread".into())
@@ -151,7 +158,7 @@ impl<'lib> Plugin<'lib> {
             // Handle callbacks requests on the main thread while the audio thread is running
             while let Ok(task) = self.task_receiver.recv() {
                 match task {
-                    MainThreadTask::Dispatch(func) => func(self),
+                    MainThreadTask::Dispatch { call, data } => call(self, data),
                     MainThreadTask::CallbackRequest => self.poll_callback_unchecked(),
                     MainThreadTask::StopAudioThread => break,
                 }

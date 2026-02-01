@@ -1,18 +1,15 @@
-use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
+use crate::plugin::ext::audio_ports::AudioPorts;
 use crate::plugin::ext::audio_ports_activation::AudioPortsActivation;
 use crate::plugin::ext::audio_ports_config::{AudioPortsConfig, AudioPortsConfigInfo};
-use crate::plugin::ext::configurable_audio_ports::{AudioPortsRequest, ConfigurableAudioPorts};
+use crate::plugin::ext::configurable_audio_ports::ConfigurableAudioPorts;
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::process::{AudioBuffers, ProcessScope};
 use crate::tests::TestStatus;
-use crate::tests::rng::{NoteGenerator, new_prng};
+use crate::tests::rng::{NoteGenerator, new_prng, random_layout_requests};
 use crate::util::{cstr_ptr_to_mandatory_string, cstr_ptr_to_string};
 use anyhow::{Context, Result};
 use clap_sys::ext::audio_ports::clap_audio_port_info;
-use rand::Rng;
-use rand::seq::SliceRandom;
-use rand_pcg::Pcg32;
 
 const BUFFER_SIZE: u32 = 512;
 
@@ -242,44 +239,6 @@ pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) 
 
 /// The test for `PluginTestCase::LayoutConfigurableAudioPorts`.
 pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
-    fn random_layout_requests(prng: &mut Pcg32, config: &AudioPortConfig) -> Vec<AudioPortsRequest> {
-        let mut requests = Vec::new();
-
-        for (i, _) in config.inputs.iter().enumerate() {
-            requests.push(AudioPortsRequest {
-                is_input: true,
-                port_index: i as u32,
-                channel_count: prng.random_range(0..=8),
-            });
-        }
-
-        for (i, _) in config.outputs.iter().enumerate() {
-            requests.push(AudioPortsRequest {
-                is_input: false,
-                port_index: i as u32,
-                channel_count: prng.random_range(0..=8),
-            });
-        }
-
-        requests.shuffle(prng);
-        requests
-    }
-
-    fn print_layout_requests(requests: &[AudioPortsRequest]) -> String {
-        let mut result = Vec::new();
-
-        for request in requests {
-            result.push(format!(
-                "{}{}-{}ch",
-                if request.is_input { "in" } else { "out" },
-                request.port_index,
-                request.channel_count,
-            ));
-        }
-
-        result.join(" ")
-    }
-
     let mut prng = new_prng();
     let plugin = library
         .create_plugin(plugin_id)
@@ -323,9 +282,10 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
     let mut checks_passed = 0;
 
     while checks_total < 200 && checks_passed < 20 {
-        let requests = random_layout_requests(&mut prng, &config_audio_ports);
-        let can_apply = configurable_audio_ports.can_apply_configuration(requests.iter().cloned());
-        let has_applied = configurable_audio_ports.apply_configuration(requests.iter().cloned());
+        let requests = random_layout_requests(&config_audio_ports, &mut prng);
+
+        let can_apply = configurable_audio_ports.can_apply_configuration(requests.iter().copied());
+        let has_applied = configurable_audio_ports.apply_configuration(requests.iter().copied());
 
         if can_apply != has_applied {
             anyhow::bail!(
@@ -333,7 +293,7 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
                  'apply_configuration' ({}) for the following layout: {}",
                 can_apply,
                 has_applied,
-                print_layout_requests(&requests),
+                requests.iter().map(|r| format!("{}", r)).collect::<Vec<_>>().join(", ")
             );
         }
 
@@ -368,7 +328,7 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
             .with_context(|| {
                 format!(
                     "Error while processing audio with the following configuration: {}",
-                    print_layout_requests(&requests)
+                    requests.iter().map(|r| format!("{}", r)).collect::<Vec<_>>().join(", ")
                 )
             })?;
     }

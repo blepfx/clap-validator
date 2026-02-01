@@ -27,7 +27,6 @@ impl<'a> Extension<&'a Plugin<'a>> for Latency<'a> {
 impl<'a> Latency<'a> {
     #[allow(unused)]
     pub fn get(&self) -> u32 {
-        self.plugin.status().assert_is_not(PluginStatus::Uninitialized);
         self.plugin.status().assert_is_not(PluginStatus::Deactivated);
 
         let latency = self.latency.as_ptr();

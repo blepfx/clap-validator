@@ -1,8 +1,5 @@
 //! Data structures and functions surrounding audio processing.
-use crate::plugin::{
-    ext::tail::Tail,
-    instance::{PluginAudioThread, PluginStatus, ProcessStatus},
-};
+use crate::plugin::instance::{PluginAudioThread, PluginStatus, ProcessStatus};
 use anyhow::Result;
 use clap_sys::process::*;
 use std::pin::Pin;
@@ -17,8 +14,6 @@ pub use transport::*;
 
 pub struct ProcessScope<'a> {
     plugin: &'a PluginAudioThread<'a>,
-    plugin_tail: Option<Tail<'a>>,
-
     buffer: &'a mut AudioBuffers,
 
     events_input: Pin<Box<EventQueue>>,
@@ -42,8 +37,6 @@ impl<'a> ProcessScope<'a> {
 
         Ok(ProcessScope {
             plugin,
-            plugin_tail: plugin.get_extension(),
-
             buffer,
             events_input: EventQueue::new(),
             events_output: EventQueue::new(),
@@ -101,7 +94,7 @@ impl<'a> ProcessScope<'a> {
             let sample_rate = self.sample_rate;
             let buffer_size = self.buffer.samples();
             self.plugin
-                .dispatch_main(move |plugin| plugin.activate(sample_rate, 1, buffer_size))?;
+                .on_main_thread(move |plugin| plugin.activate(sample_rate, 1, buffer_size))?;
         }
 
         // start processing if needed
@@ -161,12 +154,6 @@ impl<'a> ProcessScope<'a> {
         // check output audio buffers for NaNs or infinities
         check_process_call_consistency(&self.buffer[..], &original_buffers, self.output_queue(), samples)?;
 
-        if status == ProcessStatus::Tail && self.plugin_tail.is_none() {
-            anyhow::bail!(
-                "Plugin returned `CLAP_PROCESS_TAIL` process status but does not implement the 'tail' extension."
-            );
-        }
-
         Ok(status)
     }
 
@@ -176,7 +163,7 @@ impl<'a> ProcessScope<'a> {
         }
 
         if self.plugin.status() == PluginStatus::Activated {
-            self.plugin.dispatch_main(|plugin| {
+            self.plugin.on_main_thread(|plugin| {
                 plugin.deactivate();
             });
         }

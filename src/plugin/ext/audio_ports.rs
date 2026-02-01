@@ -82,7 +82,7 @@ impl AudioPorts<'_> {
         };
 
         for index in 0..num_inputs {
-            let info = match self.get_raw_port_info(false, index) {
+            let info = match self.get_raw_port_info(true, index) {
                 Some(info) => info,
                 None => {
                     anyhow::bail!(

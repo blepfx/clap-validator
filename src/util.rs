@@ -169,7 +169,8 @@ pub fn validator_version() -> &'static CStr {
 }
 
 pub fn install_panic_hook() {
-    std::panic::set_hook(Box::new(move |info| {
+    #[track_caller]
+    fn hook(info: &std::panic::PanicHookInfo) {
         let backtrace = std::backtrace::Backtrace::capture();
         let backtrace = if backtrace.status() == std::backtrace::BacktraceStatus::Disabled {
             String::from(". Set RUST_BACKTRACE=1 for a backtrace.")
@@ -207,7 +208,9 @@ pub fn install_panic_hook() {
                 backtrace
             ),
         }
-    }));
+    }
+
+    std::panic::set_hook(Box::new(hook));
 }
 
 impl<T: ?Sized> IteratorExt for T where T: Iterator {}

@@ -1,12 +1,15 @@
 //! Utilities for generating pseudo-random data.
 
+use crate::plugin::ext::audio_ports::AudioPortConfig;
+use crate::plugin::ext::configurable_audio_ports::{AudioPortsRequest, AudioPortsRequestInfo};
 use crate::plugin::ext::note_ports::NotePortConfig;
 use crate::plugin::ext::params::{Param, ParamInfo};
-use crate::plugin::process::{Event, EventQueue, TransportState};
+use crate::plugin::process::{Event, TransportState};
 use clap_sys::events::*;
+use clap_sys::ext::ambisonic::*;
 use midi_consts::channel_event as midi;
 use rand::Rng;
-use rand::seq::IteratorRandom;
+use rand::seq::{IndexedRandom, IteratorRandom};
 use rand_pcg::Pcg32;
 use std::ops::RangeInclusive;
 
@@ -595,13 +598,12 @@ impl<'a> NoteGenerator<'a> {
         panic!("Unable to generate a random note event after 1024 tries");
     }
 
-    #[allow(unused)]
-    pub fn stop_all_voices(&mut self, queue: &EventQueue, time_offset: u32) {
+    pub fn stop_all_voices(&mut self, time_offset: u32) -> Vec<Event> {
         let mut events = vec![];
-        for (note_port_idx, active_notes) in self.active_notes.drain(..).enumerate() {
+        for (note_port_idx, active_notes) in self.active_notes.iter_mut().enumerate() {
             let supports_clap = self.config.inputs[note_port_idx].supports_clap();
 
-            for note in active_notes {
+            for note in active_notes.drain(..) {
                 if supports_clap {
                     events.push(Event::Note(clap_event_note {
                         header: clap_event_header {
@@ -633,7 +635,7 @@ impl<'a> NoteGenerator<'a> {
             }
         }
 
-        queue.add_events(events);
+        events
     }
 
     #[allow(unused)]
@@ -872,4 +874,84 @@ impl TransportFuzzer {
             transport.position_beats = None;
         }
     }
+}
+
+pub fn random_layout_requests(config: &AudioPortConfig, prng: &mut Pcg32) -> Vec<AudioPortsRequest<'static>> {
+    fn random_request_info(prng: &mut Pcg32) -> AudioPortsRequestInfo<'static> {
+        match prng.random_range(0..=4) {
+            0 => AudioPortsRequestInfo::Mono,
+            1 => AudioPortsRequestInfo::Stereo,
+            2 => AudioPortsRequestInfo::Untyped {
+                channel_count: prng.random_range(1..=16),
+            },
+            3 => {
+                const AMBISONIC_ACN_SN3D: clap_ambisonic_config = clap_ambisonic_config {
+                    ordering: CLAP_AMBISONIC_ORDERING_ACN,
+                    normalization: CLAP_AMBISONIC_NORMALIZATION_SN3D,
+                };
+
+                const AMBISONIC_FUMA_MAXN: clap_ambisonic_config = clap_ambisonic_config {
+                    ordering: CLAP_AMBISONIC_ORDERING_FUMA,
+                    normalization: CLAP_AMBISONIC_NORMALIZATION_MAXN,
+                };
+
+                let channel_count = prng.random_range(1..=4u32).pow(2);
+                let is_acn_sn3d = prng.random_bool(0.5);
+
+                AudioPortsRequestInfo::Ambisonic {
+                    channel_count,
+                    config: if is_acn_sn3d {
+                        &AMBISONIC_ACN_SN3D
+                    } else {
+                        &AMBISONIC_FUMA_MAXN
+                    },
+                }
+            }
+            _ => {
+                const SURROUND_MAPS: &[&[u8]] = &[
+                    &[0, 1],              // Stereo; FL FR
+                    &[0, 2, 1],           // 3.0;    FL FC FR
+                    &[0, 2, 1, 3],        // 3.1;    FL FC FR LFE
+                    &[0, 2, 1, 8],        // 4.0;    FL FC FR BC
+                    &[0, 2, 1, 8, 3],     // 4.1;    FL FC FR BC LFE
+                    &[0, 2, 1, 9, 10],    // 5.0;    FL FC FR SL SR
+                    &[0, 2, 1, 9, 10, 3], // 5.1;    FL FC FR SL SR LFE
+                ];
+
+                AudioPortsRequestInfo::Surround {
+                    channel_map: SURROUND_MAPS.choose(prng).unwrap(),
+                }
+            }
+        }
+    }
+
+    let mut requests = vec![];
+
+    for index in 0..config.inputs.len() {
+        if prng.random_bool(0.1) {
+            // skip request for some inputs
+            continue;
+        }
+
+        requests.push(AudioPortsRequest {
+            is_input: true,
+            port_index: index as u32,
+            request_info: random_request_info(prng),
+        });
+    }
+
+    for index in 0..config.outputs.len() {
+        if prng.random_bool(0.1) {
+            // skip request for some outputs
+            continue;
+        }
+
+        requests.push(AudioPortsRequest {
+            is_input: false,
+            port_index: index as u32,
+            request_info: random_request_info(prng),
+        });
+    }
+
+    requests
 }

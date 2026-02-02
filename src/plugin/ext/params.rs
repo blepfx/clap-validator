@@ -2,8 +2,8 @@
 
 use super::Extension;
 use crate::plugin::instance::{Plugin, PluginStatus};
-use crate::plugin::process::EventQueue;
-use crate::plugin::util::{self, c_char_slice_to_string, clap_call};
+use crate::plugin::process::{InputEventQueue, OutputEventQueue};
+use crate::plugin::util::{self, Proxy, c_char_slice_to_string, clap_call};
 use anyhow::{Context, Result};
 use clap_sys::ext::params::*;
 use clap_sys::id::{CLAP_INVALID_ID, clap_id};
@@ -11,7 +11,6 @@ use clap_sys::string_sizes::CLAP_NAME_SIZE;
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString, c_void};
 use std::ops::RangeInclusive;
-use std::pin::Pin;
 use std::ptr::NonNull;
 
 pub type ParamInfo = BTreeMap<clap_id, Param>;
@@ -22,9 +21,10 @@ pub struct Params<'a> {
     params: NonNull<clap_plugin_params>,
 }
 
-impl<'a> Extension<&'a Plugin<'a>> for Params<'a> {
+impl<'a> Extension for Params<'a> {
     const IDS: &'static [&'static CStr] = &[CLAP_EXT_PARAMS];
 
+    type Plugin = &'a Plugin<'a>;
     type Struct = clap_plugin_params;
 
     unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
@@ -321,15 +321,10 @@ impl Params<'_> {
     }
 
     /// Perform a parameter flush.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the plugin is active.
-    pub fn flush(&self, input_events: &Pin<Box<EventQueue>>, output_events: &Pin<Box<EventQueue>>) {
+    pub fn flush(&self, input_events: &Proxy<InputEventQueue>, output_events: &Proxy<OutputEventQueue>) {
         // This may only be called on the audio thread when the plugin is active. This object is the
         // main thread interface for the parameters extension.
         self.status().assert_inactive();
-        assert!(input_events.is_sorted(), "Input event queue must be sorted.");
 
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();
@@ -337,8 +332,8 @@ impl Params<'_> {
             clap_call! {
                 params=>flush(
                     plugin,
-                    input_events.vtable_input(),
-                    output_events.vtable_output(),
+                    Proxy::vtable(input_events),
+                    Proxy::vtable(output_events),
                 )
             };
         }

@@ -3,13 +3,12 @@
 use super::indexer::{Indexer, IndexerResults};
 use super::metadata_receiver::{MetadataReceiver, PresetFile};
 use super::{Location, LocationValue, PresetDiscoveryFactory, ProviderMetadata};
-use crate::plugin::util::clap_call;
+use crate::plugin::util::{Proxy, clap_call};
 use anyhow::{Context, Result};
 use clap_sys::factory::preset_discovery::clap_preset_discovery_provider;
 use std::collections::{BTreeMap, HashSet};
 use std::ffi::CString;
 use std::marker::PhantomData;
-use std::pin::Pin;
 use std::ptr::NonNull;
 use walkdir::WalkDir;
 
@@ -31,7 +30,7 @@ pub struct Provider<'a> {
     ///
     /// Since there are currently no extensions the plugin shouldn't be interacting with it anymore
     /// after the `init()` call, but it still needs outlive the provider.
-    _indexer: Pin<Box<Indexer>>,
+    _indexer: Proxy<Indexer>,
     /// The factory this provider was created form. Only used for the lifetime.
     _factory: &'a PresetDiscoveryFactory<'a>,
     /// To honor CLAP's thread safety guidelines, this provider cannot be shared with or sent to
@@ -52,7 +51,7 @@ impl<'a> Provider<'a> {
                 clap_call! {
                     factory=>create(
                         factory,
-                        indexer.clap_preset_discovery_indexer_ptr(),
+                        Proxy::vtable(&indexer),
                         provider_id_cstring.as_ptr()
                     )
                 }
@@ -142,7 +141,7 @@ impl<'a> Provider<'a> {
                         provider,
                         location_kind,
                         location_ptr,
-                        metadata_receiver.clap_preset_discovery_metadata_receiver_ptr()
+                        Proxy::vtable(&metadata_receiver)
                     )
                 }
             };

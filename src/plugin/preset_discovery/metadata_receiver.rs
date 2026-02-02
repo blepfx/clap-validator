@@ -5,7 +5,7 @@
 use super::{Flags, LocationValue};
 use crate::panic::fail_test;
 use crate::plugin::preset_discovery::parse_timestamp;
-use crate::plugin::util;
+use crate::plugin::util::{self, CHECK_POINTER, Proxy, Proxyable};
 use anyhow::{Context, Result};
 use clap_sys::factory::preset_discovery::*;
 use clap_sys::timestamp::clap_timestamp;
@@ -13,9 +13,8 @@ use clap_sys::universal_plugin_id::clap_universal_plugin_id;
 use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::ffi::{c_char, c_void};
+use std::ffi::c_char;
 use std::fmt::Display;
-use std::pin::Pin;
 use std::sync::Mutex;
 use std::thread::ThreadId;
 use time::OffsetDateTime;
@@ -65,10 +64,6 @@ pub struct MetadataReceiver {
     /// on the presence of `load_key`. If this is not set, then subsequent `begin_preset()` calls
     /// are treated as errors. Used in `maybe_write_preset()`.
     next_load_key: RefCell<Option<String>>,
-
-    /// The vtable that's passed to the provider. The `receiver_data` field is populated with a
-    /// pointer to this object.
-    clap_preset_discovery_metadata_receiver: clap_preset_discovery_metadata_receiver,
 }
 
 /// One or more presets declared by the plugin through a preset provider metadata receiver.
@@ -244,10 +239,30 @@ impl Preset {
     }
 }
 
+impl Proxyable for MetadataReceiver {
+    type Vtable = clap_preset_discovery_metadata_receiver;
+
+    fn init(&self) -> Self::Vtable {
+        clap_preset_discovery_metadata_receiver {
+            receiver_data: CHECK_POINTER,
+            on_error: Some(Self::on_error),
+            begin_preset: Some(Self::begin_preset),
+            add_plugin_id: Some(Self::add_plugin_id),
+            set_soundpack_id: Some(Self::set_soundpack_id),
+            set_flags: Some(Self::set_flags),
+            add_creator: Some(Self::add_creator),
+            set_description: Some(Self::set_description),
+            set_timestamps: Some(Self::set_timestamps),
+            add_feature: Some(Self::add_feature),
+            add_extra_info: Some(Self::add_extra_info),
+        }
+    }
+}
+
 impl MetadataReceiver {
     /// Create a new metadata receiver.
-    pub fn new(location: LocationValue, location_flags: Flags) -> Pin<Box<Self>> {
-        let mut metadata_receiver = Box::pin(Self {
+    pub fn new(location: LocationValue, location_flags: Flags) -> Proxy<Self> {
+        Proxy::new(Self {
             expected_thread_id: std::thread::current().id(),
 
             location,
@@ -255,39 +270,12 @@ impl MetadataReceiver {
             result: Mutex::new(Ok(None)),
             next_preset_data: RefCell::new(None),
             next_load_key: RefCell::new(None),
-
-            clap_preset_discovery_metadata_receiver: clap_preset_discovery_metadata_receiver {
-                // This is set to a pointer to this pinned data structure later
-                receiver_data: std::ptr::null_mut(),
-                on_error: Some(Self::on_error),
-                begin_preset: Some(Self::begin_preset),
-                add_plugin_id: Some(Self::add_plugin_id),
-                set_soundpack_id: Some(Self::set_soundpack_id),
-                set_flags: Some(Self::set_flags),
-                add_creator: Some(Self::add_creator),
-                set_description: Some(Self::set_description),
-                set_timestamps: Some(Self::set_timestamps),
-                add_feature: Some(Self::add_feature),
-                add_extra_info: Some(Self::add_extra_info),
-            },
-        });
-
-        metadata_receiver.clap_preset_discovery_metadata_receiver.receiver_data =
-            &*metadata_receiver as *const Self as *mut c_void;
-        metadata_receiver
-    }
-
-    /// Get a `clap_preset_discovery_metadata_receiver` vtable pointer that can be passed to the
-    /// `clap_preset_discovery_factory` when creating a provider.
-    pub fn clap_preset_discovery_metadata_receiver_ptr(
-        self: &Pin<Box<Self>>,
-    ) -> *const clap_preset_discovery_metadata_receiver {
-        &self.clap_preset_discovery_metadata_receiver
+        })
     }
 
     /// Finish the preset declaration process and return the result. This finishes any pending
     /// presets and returns the [`PresetFile`].
-    pub fn finish(self: Pin<Box<Self>>) -> Result<Option<PresetFile>> {
+    pub fn finish(&self) -> Result<Option<PresetFile>> {
         self.flush_preset()?;
         std::mem::replace(&mut *self.result.lock().unwrap(), Ok(None))
     }
@@ -314,17 +302,16 @@ impl MetadataReceiver {
         log::trace!("'{}' was called by the plugin", function_name);
 
         let state = unsafe {
-            if receiver.is_null() || (*receiver).receiver_data.is_null() {
-                fail_test!(
-                    "'{}' was called with a null 'clap_preset_discovery_metadata_receiver' pointer",
-                    function_name
-                );
-            }
-
-            &*((*receiver).receiver_data as *const Self)
+            Proxy::<Self>::from_vtable(receiver).unwrap_or_else(|e| {
+                fail_test!("{}: {}", function_name, e);
+            })
         };
 
-        match f(state) {
+        if Proxy::vtable(&state).receiver_data != CHECK_POINTER {
+            fail_test!("{}: plugin messed with the 'receiver_data' pointer", function_name);
+        }
+
+        match f(&state) {
             Ok(result) => Some(result),
             Err(error) => {
                 let mut guard = state.result.lock().unwrap();

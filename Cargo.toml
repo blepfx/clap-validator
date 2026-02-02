@@ -41,6 +41,7 @@ textwrap = { version = "0.16.2", features = ["terminal_size"] }
 time = { version = "0.3", features = ["serde"]}
 walkdir = "2.3"
 wait-timeout = "0.2.1"
+rustc-hash = "2.1.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10.1"

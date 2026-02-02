@@ -1,7 +1,7 @@
 //! Various utility functions for the plugin host.
 
 use anyhow::{Context, Result};
-use std::ffi::{CStr, CString, c_char};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::OnceLock;
 
 /// Call a CLAP function. This is needed because even though none of CLAP's functions are allowed to
@@ -21,6 +21,10 @@ macro_rules! clap_call {
 }
 
 pub(crate) use clap_call;
+
+/// A pointer used for fields like `host_data` that can be checked for validity.
+/// We do not use `host_data` etc. directly, instead we rely on the offsets within the owner struct (See [`crate::plugin::instance::PluginShared::wrap`] for more info)
+pub const CHECK_POINTER: *mut c_void = 0xDEADCAFE as *mut c_void;
 
 /// Similar to, [`std::any::type_name_of_val()`], but on stable Rust, and stripping away the pointer
 /// part.
@@ -117,13 +121,15 @@ pub fn validator_version() -> &'static CStr {
         .as_c_str()
 }
 
-/// Utility module for tracking CLAP object lifetimes during validation.
-/// This is useful for checking that the plugin calls host-provided functions with valid pointers.
-pub mod object_tracker {
+pub use proxy::{Proxy, Proxyable};
+
+mod proxy {
     use anyhow::Result;
+    use rustc_hash::FxHashMap;
     use std::any::{TypeId, type_name};
-    use std::collections::HashMap;
-    use std::sync::RwLock;
+    use std::ops::Deref;
+    use std::pin::Pin;
+    use std::sync::{Arc, RwLock};
 
     struct TrackStatus {
         type_id: TypeId,
@@ -131,10 +137,10 @@ pub mod object_tracker {
         is_alive: bool,
     }
 
-    static OBJECTS: RwLock<Option<HashMap<usize, TrackStatus>>> = RwLock::new(None);
+    static OBJECTS: RwLock<Option<FxHashMap<usize, TrackStatus>>> = RwLock::new(None);
 
     /// Start tracking the given object pointer.
-    pub fn track<T: 'static>(obj: *const T) {
+    fn track<T: 'static>(obj: *const T) {
         let mut objects = OBJECTS.write().unwrap();
         objects.get_or_insert_default().insert(
             obj.addr(),
@@ -147,20 +153,16 @@ pub mod object_tracker {
     }
 
     /// Stop tracking the given object pointer, any subsequent use will be considered invalid.
-    pub fn untrack<T: 'static>(obj: *const T) {
+    fn untrack<T: 'static>(obj: *const T) {
         let mut objects = OBJECTS.write().unwrap();
         match objects.as_mut().and_then(|x| x.get_mut(&obj.addr())) {
             Some(status) if TypeId::of::<T>() == status.type_id => status.is_alive = false,
-            _ => panic!(
-                "Untrack failed: {} at {:p} was not being tracked",
-                type_name::<T>(),
-                obj
-            ),
+            _ => unreachable!(),
         }
     }
 
     /// Check that the given object pointer is valid, of the correct type, and is still alive.
-    pub fn check<T: 'static>(obj: *const T) -> Result<()> {
+    fn check<T: 'static>(obj: *const T) -> Result<()> {
         if obj.is_null() {
             anyhow::bail!("null pointer to {}", type_name::<T>());
         }
@@ -181,5 +183,79 @@ pub mod object_tracker {
         }
 
         Ok(())
+    }
+
+    #[repr(C)]
+    struct ProxyInner<T: Proxyable> {
+        vtable: T::Vtable,
+        data: T,
+    }
+
+    /// A type that can be proxied to the plugin through a vtable pointer.
+    /// See [`Proxy`] for more information.
+    pub trait Proxyable {
+        type Vtable: 'static;
+
+        fn init(&self) -> Self::Vtable;
+    }
+
+    /// An object that is accessible to the plugin through a vtable pointer.
+    /// Implementors of interfaces such as [`clap_host`], [`clap_istream`], and [`clap_ostream`] should be wrapped in this type before being passed to the plugin.
+    #[repr(transparent)]
+    pub struct Proxy<T: Proxyable>(Pin<Arc<ProxyInner<T>>>);
+
+    impl<T: Proxyable> Proxy<T> {
+        pub fn new(vtable: T) -> Self {
+            let arc = Arc::pin(ProxyInner {
+                vtable: vtable.init(),
+                data: vtable,
+            });
+
+            track(&arc.vtable);
+            Self(arc)
+        }
+
+        pub fn vtable(this: &Self) -> &T::Vtable {
+            &this.0.vtable
+        }
+
+        pub unsafe fn from_vtable(vtable: *const T::Vtable) -> Result<Self> {
+            check(vtable)?;
+
+            unsafe {
+                let inner = vtable.cast::<ProxyInner<T>>();
+                Arc::increment_strong_count(inner);
+                Ok(Proxy(Pin::new_unchecked(Arc::from_raw(inner))))
+            }
+        }
+    }
+
+    impl<T: Proxyable> Clone for Proxy<T> {
+        fn clone(&self) -> Self {
+            Proxy(self.0.clone())
+        }
+    }
+
+    impl<T: Proxyable> Deref for Proxy<T> {
+        type Target = T;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0.data
+        }
+    }
+
+    impl<T: Proxyable> std::fmt::Debug for Proxy<T>
+    where
+        T: std::fmt::Debug,
+    {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_tuple("Proxy").field(&self.0.data).finish()
+        }
+    }
+
+    impl<T: Proxyable> Drop for ProxyInner<T> {
+        fn drop(&mut self) {
+            untrack(&self.vtable);
+        }
     }
 }

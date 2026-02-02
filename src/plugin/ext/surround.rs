@@ -10,9 +10,10 @@ pub struct Surround<'a> {
     surround: NonNull<clap_plugin_surround>,
 }
 
-impl<'a> Extension<&'a Plugin<'a>> for Surround<'a> {
+impl<'a> Extension for Surround<'a> {
     const IDS: &'static [&'static CStr] = &[CLAP_EXT_SURROUND, CLAP_EXT_SURROUND_COMPAT];
 
+    type Plugin = &'a Plugin<'a>;
     type Struct = clap_plugin_surround;
 
     unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {

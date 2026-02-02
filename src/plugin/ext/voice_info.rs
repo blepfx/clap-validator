@@ -12,9 +12,10 @@ pub struct VoiceInfo<'a> {
     voice_info: NonNull<clap_plugin_voice_info>,
 }
 
-impl<'a> Extension<&'a Plugin<'a>> for VoiceInfo<'a> {
+impl<'a> Extension for VoiceInfo<'a> {
     const IDS: &'static [&'static CStr] = &[CLAP_EXT_VOICE_INFO];
 
+    type Plugin = &'a Plugin<'a>;
     type Struct = clap_plugin_voice_info;
 
     unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {

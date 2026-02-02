@@ -195,7 +195,7 @@ impl<'a> TestCase<'a> for PluginTestCase {
             ),
             PluginTestCase::ParamFuzzSampleAccurate => String::from(
                 "Sets parameter values in a sample-accurate fashion while processing audio, generating them at fixed \
-                 intervals (1, 100, 1000 samples). The plugin passes the test if it doesn't produce any infinite or \
+                 intervals (10, 100, 1000 samples). The plugin passes the test if it doesn't produce any infinite or \
                  NaN values, and doesn't crash.",
             ),
             PluginTestCase::ParamFuzzModulation => String::from(

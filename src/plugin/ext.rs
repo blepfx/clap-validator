@@ -20,15 +20,13 @@ pub mod tail;
 pub mod thread_pool;
 pub mod voice_info;
 
-/// An abstraction for a CLAP plugin extension. `P` here is the plugin type. In practice, this is
-/// either `Plugin`, `PluginShared` or `PluginAudioThread`. Abstractions for main thread functions will implement
-/// this trait for `Plugin`, abstractions for audio thread functions will implement this trait
-/// for `PluginAudioThread` and abstractions for thread-safe functions will implement this trait for
-/// `PluginShared`.
-pub trait Extension<P> {
+/// An abstraction for a CLAP plugin extension.
+pub trait Extension {
     /// The list of C-string IDs for the extension.
     const IDS: &'static [&'static CStr];
 
+    /// The plugin type (`Plugin` for main-thread, `PluginShared` for shared, `PluginAudioThread` for audio-thread) for which this extension is implemented.
+    type Plugin;
     /// The type of the C-struct for the extension.
     type Struct;
 
@@ -38,5 +36,5 @@ pub trait Extension<P> {
     /// # Safety
     /// The extension struct pointer must be a valid pointer to the correct extension struct for
     /// the plugin instance and given `IDS`.
-    unsafe fn new(plugin: P, extension_struct: NonNull<Self::Struct>) -> Self;
+    unsafe fn new(plugin: Self::Plugin, extension_struct: NonNull<Self::Struct>) -> Self;
 }

@@ -13,9 +13,10 @@ pub struct ThreadPool<'a> {
 unsafe impl Send for ThreadPool<'_> {}
 unsafe impl Sync for ThreadPool<'_> {}
 
-impl<'a> Extension<&'a PluginShared> for ThreadPool<'a> {
+impl<'a> Extension for ThreadPool<'a> {
     const IDS: &'static [&'static CStr] = &[CLAP_EXT_THREAD_POOL];
 
+    type Plugin = &'a PluginShared;
     type Struct = clap_plugin_thread_pool;
 
     unsafe fn new(plugin: &'a PluginShared, extension_struct: NonNull<Self::Struct>) -> Self {
@@ -29,7 +30,7 @@ impl<'a> Extension<&'a PluginShared> for ThreadPool<'a> {
 impl<'a> ThreadPool<'a> {
     pub fn exec(&self, task: u32) {
         let thread_pool = self.tail.as_ptr();
-        let plugin = self.plugin.clap_plugin_ptr();
+        let plugin = self.plugin.clap_plugin;
         unsafe {
             clap_call! { thread_pool=>exec(plugin, task) }
         }

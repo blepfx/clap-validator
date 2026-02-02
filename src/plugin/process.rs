@@ -1,8 +1,8 @@
 //! Data structures and functions surrounding audio processing.
 use crate::plugin::instance::{PluginAudioThread, PluginStatus, ProcessStatus};
+use crate::plugin::util::Proxy;
 use anyhow::Result;
 use clap_sys::process::*;
-use std::pin::Pin;
 
 mod buffer;
 mod events;
@@ -16,8 +16,8 @@ pub struct ProcessScope<'a> {
     plugin: &'a PluginAudioThread<'a>,
     buffer: &'a mut AudioBuffers,
 
-    events_input: Pin<Box<EventQueue>>,
-    events_output: Pin<Box<EventQueue>>,
+    events_input: Proxy<InputEventQueue>,
+    events_output: Proxy<OutputEventQueue>,
 
     transport: TransportState,
     sample_rate: f64,
@@ -38,8 +38,8 @@ impl<'a> ProcessScope<'a> {
         Ok(ProcessScope {
             plugin,
             buffer,
-            events_input: EventQueue::new(),
-            events_output: EventQueue::new(),
+            events_input: InputEventQueue::new(),
+            events_output: OutputEventQueue::new(),
             transport: TransportState::dummy(),
             sample_rate,
         })
@@ -53,12 +53,13 @@ impl<'a> ProcessScope<'a> {
         self.buffer.samples()
     }
 
-    pub fn input_queue(&self) -> &EventQueue {
-        &self.events_input
+    pub fn add_events(&mut self, events: impl IntoIterator<Item = Event>) {
+        self.events_input.add_events(events);
     }
 
-    pub fn output_queue(&self) -> &EventQueue {
-        &self.events_output
+    #[allow(unused)]
+    pub fn read_events(&self) -> Vec<Event> {
+        self.events_output.read()
     }
 
     pub fn transport(&mut self) -> &mut TransportState {
@@ -102,19 +103,14 @@ impl<'a> ProcessScope<'a> {
             self.plugin.start_processing()?;
         }
 
+        // check that we dont overfill the input event queue
+        assert!(
+            self.events_input.last_event_time().is_none_or(|t| t < samples),
+            "The input event queue contains events beyond the current processing block size"
+        );
+
         // prepare output event queue for processing
         self.events_output.clear();
-
-        // prepare input event queue for processing
-        self.events_input.sort_events();
-
-        // check if the input events are within the block size
-        if let Some(event) = self.events_input.read().last() {
-            assert!(
-                event.header().time <= samples,
-                "Input event timestamp larger than block size",
-            );
-        }
 
         // prepare output audio buffers for processing
         // this is used to detect uninitialized output buffers
@@ -142,8 +138,8 @@ impl<'a> ProcessScope<'a> {
                 audio_outputs: outputs.as_mut_ptr(),
                 audio_inputs_count: inputs.len() as u32,
                 audio_outputs_count: outputs.len() as u32,
-                in_events: self.events_input.vtable_input(),
-                out_events: self.events_output.vtable_output(),
+                in_events: Proxy::vtable(&self.events_input),
+                out_events: Proxy::vtable(&self.events_output),
             })
         })?;
 
@@ -152,7 +148,7 @@ impl<'a> ProcessScope<'a> {
         self.transport.advance(samples as i64, self.sample_rate());
 
         // check output audio buffers for NaNs or infinities
-        check_process_call_consistency(&self.buffer[..], &original_buffers, self.output_queue(), samples)?;
+        check_process_call_consistency(&self.buffer[..], &original_buffers, &self.events_output.read(), samples)?;
 
         Ok(status)
     }
@@ -189,7 +185,7 @@ const CHECK_NAN_F64: f64 = f64::from_bits(0x7FF8_1234_5678_1234);
 fn check_process_call_consistency(
     resulting_buffers: &[AudioBuffer],
     original_buffers: &[AudioBuffer],
-    output_events: &EventQueue,
+    output_events: &[Event],
     block_size: u32,
 ) -> Result<()> {
     for (buffer, before) in resulting_buffers.iter().zip(original_buffers.iter()) {
@@ -249,7 +245,7 @@ fn check_process_call_consistency(
 
     // If the plugin output any events, then they should be in a monotonically increasing order
     let mut last_event_time = 0;
-    for event in output_events.read() {
+    for event in output_events {
         let event_time = event.header().time;
         if event_time < last_event_time {
             anyhow::bail!(

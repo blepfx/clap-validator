@@ -3,7 +3,7 @@
 use super::{Plugin, PluginStatus};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::{CallbackEvent, MainThreadTask, PluginShared};
-use crate::plugin::util::clap_call;
+use crate::plugin::util::{Proxy, clap_call};
 use anyhow::Result;
 use clap_sys::plugin::clap_plugin;
 use clap_sys::process::*;
@@ -11,9 +11,6 @@ use std::any::Any;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::pin::Pin;
-use std::ptr::NonNull;
-use std::sync::Arc;
 use std::sync::mpsc::SyncSender;
 
 /// An audio thread equivalent to [`Plugin`]. This version only allows audio thread functions to be
@@ -21,7 +18,7 @@ use std::sync::mpsc::SyncSender;
 pub struct PluginAudioThread<'a> {
     /// Information about this plugin instance stored on the host. This keeps track of things like
     /// audio thread IDs, whether the plugin has pending callbacks, and what state it is in.
-    shared: Pin<Arc<PluginShared>>,
+    shared: Proxy<PluginShared>,
 
     _plugin_marker: PhantomData<&'a Plugin<'a>>,
 
@@ -48,7 +45,7 @@ impl Drop for PluginAudioThread<'_> {
 }
 
 impl<'a> PluginAudioThread<'a> {
-    pub(super) fn new(shared: Pin<Arc<PluginShared>>) -> PluginAudioThread<'a> {
+    pub(super) fn new(shared: Proxy<PluginShared>) -> PluginAudioThread<'a> {
         shared.audio_thread_id.store(Some(std::thread::current().id()));
         PluginAudioThread {
             shared,
@@ -59,7 +56,7 @@ impl<'a> PluginAudioThread<'a> {
 
     /// Get the raw pointer to the `clap_plugin` instance.
     pub fn as_ptr(&self) -> *const clap_plugin {
-        self.shared.clap_plugin_ptr()
+        self.shared.clap_plugin
     }
 
     /// Get the plugin's current initialization status.
@@ -73,23 +70,9 @@ impl<'a> PluginAudioThread<'a> {
     }
 
     /// Get the _audio thread_ extension abstraction for the extension `T`, if the plugin supports
-    /// this extension. Returns `None` if it does not. The plugin needs to be initialized using
-    /// [`init()`][Self::init()] before this may be called.
-    pub fn get_extension<T: Extension<&'a Self>>(&'a self) -> Option<T> {
-        self.status().assert_is_not(PluginStatus::Uninitialized);
-
-        let plugin = self.as_ptr();
-        for id in T::IDS {
-            let extension_ptr = unsafe {
-                clap_call! { plugin=>get_extension(plugin, id.as_ptr()) }
-            };
-
-            if !extension_ptr.is_null() {
-                return unsafe { Some(T::new(self, NonNull::new(extension_ptr as *mut T::Struct).unwrap())) };
-            }
-        }
-
-        None
+    /// this extension. Returns `None` if it does not.
+    pub fn get_extension<T: Extension<Plugin = &'a Self>>(&'a self) -> Option<T> {
+        unsafe { self.shared.raw_extension::<T>().map(|ptr| T::new(self, ptr)) }
     }
 
     /// Dispatch a task to be executed on the main thread. This is a blocking call that will wait

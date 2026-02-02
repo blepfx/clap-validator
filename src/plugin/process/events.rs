@@ -1,20 +1,13 @@
+use crate::panic::fail_test;
+use crate::plugin::util::{CHECK_POINTER, Proxy, Proxyable};
 use clap_sys::events::*;
-use std::pin::Pin;
 use std::sync::Mutex;
 
-use crate::panic::fail_test;
-
-/// An event queue that can be used as either an input queue or an output queue. This is always
-/// allocated through a `Pin<Box<EventQueue>>` so the pointers are stable. The `VTable` type
-/// argument should be either `clap_input_events` or `clap_output_events`.
 #[derive(Debug)]
-pub struct EventQueue {
-    vtable_input: clap_input_events,
-    vtable_output: clap_output_events,
-    /// The actual event queue. Since we're going for correctness over performance, this uses a very
-    /// suboptimal memory layout by just using an `enum` instead of doing fancy bit packing.
-    events: Mutex<Vec<Event>>,
-}
+pub struct InputEventQueue(Mutex<Vec<Event>>);
+
+#[derive(Debug)]
+pub struct OutputEventQueue(Mutex<Vec<Event>>);
 
 /// An event sent to or from the plugin. This uses an enum to make the implementation simple and
 /// correct at the cost of more wasteful memory usage.
@@ -38,109 +31,123 @@ pub enum Event {
     Unknown(clap_event_header),
 }
 
-impl EventQueue {
-    /// Construct a new event queue. This can be used as both an input and an output queue.
-    pub fn new() -> Pin<Box<Self>> {
-        let mut queue = Box::pin(Self {
-            vtable_input: clap_input_events {
-                // This is set to point to this object below
-                ctx: std::ptr::null_mut(),
-                size: Some(Self::size),
-                get: Some(Self::get),
-            },
+impl Proxyable for InputEventQueue {
+    type Vtable = clap_input_events;
 
-            vtable_output: clap_output_events {
-                // This is set to point to this object below
-                ctx: std::ptr::null_mut(),
-                try_push: Some(Self::try_push),
-            },
+    fn init(&self) -> Self::Vtable {
+        clap_input_events {
+            ctx: CHECK_POINTER,
+            size: Some(Self::size),
+            get: Some(Self::get),
+        }
+    }
+}
 
-            // Using a mutex here is obviously a terrible idea in a real host, but we're not a real
-            // host
-            events: Mutex::new(Vec::new()),
-        });
+impl Proxyable for OutputEventQueue {
+    type Vtable = clap_output_events;
 
-        queue.vtable_input.ctx = &*queue as *const Self as *mut _;
-        queue.vtable_output.ctx = &*queue as *const Self as *mut _;
-        queue
+    fn init(&self) -> Self::Vtable {
+        clap_output_events {
+            ctx: CHECK_POINTER,
+            try_push: Some(Self::try_push),
+        }
+    }
+}
+
+impl InputEventQueue {
+    pub fn new() -> Proxy<Self> {
+        Proxy::new(Self(Mutex::new(Vec::new())))
     }
 
     pub fn clear(&self) {
-        self.events.lock().unwrap().clear();
+        self.0.lock().unwrap().clear();
+    }
+
+    pub fn last_event_time(&self) -> Option<u32> {
+        let events = self.0.lock().unwrap();
+        events.last().map(|event| event.header().time)
     }
 
     pub fn add_events(&self, extend: impl IntoIterator<Item = Event>) {
-        self.events.lock().unwrap().extend(extend);
-    }
-
-    pub fn sort_events(&self) {
-        let mut events = self.events.lock().unwrap();
-        events.sort_by_key(|event| event.header().time);
-    }
-
-    pub fn is_sorted(&self) -> bool {
-        let events = self.events.lock().unwrap();
-        events.is_sorted_by_key(|event| event.header().time)
-    }
-
-    pub fn read(&self) -> Vec<Event> {
-        self.events.lock().unwrap().clone()
-    }
-
-    /// Get the vtable pointer for input events.
-    pub fn vtable_input(self: &Pin<Box<Self>>) -> *const clap_input_events {
-        &self.vtable_input
-    }
-
-    /// Get the vtable pointer for output events.
-    pub fn vtable_output(self: &Pin<Box<Self>>) -> *const clap_output_events {
-        &self.vtable_output
+        let mut events = self.0.lock().unwrap();
+        let is_empty = events.is_empty();
+        events.extend(extend);
+        if !is_empty {
+            events.sort_by_key(|event| event.header().time);
+        }
     }
 
     unsafe extern "C" fn size(list: *const clap_input_events) -> u32 {
-        unsafe {
-            if list.is_null() || (*list).ctx.is_null() {
-                fail_test!("'clap_input_events::size' was called with a null pointer");
-            }
+        let state = unsafe {
+            Proxy::<Self>::from_vtable(list).unwrap_or_else(|e| {
+                fail_test!("clap_input_events::size: {}", e);
+            })
+        };
 
-            let this = &*((*list).ctx as *const Self);
-            this.events.lock().unwrap().len() as u32
+        if Proxy::vtable(&state).ctx != CHECK_POINTER {
+            fail_test!("clap_input_events::size: plugin messed with the 'ctx' pointer");
         }
+
+        state.0.lock().unwrap().len() as u32
     }
 
     unsafe extern "C" fn get(list: *const clap_input_events, index: u32) -> *const clap_event_header {
-        unsafe {
-            if list.is_null() || (*list).ctx.is_null() {
-                fail_test!("'clap_input_events::get' was called with a null pointer");
-            }
+        let state = unsafe {
+            Proxy::<Self>::from_vtable(list).unwrap_or_else(|e| {
+                fail_test!("clap_input_events::size: {}", e);
+            })
+        };
 
-            let this = &*((*list).ctx as *const Self);
-            let events = this.events.lock().unwrap();
-            match events.get(index as usize) {
-                Some(event) => event.header(),
-                None => {
-                    log::warn!(
-                        "The plugin tried to get an event with index {index} ({} total events)",
-                        events.len()
-                    );
-                    std::ptr::null()
-                }
+        if Proxy::vtable(&state).ctx != CHECK_POINTER {
+            fail_test!("clap_input_events::size: plugin messed with the 'ctx' pointer");
+        }
+
+        let events = state.0.lock().unwrap();
+        match events.get(index as usize) {
+            Some(event) => event.header(),
+            None => {
+                log::warn!(
+                    "The plugin tried to get an event with index {index} ({} total events)",
+                    events.len()
+                );
+                std::ptr::null()
             }
         }
     }
+}
+
+impl OutputEventQueue {
+    pub fn new() -> Proxy<Self> {
+        Proxy::new(Self(Mutex::new(Vec::new())))
+    }
+
+    pub fn clear(&self) {
+        self.0.lock().unwrap().clear();
+    }
+
+    pub fn read(&self) -> Vec<Event> {
+        self.0.lock().unwrap().clone()
+    }
 
     unsafe extern "C" fn try_push(list: *const clap_output_events, event: *const clap_event_header) -> bool {
-        unsafe {
-            if list.is_null() || (*list).ctx.is_null() || event.is_null() {
-                fail_test!("'clap_output_events::try_push' was called with a null pointer");
-            }
+        let state = unsafe {
+            Proxy::<Self>::from_vtable(list).unwrap_or_else(|e| {
+                fail_test!("clap_output_events::try_push: {}", e);
+            })
+        };
 
-            // The monotonicity of the plugin's event insertion order is checked as part of the output
-            // consistency checks
-            let this = &*((*list).ctx as *const Self);
-            this.events.lock().unwrap().push(Event::from_raw(event));
-            true
+        if Proxy::vtable(&state).ctx != CHECK_POINTER {
+            fail_test!("clap_output_events::try_push: plugin messed with the 'ctx' pointer");
         }
+
+        if event.is_null() {
+            fail_test!("clap_output_events::try_push: 'event' pointer is null");
+        }
+
+        // The monotonicity of the plugin's event insertion order is checked as part of the output
+        // consistency checks
+        state.0.lock().unwrap().push(unsafe { Event::from_raw(event) });
+        true
     }
 }
 

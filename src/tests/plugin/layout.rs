@@ -5,11 +5,9 @@ use crate::plugin::ext::configurable_audio_ports::ConfigurableAudioPorts;
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::process::{AudioBuffers, ProcessScope};
-use crate::plugin::util::{cstr_ptr_to_mandatory_string, cstr_ptr_to_string};
 use crate::tests::TestStatus;
 use crate::tests::rng::{NoteGenerator, new_prng, random_layout_requests};
 use anyhow::{Context, Result};
-use clap_sys::ext::audio_ports::clap_audio_port_info;
 
 const BUFFER_SIZE: u32 = 512;
 
@@ -161,48 +159,46 @@ pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) 
                 config_audio_ports_config.id,
             );
 
-            for is_input in [true, false] {
-                let count = if is_input {
-                    config_audio_ports_config.input_port_count
-                } else {
-                    config_audio_ports_config.output_port_count
-                };
-
-                for index in 0..count {
-                    let info_apci = audio_ports_config_info
-                        .get_raw_port_info(config_audio_ports_config.id, is_input, index)
-                        .with_context(|| {
-                            format!(
-                                "Could not get info for {} port {} of configuration '{}' ({}) from \
-                                 'audio-ports-config-info'",
-                                if is_input { "input" } else { "output" },
-                                index,
-                                config_audio_ports_config.name,
-                                config_audio_ports_config.id,
-                            )
-                        })?;
-
-                    let info_ap = audio_ports.get_raw_port_info(is_input, index).with_context(|| {
+            for index in 0..config_audio_ports_config.input_port_count {
+                let extra_info = audio_ports_config_info
+                    .get(config_audio_ports_config.id, true, index)
+                    .with_context(|| {
                         format!(
-                            "Could not get info for {} port {} of configuration '{}' ({}) from 'audio-ports'",
-                            if is_input { "input" } else { "output" },
-                            index,
-                            config_audio_ports_config.name,
-                            config_audio_ports_config.id,
+                            "Could not get info for input port {} of configuration '{}' ({}) from \
+                             'audio-ports-config-info'",
+                            index, config_audio_ports_config.name, config_audio_ports_config.id,
                         )
                     })?;
 
-                    check_mismatch_audio_port_info(&info_apci, &info_ap).with_context(|| {
+                anyhow::ensure!(
+                    extra_info == config_audio_ports.inputs[index as usize],
+                    "Mismatch between info queried via 'audio-ports-config-info' and 'audio-ports' for input port {} \
+                     of configuration '{}' ({})",
+                    index,
+                    config_audio_ports_config.name,
+                    config_audio_ports_config.id,
+                )
+            }
+
+            for index in 0..config_audio_ports_config.output_port_count {
+                let extra_info = audio_ports_config_info
+                    .get(config_audio_ports_config.id, false, index)
+                    .with_context(|| {
                         format!(
-                            "Mismatch between info queried via 'audio-ports-config-info' and 'audio-ports' for {} \
-                             port {} of configuration '{}' ({})",
-                            if is_input { "input" } else { "output" },
-                            index,
-                            config_audio_ports_config.name,
-                            config_audio_ports_config.id,
+                            "Could not get info for output port {} of configuration '{}' ({}) from \
+                             'audio-ports-config-info'",
+                            index, config_audio_ports_config.name, config_audio_ports_config.id,
                         )
                     })?;
-                }
+
+                anyhow::ensure!(
+                    extra_info == config_audio_ports.outputs[index as usize],
+                    "Mismatch between info queried via 'audio-ports-config-info' and 'audio-ports' for output port {} \
+                     of configuration '{}' ({})",
+                    index,
+                    config_audio_ports_config.name,
+                    config_audio_ports_config.id,
+                )
             }
         }
 
@@ -214,9 +210,7 @@ pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) 
 
                 for _ in 0..5 {
                     process.audio_buffers().fill_white_noise(&mut prng);
-                    process
-                        .input_queue()
-                        .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+                    process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
                     process.run()?;
                 }
 
@@ -315,9 +309,7 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
 
                 for _ in 0..5 {
                     process.audio_buffers().fill_white_noise(&mut prng);
-                    process
-                        .input_queue()
-                        .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+                    process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
                     process.run()?;
                 }
 
@@ -385,50 +377,4 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
     };
 
     Ok(TestStatus::Success { details: None })
-}
-
-fn check_mismatch_audio_port_info(info_left: &clap_audio_port_info, info_right: &clap_audio_port_info) -> Result<()> {
-    if info_left.id != info_right.id {
-        anyhow::bail!("ID mismatch: {} vs {}", info_left.id, info_right.id);
-    }
-
-    if info_left.channel_count != info_right.channel_count {
-        anyhow::bail!(
-            "Channel count mismatch: {} vs {}",
-            info_left.channel_count,
-            info_right.channel_count
-        );
-    }
-
-    if info_left.flags != info_right.flags {
-        anyhow::bail!("Flags mismatch");
-    }
-
-    let (name_left, name_right) = unsafe {
-        (
-            cstr_ptr_to_mandatory_string(info_left.name.as_ptr())?,
-            cstr_ptr_to_mandatory_string(info_right.name.as_ptr())?,
-        )
-    };
-
-    if name_left != name_right {
-        anyhow::bail!("Name mismatch: {:?} vs {:?}", name_left, name_right);
-    }
-
-    let (port_type_left, port_type_right) = unsafe {
-        (
-            cstr_ptr_to_string(info_left.port_type)?,
-            cstr_ptr_to_string(info_right.port_type)?,
-        )
-    };
-
-    if port_type_left != port_type_right {
-        anyhow::bail!(
-            "Port type mismatch: {:?} vs {:?}",
-            port_type_left.as_deref().unwrap_or("<null>"),
-            port_type_right.as_deref().unwrap_or("<null>")
-        );
-    }
-
-    Ok(())
 }

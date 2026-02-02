@@ -38,9 +38,7 @@ pub fn test_transport_null(library: &PluginLibrary, plugin_id: &str) -> Result<T
 
         for _ in 0..5 {
             process.transport().is_freerun = true;
-            process
-                .input_queue()
-                .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+            process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
             process.audio_buffers().fill_white_noise(&mut prng);
             process.run()?;
         }
@@ -85,9 +83,7 @@ pub fn test_transport_fuzz(library: &PluginLibrary, plugin_id: &str) -> Result<T
         for _ in 0..80 {
             transport_fuzz.mutate(&mut prng, process.transport());
 
-            process
-                .input_queue()
-                .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+            process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
             process.audio_buffers().fill_white_noise(&mut prng);
             process.run()?;
         }
@@ -155,18 +151,14 @@ pub fn test_transport_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &
 
                         // this will also send the event at current_sample == 0
                         // but that's fine, the plugin should handle that correctly
-                        process
-                            .input_queue()
-                            .add_events([Event::Transport(transport_state.as_clap_transport(current_sample))]);
+                        process.add_events([Event::Transport(transport_state.as_clap_transport(current_sample))]);
                         current_sample += interval;
                     }
 
                     current_sample -= BUFFER_SIZE;
 
                     process.audio_buffers().fill_white_noise(&mut prng);
-                    process
-                        .input_queue()
-                        .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+                    process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
                     process.run()?;
                 }
 

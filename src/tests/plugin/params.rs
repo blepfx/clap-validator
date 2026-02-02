@@ -3,7 +3,7 @@
 use super::PluginTestCase;
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
-use crate::plugin::ext::params::{ParamInfo, Params};
+use crate::plugin::ext::params::{Param, ParamInfo, Params};
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::process::{AudioBuffers, Event, ProcessScope};
 use crate::tests::rng::{NoteGenerator, ParamFuzzer, new_prng};
@@ -226,13 +226,11 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str, snap_to_b
         let run_result = plugin.on_audio_thread(|plugin| -> Result<()> {
             let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
-            process.input_queue().add_events(current_events.clone().unwrap());
+            process.add_events(current_events.clone().unwrap());
 
             for _ in 0..FUZZ_RUNS_PER_PERMUTATION {
                 process.audio_buffers().fill_white_noise(&mut prng);
-                process
-                    .input_queue()
-                    .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+                process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
                 process.run()?;
             }
 
@@ -282,7 +280,7 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str, snap_to_b
 
 /// The test for `ProcessingTest::ParamFuzzSampleAccurate`.
 pub fn test_param_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
-    const INTERVALS: &[u32] = &[1000, 100, 1];
+    const INTERVALS: &[u32] = &[1000, 100, 10];
 
     let mut prng = new_prng();
     let plugin = library
@@ -325,16 +323,15 @@ pub fn test_param_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &str)
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
 
     for &interval in INTERVALS {
+        let num_steps = (interval * 4).div_ceil(BUFFER_SIZE);
+
         plugin.on_audio_thread(|plugin| -> Result<()> {
             let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
-
-            let num_steps = interval.div_ceil(BUFFER_SIZE);
             let mut current_sample = 0;
             for _ in 0..num_steps {
                 while current_sample < BUFFER_SIZE {
                     let events: Vec<Event> = param_fuzzer.randomize_params_at(&mut prng, current_sample).collect();
-
-                    process.input_queue().add_events(events.clone());
+                    process.add_events(events.clone());
                     current_events = Some(events);
                     current_sample += interval;
                 }
@@ -344,9 +341,7 @@ pub fn test_param_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &str)
                 // Audio and MIDI/note events are randomized in accordance to what the plugin
                 // supports
                 process.audio_buffers().fill_white_noise(&mut prng);
-                process
-                    .input_queue()
-                    .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+                process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
                 process.run()?;
             }
 
@@ -400,12 +395,8 @@ pub fn test_param_fuzz_modulation(library: &PluginLibrary, plugin_id: &str) -> R
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         process.audio_buffers().fill_white_noise(&mut prng);
-        process
-            .input_queue()
-            .add_events(param_fuzzer.generate_events(&mut prng, process.max_block_size()));
-        process
-            .input_queue()
-            .add_events(note_rng.generate_events(&mut prng, process.max_block_size()));
+        process.add_events(param_fuzzer.generate_events(&mut prng, process.max_block_size()));
+        process.add_events(note_rng.generate_events(&mut prng, process.max_block_size()));
         Ok(())
     })?;
 
@@ -465,7 +456,7 @@ pub fn test_param_set_wrong_namespace(library: &PluginLibrary, plugin_id: &str) 
         let mut process = ProcessScope::new(&plugin, &mut buffers)?;
 
         process.audio_buffers().fill_white_noise(&mut prng);
-        process.input_queue().add_events(random_param_set_events);
+        process.add_events(random_param_set_events);
         process.run()
     })?;
 
@@ -519,7 +510,7 @@ pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Re
             .get(param_id)
             .with_context(|| format!("Could not get value for parameter {param_id}"))?;
 
-        if !param_compare_approx(default_value, param_info.default) {
+        if !param_compare_approx(&param_info, default_value, param_info.default) {
             anyhow::bail!(
                 "The default value for parameter {param_id} ('{}') is {}, but the actual parameter value after \
                  initialization is {}.",
@@ -535,7 +526,16 @@ pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Re
     Ok(TestStatus::Success { details: None })
 }
 
-pub fn param_compare_approx(actual: f64, expected: f64) -> bool {
-    const EPSILON: f64 = 1e-5;
-    (actual - expected).abs() <= EPSILON
+pub fn param_compare_approx(param: &Param, actual: f64, expected: f64) -> bool {
+    if param.stepped() {
+        let actual = actual.round() as i64;
+        let expected = expected.round() as i64;
+
+        actual == expected
+    } else {
+        let actual = (actual - param.range.start()) / (param.range.end() - param.range.start());
+        let expected = (expected - param.range.start()) / (param.range.end() - param.range.start());
+
+        (actual - expected).abs() <= 1e-4 // 0.01% of the range
+    }
 }

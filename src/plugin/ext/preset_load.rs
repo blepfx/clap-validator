@@ -16,9 +16,10 @@ pub struct PresetLoad<'a> {
     preset_load: NonNull<clap_plugin_preset_load>,
 }
 
-impl<'a> Extension<&'a Plugin<'a>> for PresetLoad<'a> {
+impl<'a> Extension for PresetLoad<'a> {
     const IDS: &'static [&'static CStr] = &[CLAP_EXT_PRESET_LOAD];
 
+    type Plugin = &'a Plugin<'a>;
     type Struct = clap_plugin_preset_load;
 
     unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {

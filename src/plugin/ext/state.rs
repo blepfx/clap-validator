@@ -3,15 +3,15 @@
 use super::Extension;
 use crate::panic::fail_test;
 use crate::plugin::instance::Plugin;
-use crate::plugin::util::clap_call;
+use crate::plugin::util::{CHECK_POINTER, Proxy, Proxyable, clap_call};
 use anyhow::Result;
 use clap_sys::ext::state::{CLAP_EXT_STATE, clap_plugin_state};
 use clap_sys::stream::{clap_istream, clap_ostream};
 use std::ffi::{CStr, c_void};
-use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread::ThreadId;
 
 /// Abstraction for the `state` extension covering the main thread functionality.
 pub struct State<'a> {
@@ -22,10 +22,13 @@ pub struct State<'a> {
 /// An input stream backed by a slice.
 #[derive(Debug)]
 struct InputStream<'a> {
-    // The `ctx` pointer is set to this struct after creating the object
-    vtable: clap_istream,
+    /// The thread ID that created this stream. Used to verify that the plugin is calling the stream
+    /// methods from the same thread.
+    expected_thread_id: ThreadId,
 
-    buffer: &'a [u8],
+    /// The buffer to read from.
+    read_buffer: &'a [u8],
+
     /// The current position when reading from the buffer. This is needed because the plugin
     /// provides the buffer we should copy data into, and subsequent reads should continue from
     /// where we were left off.
@@ -38,22 +41,25 @@ struct InputStream<'a> {
 /// An output stream backed by a vector.
 #[derive(Debug)]
 struct OutputStream {
-    // The `ctx` pointer is set to this struct after creating the object
-    vtable: clap_ostream,
+    /// The thread ID that created this stream. Used to verify that the plugin is calling the stream
+    /// methods from the same thread.
+    expected_thread_id: ThreadId,
 
     // In Rust-land this function is object is only used from a single thread and there's absolutely
     // no reason for the plugin to be calling the stream read and write methods from multiple
     // threads, but better be safe than sorry.
-    buffer: Mutex<Vec<u8>>,
+    write_buffer: Mutex<Vec<u8>>,
+
     /// The maximum number of bytes the plugin is allowed to write to this stream at a time, if the
     /// stream pretends to be buffered. This is used to test whether the plugin handles buffered
     /// streams correctly.
     max_write_size: Option<usize>,
 }
 
-impl<'a> Extension<&'a Plugin<'a>> for State<'a> {
+impl<'a> Extension for State<'a> {
     const IDS: &'static [&'static CStr] = &[CLAP_EXT_STATE];
 
+    type Plugin = &'a Plugin<'a>;
     type Struct = clap_plugin_state;
 
     unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
@@ -67,16 +73,16 @@ impl<'a> Extension<&'a Plugin<'a>> for State<'a> {
 impl State<'_> {
     /// Retrieve the plugin's state. Returns an error if the plugin returned `false`.
     pub fn save(&self) -> Result<Vec<u8>> {
-        let stream = OutputStream::new();
+        let stream = OutputStream::new(None);
 
         let state = self.state.as_ptr();
         let plugin = self.plugin.as_ptr();
         let result = unsafe {
-            clap_call! { state=>save(plugin, &stream.vtable) }
+            clap_call! { state=>save(plugin, Proxy::vtable(&stream)) }
         };
 
         if result {
-            Ok(stream.into_vec())
+            Ok(stream.take())
         } else {
             anyhow::bail!("'clap_plugin_state::save()' returned false.");
         }
@@ -85,16 +91,16 @@ impl State<'_> {
     /// Retrieve the plugin's state while limiting the number of bytes the plugin can write at a
     /// time. Returns an error if the plugin returned `false`.
     pub fn save_buffered(&self, max_bytes: usize) -> Result<Vec<u8>> {
-        let stream = OutputStream::new().with_buffering(max_bytes);
+        let stream = OutputStream::new(Some(max_bytes));
 
         let state = self.state.as_ptr();
         let plugin = self.plugin.as_ptr();
         let result = unsafe {
-            clap_call! { state=>save(plugin, stream.vtable()) }
+            clap_call! { state=>save(plugin, Proxy::vtable(&stream)) }
         };
 
         if result {
-            Ok(stream.into_vec())
+            Ok(stream.take())
         } else {
             anyhow::bail!(
                 "'clap_plugin_state::save()' returned false when only allowing the plugin to write {max_bytes} bytes \
@@ -105,12 +111,12 @@ impl State<'_> {
 
     /// Restore previously stored state. Returns an error if the plugin returned `false`.
     pub fn load(&self, state: &[u8]) -> Result<()> {
-        let stream = InputStream::new(state);
+        let stream = InputStream::new(state, None);
 
         let state = self.state.as_ptr();
         let plugin = self.plugin.as_ptr();
         let result = unsafe {
-            clap_call! { state=>load(plugin, stream.vtable()) }
+            clap_call! { state=>load(plugin, Proxy::vtable(&stream)) }
         };
 
         if result {
@@ -123,12 +129,12 @@ impl State<'_> {
     /// Restore previously stored state while limiting the number of bytes the plugin can read at a
     /// time. Returns an error if the plugin returned `false`.
     pub fn load_buffered(&self, state: &[u8], max_bytes: usize) -> Result<()> {
-        let stream = InputStream::new(state).with_buffering(max_bytes);
+        let stream = InputStream::new(state, Some(max_bytes));
 
         let state = self.state.as_ptr();
         let plugin = self.plugin.as_ptr();
         let result = unsafe {
-            clap_call! { state=>load(plugin, &stream.vtable) }
+            clap_call! { state=>load(plugin, Proxy::vtable(&stream)) }
         };
 
         if result {
@@ -142,56 +148,65 @@ impl State<'_> {
     }
 }
 
+impl<'a> Proxyable for InputStream<'a> {
+    type Vtable = clap_istream;
+
+    fn init(&self) -> Self::Vtable {
+        clap_istream {
+            ctx: CHECK_POINTER,
+            read: Some(Self::read),
+        }
+    }
+}
+
+impl Proxyable for OutputStream {
+    type Vtable = clap_ostream;
+
+    fn init(&self) -> Self::Vtable {
+        clap_ostream {
+            ctx: CHECK_POINTER,
+            write: Some(Self::write),
+        }
+    }
+}
+
 impl<'a> InputStream<'a> {
     /// Create a new input stream backed by a slice.
-    pub fn new(buffer: &'a [u8]) -> Pin<Box<Self>> {
-        let mut stream = Box::pin(InputStream {
-            vtable: clap_istream {
-                // This is set to point to this object below
-                ctx: std::ptr::null_mut(),
-                read: Some(Self::read),
-            },
-
-            buffer,
+    pub fn new(buffer: &'a [u8], max_read_size: Option<usize>) -> Proxy<Self> {
+        Proxy::new(InputStream {
+            read_buffer: buffer,
+            expected_thread_id: std::thread::current().id(),
             read_position: AtomicUsize::new(0),
-            max_read_size: None,
-        });
-
-        stream.vtable.ctx = &*stream as *const Self as *mut c_void;
-
-        stream
-    }
-
-    /// The stream's `clap_istream` vtable.
-    pub fn vtable(self: &Pin<Box<Self>>) -> *const clap_istream {
-        &self.vtable
-    }
-
-    /// Only allow `max_bytes` bytes to be read at a time. Useful for simulating buffered streams.
-    pub fn with_buffering(mut self: Pin<Box<Self>>, max_bytes: usize) -> Pin<Box<Self>> {
-        self.max_read_size = Some(max_bytes);
-        self
+            max_read_size,
+        })
     }
 
     unsafe extern "C" fn read(stream: *const clap_istream, buffer: *mut c_void, size: u64) -> i64 {
         unsafe {
-            if stream.is_null() || (*stream).ctx.is_null() || buffer.is_null() {
-                fail_test!("'clap_istream::read' was called with a null pointer");
+            let state = Proxy::<Self>::from_vtable(stream).unwrap_or_else(|e| {
+                fail_test!("clap_istream::read: {}", e);
+            });
+
+            if Proxy::vtable(&state).ctx != CHECK_POINTER {
+                fail_test!("clap_istream::read: plugin messed with the 'ctx' pointer");
+            }
+
+            if state.expected_thread_id != std::thread::current().id() {
+                fail_test!("clap_istream::read: called from a different thread than the one that created the stream");
             }
 
             // The reads may be limited to a certain buffering size to test the plugin's capabilities
-            let this = &*((*stream).ctx as *const Self);
-            let size = match this.max_read_size {
+            let size = match state.max_read_size {
                 Some(max_read_size) => size.min(max_read_size as u64),
                 None => size,
             };
 
-            let current_pos = this.read_position.load(Ordering::Relaxed);
-            let bytes_to_read = (this.buffer.len() - current_pos).min(size as usize);
-            this.read_position.fetch_add(bytes_to_read, Ordering::Relaxed);
+            let current_pos = state.read_position.load(Ordering::Relaxed);
+            let bytes_to_read = (state.read_buffer.len() - current_pos).min(size as usize);
+            state.read_position.fetch_add(bytes_to_read, Ordering::Relaxed);
 
             std::slice::from_raw_parts_mut(buffer as *mut u8, bytes_to_read)
-                .copy_from_slice(&this.buffer[current_pos..current_pos + bytes_to_read]);
+                .copy_from_slice(&state.read_buffer[current_pos..current_pos + bytes_to_read]);
 
             bytes_to_read as i64
         }
@@ -200,55 +215,45 @@ impl<'a> InputStream<'a> {
 
 impl OutputStream {
     /// Create a new output stream backed by a vector.
-    pub fn new() -> Pin<Box<Self>> {
-        let mut stream = Box::pin(OutputStream {
-            vtable: clap_ostream {
-                // This is set to point to this object below
-                ctx: std::ptr::null_mut(),
-                write: Some(Self::write),
-            },
-
-            buffer: Mutex::new(Vec::new()),
-            max_write_size: None,
-        });
-
-        stream.vtable.ctx = &*stream as *const Self as *mut c_void;
-
-        stream
+    pub fn new(max_write_size: Option<usize>) -> Proxy<Self> {
+        Proxy::new(OutputStream {
+            expected_thread_id: std::thread::current().id(),
+            write_buffer: Mutex::new(Vec::new()),
+            max_write_size,
+        })
     }
 
-    /// The stream's `clap_ostream` vtable.
-    pub fn vtable(self: &Pin<Box<Self>>) -> *const clap_ostream {
-        &self.vtable
-    }
-
-    /// Only allow `max_bytes` bytes to be written at a time. Useful for simulating buffered
-    /// streams.
-    pub fn with_buffering(mut self: Pin<Box<Self>>, max_bytes: usize) -> Pin<Box<Self>> {
-        self.max_write_size = Some(max_bytes);
-        self
-    }
-
-    /// Get the byte buffer from this stream.
-    pub fn into_vec(self: Pin<Box<Self>>) -> Vec<u8> {
-        // SAFETY: We can safely grab this inner buffer because this consumes the Box<Self>
-        unsafe { Pin::into_inner_unchecked(self) }.buffer.into_inner().unwrap()
+    /// Take the contents of the write buffer.
+    pub fn take(&self) -> Vec<u8> {
+        std::mem::take(&mut *self.write_buffer.lock().unwrap())
     }
 
     unsafe extern "C" fn write(stream: *const clap_ostream, buffer: *const c_void, size: u64) -> i64 {
         unsafe {
-            if stream.is_null() || (*stream).ctx.is_null() || buffer.is_null() {
-                fail_test!("'clap_ostream::write' was called with a null pointer");
+            let state = Proxy::<Self>::from_vtable(stream).unwrap_or_else(|e| {
+                fail_test!("clap_ostream::write: {}", e);
+            });
+
+            if Proxy::vtable(&state).ctx != CHECK_POINTER {
+                fail_test!("clap_ostream::write: plugin messed with the 'ctx' pointer");
+            }
+
+            if buffer.is_null() {
+                fail_test!("clap_ostream::write: 'buffer' pointer is null");
+            }
+
+            if state.expected_thread_id != std::thread::current().id() {
+                fail_test!("clap_ostream::write: called from a different thread than the one that created the stream");
             }
 
             // The writes may be limited to a certain buffering size to test the plugin's capabilities
-            let this = &*((*stream).ctx as *const Self);
-            let size = match this.max_write_size {
+            let size = match state.max_write_size {
                 Some(max_write_size) => size.min(max_write_size as u64),
                 None => size,
             };
 
-            this.buffer
+            state
+                .write_buffer
                 .lock()
                 .unwrap()
                 .extend_from_slice(std::slice::from_raw_parts(buffer as *const u8, size as usize));

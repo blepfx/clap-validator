@@ -11,9 +11,10 @@ pub struct AudioPortsActivation<'a> {
     audio_ports_activation: NonNull<clap_plugin_audio_ports_activation>,
 }
 
-impl<'a> Extension<&'a Plugin<'a>> for AudioPortsActivation<'a> {
+impl<'a> Extension for AudioPortsActivation<'a> {
     const IDS: &'static [&'static CStr] = &[CLAP_EXT_AUDIO_PORTS_ACTIVATION, CLAP_EXT_AUDIO_PORTS_ACTIVATION_COMPAT];
 
+    type Plugin = &'a Plugin<'a>;
     type Struct = clap_plugin_audio_ports_activation;
 
     unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {

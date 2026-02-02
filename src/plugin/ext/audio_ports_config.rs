@@ -1,6 +1,6 @@
 use crate::plugin::ext::Extension;
 use crate::plugin::ext::ambisonic::Ambisonic;
-use crate::plugin::ext::audio_ports::check_audio_port_type_consistent;
+use crate::plugin::ext::audio_ports::{AudioPort, check_audio_port_info_valid, check_audio_port_type_consistent};
 use crate::plugin::ext::surround::Surround;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::{c_char_slice_to_string, clap_call};
@@ -35,9 +35,10 @@ pub struct AudioPortsConfigConfig {
     pub main_output_channel_count: Option<u32>,
 }
 
-impl<'a> Extension<&'a Plugin<'a>> for AudioPortsConfig<'a> {
+impl<'a> Extension for AudioPortsConfig<'a> {
     const IDS: &'static [&'static CStr] = &[CLAP_EXT_AUDIO_PORTS_CONFIG];
 
+    type Plugin = &'a Plugin<'a>;
     type Struct = clap_plugin_audio_ports_config;
 
     unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
@@ -48,12 +49,13 @@ impl<'a> Extension<&'a Plugin<'a>> for AudioPortsConfig<'a> {
     }
 }
 
-impl<'a> Extension<&'a Plugin<'a>> for AudioPortsConfigInfo<'a> {
+impl<'a> Extension for AudioPortsConfigInfo<'a> {
     const IDS: &'static [&'static CStr] = &[
         CLAP_EXT_AUDIO_PORTS_CONFIG_INFO,
         CLAP_EXT_AUDIO_PORTS_CONFIG_INFO_COMPAT,
     ];
 
+    type Plugin = &'a Plugin<'a>;
     type Struct = clap_plugin_audio_ports_config_info;
 
     unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
@@ -147,6 +149,7 @@ impl AudioPortsConfig<'_> {
 }
 
 impl AudioPortsConfigInfo<'_> {
+    /// Get the current selected audio ports configuration ID.
     pub fn current(&self) -> clap_id {
         let audio_ports_config_info = self.audio_ports_config_info.as_ptr();
         let plugin = self.plugin.as_ptr();
@@ -156,24 +159,20 @@ impl AudioPortsConfigInfo<'_> {
         }
     }
 
-    /// Get the raw audio port information for the given port index. This does not perform any
-    /// consistency checks.
-    pub fn get_raw_port_info(
-        &self,
-        config_id: clap_id,
-        is_input: bool,
-        port_index: u32,
-    ) -> Option<clap_audio_port_info> {
-        let audio_ports_config_info = self.audio_ports_config_info.as_ptr();
-        let plugin = self.plugin.as_ptr();
+    /// Get information about an audio port for a configuration.
+    pub fn get(&self, config_id: clap_id, is_input: bool, port_index: u32) -> Result<AudioPort> {
+        let info = unsafe {
+            let audio_ports_config_info = self.audio_ports_config_info.as_ptr();
+            let plugin = self.plugin.as_ptr();
 
-        unsafe {
             let mut info = clap_audio_port_info { ..zeroed() };
             if !clap_call! { audio_ports_config_info=>get(plugin, config_id, port_index, is_input, &mut info) } {
-                return None;
+                anyhow::bail!("audio_ports_config_info::get() returned false");
             }
 
-            Some(info)
-        }
+            info
+        };
+
+        check_audio_port_info_valid(self.plugin, is_input, port_index, &info)
     }
 }

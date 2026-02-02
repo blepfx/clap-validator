@@ -34,9 +34,10 @@ pub struct NotePort {
     pub supported_dialects: Vec<clap_note_dialect>,
 }
 
-impl<'a> Extension<&'a Plugin<'a>> for NotePorts<'a> {
+impl<'a> Extension for NotePorts<'a> {
     const IDS: &'static [&'static CStr] = &[CLAP_EXT_NOTE_PORTS];
 
+    type Plugin = &'a Plugin<'a>;
     type Struct = clap_plugin_note_ports;
 
     unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {

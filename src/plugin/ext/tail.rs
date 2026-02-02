@@ -11,9 +11,10 @@ pub struct Tail<'a> {
     tail: NonNull<clap_plugin_tail>,
 }
 
-impl<'a> Extension<&'a PluginAudioThread<'a>> for Tail<'a> {
+impl<'a> Extension for Tail<'a> {
     const IDS: &'static [&'static CStr] = &[CLAP_EXT_TAIL];
 
+    type Plugin = &'a PluginAudioThread<'a>;
     type Struct = clap_plugin_tail;
 
     unsafe fn new(plugin: &'a PluginAudioThread<'a>, extension_struct: NonNull<Self::Struct>) -> Self {

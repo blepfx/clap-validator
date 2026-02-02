@@ -3,7 +3,7 @@
 
 use crate::panic::fail_test;
 use crate::plugin::preset_discovery::parse_timestamp;
-use crate::plugin::util::{self, object_tracker, validator_version};
+use crate::plugin::util::{self, CHECK_POINTER, Proxy, Proxyable, validator_version};
 use anyhow::{Context, Result};
 use clap_sys::factory::preset_discovery::*;
 use clap_sys::version::CLAP_VERSION;
@@ -11,7 +11,6 @@ use serde::Serialize;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
 use std::path::Path;
-use std::pin::Pin;
 use std::sync::Mutex;
 use std::thread::ThreadId;
 use time::OffsetDateTime;
@@ -24,10 +23,6 @@ pub struct Indexer {
 
     /// The data written to this object by the plugin.
     result: Mutex<Result<IndexerResults>>,
-
-    /// The vtable that's passed to the provider. The `indexer_data` field is populated with a
-    /// pointer to this object.
-    clap_preset_discovery_indexer: clap_preset_discovery_indexer,
 }
 
 /// The data written to the indexer by the plugin during the
@@ -323,42 +318,31 @@ impl Soundpack {
     }
 }
 
-impl Drop for Indexer {
-    fn drop(&mut self) {
-        object_tracker::untrack(&self.clap_preset_discovery_indexer);
+impl Proxyable for Indexer {
+    type Vtable = clap_preset_discovery_indexer;
+
+    fn init(&self) -> Self::Vtable {
+        clap_preset_discovery_indexer {
+            clap_version: CLAP_VERSION,
+            indexer_data: CHECK_POINTER,
+            name: c"clap-validator".as_ptr(),
+            vendor: c"Robbert van der Helm".as_ptr(),
+            url: c"https://github.com/free-audio/clap-validator".as_ptr(),
+            version: validator_version().as_ptr(),
+            declare_filetype: Some(Self::declare_filetype),
+            declare_location: Some(Self::declare_location),
+            declare_soundpack: Some(Self::declare_soundpack),
+            get_extension: Some(Self::get_extension),
+        }
     }
 }
 
 impl Indexer {
-    pub fn new() -> Pin<Box<Self>> {
-        let mut indexer = Box::pin(Self {
+    pub fn new() -> Proxy<Self> {
+        Proxy::new(Self {
             expected_thread_id: std::thread::current().id(),
             result: Mutex::new(Ok(IndexerResults::default())),
-
-            clap_preset_discovery_indexer: clap_preset_discovery_indexer {
-                clap_version: CLAP_VERSION,
-                name: c"clap-validator".as_ptr(),
-                vendor: c"Robbert van der Helm".as_ptr(),
-                url: c"https://github.com/free-audio/clap-validator".as_ptr(),
-                version: validator_version().as_ptr(),
-                // This is filled with a pointer to this struct after the `Box` has been allocated
-                indexer_data: std::ptr::null_mut(),
-                declare_filetype: Some(Self::declare_filetype),
-                declare_location: Some(Self::declare_location),
-                declare_soundpack: Some(Self::declare_soundpack),
-                get_extension: Some(Self::get_extension),
-            },
-        });
-
-        object_tracker::track(&indexer.clap_preset_discovery_indexer);
-        indexer.clap_preset_discovery_indexer.indexer_data = &*indexer as *const Self as *mut c_void;
-        indexer
-    }
-
-    /// Get a `clap_preset_discovery_indexer` vtable pointer that can be passed to the
-    /// `clap_preset_discovery_factory` when creating a provider.
-    pub fn clap_preset_discovery_indexer_ptr(self: &Pin<Box<Self>>) -> *const clap_preset_discovery_indexer {
-        &self.clap_preset_discovery_indexer
+        })
     }
 
     /// Get the values written to this indexer by the plugin during the
@@ -382,17 +366,16 @@ impl Indexer {
         log::trace!("'{}' was called by the plugin", function_name);
 
         let state = unsafe {
-            if indexer.is_null() || (*indexer).indexer_data.is_null() {
-                fail_test!(
-                    "'{}' was called with a null 'clap_preset_discovery_indexer' pointer",
-                    function_name
-                );
-            }
-
-            &*((*indexer).indexer_data as *const Self)
+            Proxy::<Self>::from_vtable(indexer).unwrap_or_else(|e| {
+                fail_test!("{}: {}", function_name, e);
+            })
         };
 
-        match f(state) {
+        if Proxy::vtable(&state).indexer_data != CHECK_POINTER {
+            fail_test!("{}: plugin messed with the 'indexer_data' pointer", function_name);
+        }
+
+        match f(&state) {
             Ok(result) => Some(result),
             Err(error) => {
                 let mut guard = state.result.lock().unwrap();

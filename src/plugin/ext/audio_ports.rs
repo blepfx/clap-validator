@@ -48,14 +48,18 @@ pub struct AudioPort {
     /// Supports 64 bit processing
     pub supports_double_sample_size: bool,
 
+    /// Prefers 64 bit processing
+    pub prefers_double_sample_size: bool,
+
     /// All ports with this flag require common sample size
     #[allow(unused)] // TODO: use for future mixed precision processing tests
     pub requires_common_sample_size: bool,
 }
 
-impl<'a> Extension<&'a Plugin<'a>> for AudioPorts<'a> {
+impl<'a> Extension for AudioPorts<'a> {
     const IDS: &'static [&'static CStr] = &[CLAP_EXT_AUDIO_PORTS];
 
+    type Plugin = &'a Plugin<'a>;
     type Struct = clap_plugin_audio_ports;
 
     unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
@@ -70,6 +74,20 @@ impl AudioPorts<'_> {
     /// Get the audio port configuration for this plugin. This automatically performs a number of
     /// consistency checks on the plugin's audio port configuration.
     pub fn config(&self) -> Result<AudioPortConfig> {
+        fn get_raw_port_info(this: &AudioPorts, is_input: bool, port_index: u32) -> Option<clap_audio_port_info> {
+            let audio_ports = this.audio_ports.as_ptr();
+            let plugin = this.plugin.as_ptr();
+
+            unsafe {
+                let mut info = clap_audio_port_info { ..zeroed() };
+                if !clap_call! { audio_ports=>get(plugin, port_index, is_input, &mut info) } {
+                    return None;
+                }
+
+                Some(info)
+            }
+        }
+
         let mut config = AudioPortConfig::default();
 
         let audio_ports = self.audio_ports.as_ptr();
@@ -82,12 +100,12 @@ impl AudioPorts<'_> {
         };
 
         for index in 0..num_inputs {
-            let info = match self.get_raw_port_info(true, index) {
+            let info = match get_raw_port_info(self, true, index) {
                 Some(info) => info,
                 None => {
                     anyhow::bail!(
                         "Plugin returned false when querying audio port info for input port {index} (out of \
-                         {num_inputs} total)."
+                         {num_inputs} total)"
                     );
                 }
             };
@@ -99,12 +117,12 @@ impl AudioPorts<'_> {
         }
 
         for index in 0..num_outputs {
-            let info = match self.get_raw_port_info(false, index) {
+            let info = match get_raw_port_info(self, false, index) {
                 Some(info) => info,
                 None => {
                     anyhow::bail!(
                         "Plugin returned false when querying audio port info for output port {index} (out of \
-                         {num_outputs} total)."
+                         {num_outputs} total)"
                     );
                 }
             };
@@ -154,22 +172,6 @@ impl AudioPorts<'_> {
         }
 
         Ok(config)
-    }
-
-    /// Get the raw audio port information for the given port index. This does not perform any
-    /// consistency checks.
-    pub fn get_raw_port_info(&self, is_input: bool, port_index: u32) -> Option<clap_audio_port_info> {
-        let audio_ports = self.audio_ports.as_ptr();
-        let plugin = self.plugin.as_ptr();
-
-        unsafe {
-            let mut info = clap_audio_port_info { ..zeroed() };
-            if !clap_call! { audio_ports=>get(plugin, port_index, is_input, &mut info) } {
-                return None;
-            }
-
-            Some(info)
-        }
     }
 }
 
@@ -228,6 +230,7 @@ pub fn check_audio_port_info_valid(
 
         supports_double_sample_size,
         requires_common_sample_size,
+        prefers_double_sample_size,
     })
 }
 

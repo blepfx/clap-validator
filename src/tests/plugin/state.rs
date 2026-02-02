@@ -11,7 +11,7 @@ use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::params::Params;
 use crate::plugin::ext::state::State;
 use crate::plugin::library::PluginLibrary;
-use crate::plugin::process::{AudioBuffers, Event, EventQueue, ProcessScope};
+use crate::plugin::process::{AudioBuffers, Event, InputEventQueue, OutputEventQueue, ProcessScope};
 use crate::tests::plugin::params::param_compare_approx;
 use crate::tests::rng::{ParamFuzzer, new_prng};
 use crate::tests::{TestCase, TestStatus};
@@ -174,9 +174,11 @@ pub fn test_state_reproducibility_basic(
             let mut process = ProcessScope::new(&plugin, &mut buffers)?;
 
             process.audio_buffers().fill_white_noise(&mut prng);
-            process.input_queue().add_events(random_param_set_events);
+            process.add_events(random_param_set_events);
             process.run()
         })?;
+
+        plugin.poll_callback(|_| Ok(()))?;
 
         // We'll check that the plugin has these sames values after reloading the state. These
         // values are rounded to the tenth decimal to provide some leeway in the serialization and
@@ -255,6 +257,8 @@ pub fn test_state_reproducibility_basic(
         );
     }
 
+    plugin.poll_callback(|_| Ok(()))?;
+
     // Now for the moment of truth
     let actual_state = state.save()?;
 
@@ -331,8 +335,8 @@ pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str
         let param_fuzzer = ParamFuzzer::new(&param_infos);
         let random_param_set_events: Vec<_> = param_fuzzer.randomize_params_at(&mut prng, 0).collect();
 
-        let input_events = EventQueue::new();
-        let output_events = EventQueue::new();
+        let input_events = InputEventQueue::new();
+        let output_events = OutputEventQueue::new();
 
         input_events.add_events(random_param_set_events.clone());
         params.flush(&input_events, &output_events);
@@ -432,9 +436,11 @@ pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str
         let mut process = ProcessScope::new(&plugin, &mut buffers)?;
 
         process.audio_buffers().fill_white_noise(&mut prng);
-        process.input_queue().add_events(new_random_param_set_events);
+        process.add_events(new_random_param_set_events);
         process.run()
     })?;
+
+    plugin.poll_callback(|_| Ok(()))?;
 
     let actual_param_values: BTreeMap<clap_id, f64> = expected_param_values
         .keys()
@@ -454,6 +460,8 @@ pub fn test_state_reproducibility_flush(library: &PluginLibrary, plugin_id: &str
             param_diff_file_path.display(),
         );
     }
+
+    plugin.poll_callback(|_| Ok(()))?;
 
     let actual_state = state.save()?;
 
@@ -521,14 +529,18 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
         let param_fuzzer = ParamFuzzer::new(&param_infos);
         let random_param_set_events: Vec<_> = param_fuzzer.randomize_params_at(&mut prng, 0).collect();
 
+        plugin.poll_callback(|_| Ok(()))?;
+
         plugin.on_audio_thread(|plugin| {
             let mut buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
             let mut process = ProcessScope::new(&plugin, &mut buffers)?;
 
             process.audio_buffers().fill_white_noise(&mut prng);
-            process.input_queue().add_events(random_param_set_events);
+            process.add_events(random_param_set_events);
             process.run()
         })?;
+
+        plugin.poll_callback(|_| Ok(()))?;
 
         let expected_param_values: BTreeMap<clap_id, f64> = param_infos
             .keys()
@@ -583,6 +595,7 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
     // This is a buffered load that only loads 17 bytes at a time. Why 17? Because.
     const BUFFERED_LOAD_MAX_BYTES: usize = 17;
     state.load_buffered(&expected_state, BUFFERED_LOAD_MAX_BYTES)?;
+
     plugin.poll_callback(|_| Ok(()))?;
 
     let actual_param_values: BTreeMap<clap_id, f64> = expected_param_values
@@ -603,6 +616,8 @@ pub fn test_state_buffered_streams(library: &PluginLibrary, plugin_id: &str) -> 
             param_diff_file_path.display()
         );
     }
+
+    plugin.poll_callback(|_| Ok(()))?;
 
     // Because we're mean, we'll use a different prime number for the saving
     const BUFFERED_SAVE_MAX_BYTES: usize = 23;
@@ -645,12 +660,13 @@ fn generate_param_diff(
     let diff = actual
         .iter()
         .filter_map(|(&param_id, &actual_value)| {
+            let info = &param_infos[&param_id];
             let expected_value = expected[&param_id];
-            if param_compare_approx(actual_value, expected_value) {
+
+            if param_compare_approx(info, actual_value, expected_value) {
                 return None;
             }
 
-            let param_name = &param_infos[&param_id].name;
             let string_actual = params
                 .value_to_text(param_id, actual_value)
                 .ok()
@@ -664,7 +680,7 @@ fn generate_param_diff(
 
             Some(format!(
                 "{}, {:?}, {:?}, {:.4}, {:?}, {:.4}",
-                param_id, param_name, string_actual, actual_value, string_expected, expected_value,
+                param_id, info.name, string_actual, actual_value, string_expected, expected_value,
             ))
         })
         .collect::<Vec<String>>();

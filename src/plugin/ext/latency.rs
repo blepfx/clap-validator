@@ -11,9 +11,10 @@ pub struct Latency<'a> {
     latency: NonNull<clap_plugin_latency>,
 }
 
-impl<'a> Extension<&'a Plugin<'a>> for Latency<'a> {
+impl<'a> Extension for Latency<'a> {
     const IDS: &'static [&'static CStr] = &[CLAP_EXT_LATENCY];
 
+    type Plugin = &'a Plugin<'a>;
     type Struct = clap_plugin_latency;
 
     unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {

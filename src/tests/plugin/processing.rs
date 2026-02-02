@@ -113,9 +113,7 @@ pub fn test_process_audio_double(library: &PluginLibrary, plugin_id: &str, in_pl
 
         for _ in 0..5 {
             process.audio_buffers().fill_white_noise(&mut prng);
-            process
-                .input_queue()
-                .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+            process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
             process.run()?;
         }
 
@@ -184,9 +182,7 @@ pub fn test_process_note_out_of_place(
 
         for _ in 0..5 {
             process.audio_buffers().fill_white_noise(&mut prng);
-            process
-                .input_queue()
-                .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+            process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
             process.run()?;
         }
 
@@ -238,9 +234,7 @@ pub fn test_process_varying_sample_rates(library: &PluginLibrary, plugin_id: &st
 
                 for _ in 0..5 {
                     process.audio_buffers().fill_white_noise(&mut prng);
-                    process
-                        .input_queue()
-                        .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+                    process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
                     process.run()?;
                 }
 
@@ -291,9 +285,7 @@ pub fn test_process_varying_block_sizes(library: &PluginLibrary, plugin_id: &str
 
                 for _ in 0..num_iters {
                     process.audio_buffers().fill_white_noise(&mut prng);
-                    process
-                        .input_queue()
-                        .add_events(note_rng.generate_events(&mut prng, buffer_size));
+                    process.add_events(note_rng.generate_events(&mut prng, buffer_size));
                     process.run()?;
                 }
 
@@ -345,9 +337,7 @@ pub fn test_process_random_block_sizes(library: &PluginLibrary, plugin_id: &str)
             };
 
             process.audio_buffers().fill_white_noise(&mut prng);
-            process
-                .input_queue()
-                .add_events(note_rng.generate_events(&mut prng, buffer_size));
+            process.add_events(note_rng.generate_events(&mut prng, buffer_size));
             process
                 .run_with_block_size(buffer_size)
                 .with_context(|| format!("Error while processing with buffer size of {}", buffer_size))?;
@@ -391,9 +381,7 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
 
         // first run, "control" run
         process.audio_buffers().fill_white_noise(&mut new_prng());
-        process
-            .input_queue()
-            .add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
+        process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
         process.run()?;
 
         let output_control = process
@@ -406,9 +394,7 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
         // second run, deactivate and reactivate the plugin, see if the output changes
         process.restart();
         process.audio_buffers().fill_white_noise(&mut new_prng());
-        process
-            .input_queue()
-            .add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
+        process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
         process.run()?;
 
         let output_reactivated = process
@@ -421,9 +407,7 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
         // third run, reset the plugin, see if the output matches the control run
         process.reset();
         process.audio_buffers().fill_white_noise(&mut new_prng());
-        process
-            .input_queue()
-            .add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
+        process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
         process.run()?;
 
         let output_reset = process
@@ -528,16 +512,14 @@ pub fn test_process_sleep_constant_mask(library: &PluginLibrary, plugin_id: &str
 
         // block 2: randomize inputs, see if the plugin tracks constant channels
         process.audio_buffers().fill_white_noise(&mut prng);
-        process
-            .input_queue()
-            .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+        process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
         process.run()?;
         check_buffers(process.audio_buffers()).context("Block 1")?;
 
         // block 3-40: silent inputs again, see if the plugin updates the constant mask accordingly
         // 40 blocks to give the output tail to fully decay to silence if there is any reverb/delay
         process.audio_buffers().fill_silence();
-        process.input_queue().add_events(note_rng.stop_all_voices(0));
+        process.add_events(note_rng.stop_all_voices(0));
         for _ in 3..=40 {
             process.run()?;
             check_buffers(process.audio_buffers())?;
@@ -599,12 +581,10 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
             let is_quiet = (0..5).contains(&i) || (10..20).contains(&i) || (30..).contains(&i);
 
             if is_quiet {
-                process.input_queue().add_events(note_rng.stop_all_voices(0));
+                process.add_events(note_rng.stop_all_voices(0));
                 process.audio_buffers().fill_silence();
             } else {
-                process
-                    .input_queue()
-                    .add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+                process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
                 process.audio_buffers().fill_white_noise(&mut prng);
             }
 

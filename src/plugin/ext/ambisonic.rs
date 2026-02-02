@@ -11,9 +11,10 @@ pub struct Ambisonic<'a> {
     ambisonic: NonNull<clap_plugin_ambisonic>,
 }
 
-impl<'a> Extension<&'a Plugin<'a>> for Ambisonic<'a> {
+impl<'a> Extension for Ambisonic<'a> {
     const IDS: &'static [&'static CStr] = &[CLAP_EXT_AMBISONIC, CLAP_EXT_AMBISONIC_COMPAT];
 
+    type Plugin = &'a Plugin<'a>;
     type Struct = clap_plugin_ambisonic;
 
     unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {

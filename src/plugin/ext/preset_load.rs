@@ -31,13 +31,12 @@ impl<'a> Extension for PresetLoad<'a> {
 }
 
 impl PresetLoad<'_> {
-    /// Try to load a preet based on a location and an optional load key. This information can be
+    /// Try to load a preset based on a location and an optional load key. This information can be
     /// obtained through the preset discovery factory
     /// ([`Library::preset_discovery_factory()`][[crate::plugin::library::Library::preset_discovery_factory()]]).
     /// Load keys are only used for container presets, otherwise they're `None`. The semantics are
     /// similar to loading state.
-    #[allow(clippy::wrong_self_convention)]
-    pub fn from_location(&self, location: &LocationValue, load_key: Option<&str>) -> Result<()> {
+    pub fn load_from_location(&self, location: &LocationValue, load_key: Option<&str>) -> Result<()> {
         let (location_kind, location_ptr) = location.to_raw();
         let load_key_cstring = load_key
             .map(|load_key| CString::new(load_key).context("Load key contained internal null bytes"))

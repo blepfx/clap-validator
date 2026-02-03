@@ -28,9 +28,11 @@ impl<'a> Extension for ThreadPool<'a> {
 }
 
 impl<'a> ThreadPool<'a> {
+    #[tracing::instrument(name = "clap_plugin_thread_pool::exec", level = 1, skip(self))]
     pub fn exec(&self, task: u32) {
         let thread_pool = self.tail.as_ptr();
         let plugin = self.plugin.clap_plugin;
+
         unsafe {
             clap_call! { thread_pool=>exec(plugin, task) }
         }

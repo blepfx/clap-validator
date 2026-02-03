@@ -10,7 +10,7 @@ use crate::util::{self, IteratorExt};
 use anyhow::{Context, Result};
 use clap::ValueEnum;
 use clap_sys::version::clap_version_is_compatible;
-use regex::{Regex, RegexBuilder};
+use regex_lite::Regex;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -58,15 +58,11 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Va
     // fail. This is allowed to fail since the directory may not exist and even if it does and we
     // cannot remove it, then that may not be a problem.
     let _ = std::fs::remove_dir_all(util::validator_temp_dir());
-    let test_filter_re = settings
+
+    let test_regex = settings
         .test_filter
-        .as_deref()
-        .map(|filter| {
-            RegexBuilder::new(filter)
-                .case_insensitive(true)
-                .build()
-                .context("The test filter is not a valid regular expression")
-        })
+        .as_ref()
+        .map(|x| Regex::new(x).with_context(|| format!("Could not parse the test filter regular expression '{}'", x)))
         .transpose()?;
 
     // The tests can optionally be run in parallel. This is not the default since some plugins may
@@ -89,7 +85,7 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Va
             plugin_library_tests.insert(
                 library_path.clone(),
                 PluginLibraryTestCase::iter()
-                    .filter(|test| test_filter(test, settings, &test_filter_re))
+                    .filter(|test| test_filter(test, settings, test_regex.as_ref()))
                     .map_parallel(parallel, |test| run_test(&test, verbosity, settings, library_path))
                     .collect::<Result<Vec<TestResult>>>()?,
             );
@@ -103,7 +99,7 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Va
                 .with_context(|| format!("Could not fetch plugin metadata for '{}'", library_path.display()))?;
 
             if !clap_version_is_compatible(plugin_metadata.clap_version()) {
-                log::debug!(
+                tracing::debug!(
                     "'{}' uses an unsupported CLAP version ({}.{}.{}), skipping...",
                     library_path.display(),
                     plugin_metadata.version.0,
@@ -123,7 +119,7 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Va
                 .filter(|plugin_metadata| plugin_filter(plugin_metadata, settings))
                 .map_parallel(parallel, |plugin_metadata| {
                     let tests = PluginTestCase::iter()
-                        .filter(|test| test_filter(test, settings, &test_filter_re))
+                        .filter(|test| test_filter(test, settings, test_regex.as_ref()))
                         .map_parallel(parallel, |test| {
                             run_test(&test, verbosity, settings, (library_path, &plugin_metadata.id))
                         });
@@ -198,11 +194,11 @@ pub fn run_single_test(settings: &SingleTestSettings) -> Result<()> {
 
 /// The filter function for determining whether or not a test should be run based on the validator's
 /// settings settings.
-fn test_filter<'a, T: TestCase<'a>>(test: &T, settings: &ValidatorSettings, test_filter_re: &Option<Regex>) -> bool {
+fn test_filter<'a, T: TestCase<'a>>(test: &T, settings: &ValidatorSettings, test_filter: Option<&Regex>) -> bool {
     let test_name = test.to_string();
-    match (&test_filter_re, settings.invert_filter) {
-        (Some(test_filter_re), false) if !test_filter_re.is_match(&test_name) => false,
-        (Some(test_filter_re), true) if test_filter_re.is_match(&test_name) => false,
+    match (test_filter, settings.invert_filter) {
+        (Some(test_filter), false) if !test_filter.is_match(&test_name) => false,
+        (Some(test_filter), true) if test_filter.is_match(&test_name) => false,
         _ => true,
     }
 }
@@ -282,7 +278,7 @@ fn run_test_out_of_process<'a, T: TestCase<'a>>(
         command.stderr(Stdio::null());
     }
 
-    let exit_status = command
+    let status = command
         .spawn()
         .context("Could not call clap-validator for out-of-process validation")?
         // The docs make it seem like this can only fail if the process isn't running, but if
@@ -290,33 +286,29 @@ fn run_test_out_of_process<'a, T: TestCase<'a>>(
         .wait_timeout(WAIT_TIMEOUT)
         .context("Error while waiting on clap-validator to finish running the test")?;
 
-    match exit_status {
-        None => {
-            return Ok(TestStatus::Crashed {
-                details: format!("Timed out after {} seconds", WAIT_TIMEOUT.as_secs()),
-            });
-        }
+    match status {
+        None => Ok(TestStatus::Crashed {
+            details: format!("Timed out after {} seconds", WAIT_TIMEOUT.as_secs()),
+        }),
 
-        Some(status) if !status.success() => {
-            return Ok(TestStatus::Crashed {
-                details: status.to_string(),
-            });
-        }
+        Some(status) if !status.success() => Ok(TestStatus::Crashed {
+            details: status.to_string(),
+        }),
 
-        _ => {}
+        _ => {
+            // At this point, the child process _should_ have written its output to `output_file_path`,
+            // and we can just parse it from there
+            let result = serde_json::from_str(&fs::read_to_string(&output_file_path).with_context(|| {
+                format!(
+                    "Could not read the child process output from '{}'",
+                    output_file_path.display()
+                )
+            })?)
+            .context("Could not parse the child process output to JSON")?;
+
+            Ok(result)
+        }
     }
-
-    // At this point, the child process _should_ have written its output to `output_file_path`,
-    // and we can just parse it from there
-    let result = serde_json::from_str(&fs::read_to_string(&output_file_path).with_context(|| {
-        format!(
-            "Could not read the child process output from '{}'",
-            output_file_path.display()
-        )
-    })?)
-    .context("Could not parse the child process output to JSON")?;
-
-    Ok(result)
 }
 
 fn run_test_in_process(test: impl FnOnce() -> Result<TestStatus>) -> TestStatus {

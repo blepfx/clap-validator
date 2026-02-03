@@ -33,6 +33,8 @@ pub struct PluginLibrary {
     /// To honor CLAP's thread safety guidelines, the thread this object was created from is
     /// designated the 'main thread', and this object cannot be shared with other threads.
     _thread: PhantomData<*const ()>,
+
+    _span: tracing::span::EnteredSpan,
 }
 
 /// Metadata for a CLAP plugin library, which may contain multiple plugins.
@@ -115,11 +117,6 @@ impl PluginLibrary {
         path: impl AsRef<Path>,
         load: impl FnOnce(&Path) -> Result<libloading::Library>,
     ) -> Result<PluginLibrary> {
-        // assert!(
-        //     IS_OS_MAIN_THREAD.with(|cell| cell.get()),
-        //     "PluginLibrary must be loaded from the OS main thread"
-        // );
-
         // NOTE: We'll always make sure `path` is either relative to the current directory or
         //       absolute. Otherwise the system libraries may be searched instead which would lead
         //       to unexpected behavior. Joining an absolute path to a relative directory gets you
@@ -127,6 +124,8 @@ impl PluginLibrary {
         let path = std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(path);
+
+        let span = tracing::debug_span!("PluginLibrary", library_path = %path.display()).entered();
 
         // This is the path passed to `clap_entry::init()`. On macOS this should point to the
         // bundle, not the DSO.
@@ -169,6 +168,7 @@ impl PluginLibrary {
             plugin_path: path,
             library,
             _thread: PhantomData,
+            _span: span,
         })
     }
 

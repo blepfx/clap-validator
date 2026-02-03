@@ -132,10 +132,10 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Ex
 
             let status_text = match test.status {
                 TestStatus::Success { .. } => "PASSED".green(),
-                TestStatus::Crashed { .. } => "CRASHED".red().bold(),
-                TestStatus::Failed { .. } => "FAILED".red(),
-                TestStatus::Skipped { .. } => "SKIPPED".yellow(),
+                TestStatus::Skipped { .. } => "SKIPPED".dimmed(),
                 TestStatus::Warning { .. } => "WARNING".yellow(),
+                TestStatus::Failed { .. } => "FAILED".red(),
+                TestStatus::Crashed { .. } => "CRASHED".red().bold(),
             };
             let test_result = match test.status.details() {
                 Some(reason) => format!("     {status_text}: {reason}"),

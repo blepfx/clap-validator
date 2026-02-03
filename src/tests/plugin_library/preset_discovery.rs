@@ -137,7 +137,7 @@ pub fn test_crawl(library_path: &Path, load_presets: bool) -> Result<TestStatus>
                 //       be loaded at any point, even when the plugin is processing audio. Test
                 //       this.
                 let load_result = preset_load
-                    .from_location(&preset.location, preset.load_key.as_deref())
+                    .load_from_location(&preset.location, preset.load_key.as_deref())
                     .with_context(|| {
                         format!(
                             "Could not load the preset '{}' for plugin '{}'",

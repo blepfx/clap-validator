@@ -225,8 +225,6 @@ pub fn test_process_varying_sample_rates(library: &PluginLibrary, plugin_id: &st
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
 
     for &sample_rate in SAMPLE_RATES {
-        log::trace!("Testing processing with sample rate: {:.2}hz", sample_rate);
-
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
                 let mut note_rng = NoteGenerator::new(&note_ports_config);
@@ -274,8 +272,6 @@ pub fn test_process_varying_block_sizes(library: &PluginLibrary, plugin_id: &str
         .unwrap_or_default();
 
     for &buffer_size in BLOCK_SIZES {
-        log::trace!("Testing processing with max buffer size: {}", buffer_size);
-
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
                 let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, buffer_size);

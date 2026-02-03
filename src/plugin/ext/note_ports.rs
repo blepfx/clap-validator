@@ -54,30 +54,15 @@ impl NotePorts<'_> {
     pub fn config(&self) -> Result<NotePortConfig> {
         let mut config = NotePortConfig::default();
 
-        let note_ports = self.note_ports.as_ptr();
-        let plugin = self.plugin.as_ptr();
-        let (num_inputs, num_outputs) = unsafe {
-            (
-                clap_call! { note_ports=>count(plugin, true) },
-                clap_call! { note_ports=>count(plugin, false) },
-            )
-        };
+        let num_inputs = self.get_raw_port_count(true);
+        let num_outputs = self.get_raw_port_count(false);
 
         // We don't need the port's stable IDs, but we'll still verify that they're unique
         let mut input_stable_indices: HashSet<u32> = HashSet::new();
         let mut output_stable_indices: HashSet<u32> = HashSet::new();
 
         for index in 0..num_inputs {
-            let mut info: clap_note_port_info = unsafe { std::mem::zeroed() };
-            let success = unsafe {
-                clap_call! { note_ports=>get(plugin, index, true, &mut info) }
-            };
-
-            if !success {
-                anyhow::bail!(
-                    "Plugin returned false when querying input note port {index} ({num_inputs} total input ports)."
-                );
-            }
+            let info = self.get_raw_port_info(true, index)?;
 
             if !input_stable_indices.insert(info.id) {
                 anyhow::bail!("The stable ID of input note port {index} ({}) is a duplicate.", info.id);
@@ -90,16 +75,7 @@ impl NotePorts<'_> {
         }
 
         for index in 0..num_outputs {
-            let mut info: clap_note_port_info = unsafe { std::mem::zeroed() };
-            let success = unsafe {
-                clap_call! { note_ports=>get(plugin, index, false, &mut info) }
-            };
-
-            if !success {
-                anyhow::bail!(
-                    "Plugin returned false when querying output note port {index} ({num_outputs} total output ports)."
-                );
-            }
+            let info = self.get_raw_port_info(false, index)?;
 
             if !output_stable_indices.insert(info.id) {
                 anyhow::bail!(
@@ -115,6 +91,37 @@ impl NotePorts<'_> {
         }
 
         Ok(config)
+    }
+
+    #[tracing::instrument(name = "clap_plugin_note_ports::count", level = 1, skip(self))]
+    fn get_raw_port_count(&self, is_input: bool) -> u32 {
+        let note_ports = self.note_ports.as_ptr();
+        let plugin = self.plugin.as_ptr();
+        unsafe {
+            clap_call! { note_ports=>count(plugin, is_input) }
+        }
+    }
+
+    #[tracing::instrument(name = "clap_plugin_note_ports::get", level = 1, skip(self))]
+    fn get_raw_port_info(&self, is_input: bool, port_index: u32) -> Result<clap_note_port_info> {
+        let note_ports = self.note_ports.as_ptr();
+        let plugin = self.plugin.as_ptr();
+
+        let mut info: clap_note_port_info = unsafe { std::mem::zeroed() };
+        let success = unsafe {
+            clap_call! { note_ports=>get(plugin, port_index, is_input, &mut info) }
+        };
+
+        if !success {
+            anyhow::bail!(
+                "Plugin returned false when querying {} note port {port_index} ({} total {} ports).",
+                if is_input { "input" } else { "output" },
+                self.get_raw_port_count(is_input),
+                if is_input { "input" } else { "output" }
+            );
+        }
+
+        Ok(info)
     }
 }
 

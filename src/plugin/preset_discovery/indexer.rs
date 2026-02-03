@@ -358,12 +358,8 @@ impl Indexer {
     }
 
     #[track_caller]
-    fn wrap<R>(
-        indexer: *const clap_preset_discovery_indexer,
-        function_name: &str,
-        f: impl FnOnce(&Self) -> Result<R>,
-    ) -> Option<R> {
-        log::trace!("'{}' was called by the plugin", function_name);
+    fn wrap<R>(indexer: *const clap_preset_discovery_indexer, f: impl FnOnce(&Self) -> Result<R>) -> Option<R> {
+        let function_name = tracing::Span::current().metadata().map_or("<unknown>", |m| m.name());
 
         let state = unsafe {
             Proxy::<Self>::from_vtable(indexer).unwrap_or_else(|e| {
@@ -378,6 +374,8 @@ impl Indexer {
         match f(&state) {
             Ok(result) => Some(result),
             Err(error) => {
+                tracing::error!("{:#}", error);
+
                 let mut guard = state.result.lock().unwrap();
                 if guard.is_ok() {
                     *guard = Err(error.context(function_name.to_string()));
@@ -405,11 +403,16 @@ impl Indexer {
         Ok(())
     }
 
+    #[tracing::instrument(
+        name = "clap_preset_discovery_indexer::declare_filetype",
+        level = 1,
+        skip(indexer, filetype)
+    )]
     unsafe extern "C" fn declare_filetype(
         indexer: *const clap_preset_discovery_indexer,
         filetype: *const clap_preset_discovery_filetype,
     ) -> bool {
-        Self::wrap(indexer, "clap_preset_discovery_indexer::declare_filetype", |this| {
+        Self::wrap(indexer, |this| {
             this.assert_same_thread()?;
 
             let mut results = this.result.lock().unwrap();
@@ -425,11 +428,16 @@ impl Indexer {
         .unwrap_or(false)
     }
 
+    #[tracing::instrument(
+        name = "clap_preset_discovery_indexer::declare_location",
+        level = 1,
+        skip(indexer, location)
+    )]
     unsafe extern "C" fn declare_location(
         indexer: *const clap_preset_discovery_indexer,
         location: *const clap_preset_discovery_location,
     ) -> bool {
-        Self::wrap(indexer, "clap_preset_discovery_indexer::declare_location", |this| {
+        Self::wrap(indexer, |this| {
             this.assert_same_thread()?;
 
             let mut results = this.result.lock().unwrap();
@@ -444,11 +452,16 @@ impl Indexer {
         .unwrap_or(false)
     }
 
+    #[tracing::instrument(
+        name = "clap_preset_discovery_indexer::declare_soundpack",
+        level = 1,
+        skip(indexer, soundpack)
+    )]
     unsafe extern "C" fn declare_soundpack(
         indexer: *const clap_preset_discovery_indexer,
         soundpack: *const clap_preset_discovery_soundpack,
     ) -> bool {
-        Self::wrap(indexer, "clap_preset_discovery_indexer::declare_soundpack", |this| {
+        Self::wrap(indexer, |this| {
             this.assert_same_thread()?;
 
             let mut results = this.result.lock().unwrap();
@@ -465,11 +478,16 @@ impl Indexer {
         .unwrap_or(false)
     }
 
+    #[tracing::instrument(
+        name = "clap_preset_discovery_indexer::get_extension",
+        level = 1,
+        skip(indexer, extension_id)
+    )]
     unsafe extern "C" fn get_extension(
         indexer: *const clap_preset_discovery_indexer,
         extension_id: *const c_char,
     ) -> *const c_void {
-        Self::wrap(indexer, "clap_preset_discovery_indexer::get_extension", |_| {
+        Self::wrap(indexer, |_| {
             if extension_id.is_null() {
                 anyhow::bail!("Null extension ID");
             }

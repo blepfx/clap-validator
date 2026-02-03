@@ -25,8 +25,11 @@ pub enum CallbackEvent {
 
     AudioPortsRescanNames,
     AudioPortsRescanAll,
+
     NotePortsRescanNames,
     NotePortsRescanAll,
+
+    AudioPortsConfigRescan,
 
     /// clap_plugin_latency::changed()
     LatencyChanged,

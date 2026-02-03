@@ -25,6 +25,7 @@ impl<'a> Extension for Surround<'a> {
 }
 
 impl<'a> Surround<'a> {
+    #[tracing::instrument(name = "clap_plugin_surround::is_channel_mask_supported", level = 1, skip(self))]
     pub fn is_channel_mask_supported(&self, channel_mask: u64) -> bool {
         let surround = self.surround.as_ptr();
         let plugin = self.plugin.as_ptr();
@@ -39,6 +40,7 @@ impl<'a> Surround<'a> {
         }
     }
 
+    #[tracing::instrument(name = "clap_plugin_surround::get_channel_map", level = 1, skip(self))]
     pub fn get_channel_map(&self, is_input: bool, port_index: u32, channel_count: u32) -> Vec<u8> {
         let surround = self.surround.as_ptr();
         let plugin = self.plugin.as_ptr();

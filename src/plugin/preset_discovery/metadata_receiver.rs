@@ -299,7 +299,7 @@ impl MetadataReceiver {
         function_name: &str,
         f: impl FnOnce(&Self) -> Result<R>,
     ) -> Option<R> {
-        log::trace!("'{}' was called by the plugin", function_name);
+        tracing::trace!(target: "callback", "{}", function_name);
 
         let state = unsafe {
             Proxy::<Self>::from_vtable(receiver).unwrap_or_else(|e| {

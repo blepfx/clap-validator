@@ -231,6 +231,9 @@ pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) 
 
 /// The test for `PluginTestCase::LayoutConfigurableAudioPorts`.
 pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+    const MAX_TOTAL_CHECKS: u32 = 200;
+    const MAX_PASSED_CHECKS: u32 = 20;
+
     let mut prng = new_prng();
     let plugin = library
         .create_plugin(plugin_id)
@@ -273,7 +276,7 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
     let mut checks_total = 0;
     let mut checks_passed = 0;
 
-    while checks_total < 200 && checks_passed < 20 {
+    while checks_total < MAX_TOTAL_CHECKS && checks_passed < MAX_PASSED_CHECKS {
         let requests = random_layout_requests(&config_audio_ports, &mut prng);
 
         let can_apply = configurable_audio_ports.can_apply_configuration(requests.iter().copied());
@@ -327,8 +330,9 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
 
     if checks_passed == 0 {
         return Ok(TestStatus::Warning {
-            details: Some(String::from(
-                "Tried 200 random audio port layouts, but none were accepted.",
+            details: Some(format!(
+                "Tried {} random audio port layouts, but none were accepted.",
+                checks_total
             )),
         });
     }
@@ -358,6 +362,13 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
         }
     };
 
+    let note_ports_config = match plugin.get_extension::<NotePorts>() {
+        Some(note_ports) => note_ports
+            .config()
+            .context("Error while querying 'note-ports' IO configuration")?,
+        None => NotePortConfig::default(),
+    };
+
     let audio_ports_activation = match plugin.get_extension::<AudioPortsActivation>() {
         Some(extension) => extension,
         None => {
@@ -367,13 +378,6 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
                 )),
             });
         }
-    };
-
-    let note_ports = match plugin.get_extension::<NotePorts>() {
-        Some(note_ports) => note_ports
-            .config()
-            .context("Error while querying 'note-ports' IO configuration")?,
-        None => NotePortConfig::default(),
     };
 
     Ok(TestStatus::Success { details: None })

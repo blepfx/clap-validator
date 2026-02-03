@@ -60,7 +60,8 @@ impl InputEventQueue {
     }
 
     pub fn clear(&self) {
-        self.0.lock().unwrap().clear();
+        let mut events = self.0.lock().unwrap();
+        events.clear();
     }
 
     pub fn last_event_time(&self) -> Option<u32> {
@@ -77,6 +78,7 @@ impl InputEventQueue {
         }
     }
 
+    #[tracing::instrument(name = "clap_input_events::size", level = 1, skip(list))]
     unsafe extern "C" fn size(list: *const clap_input_events) -> u32 {
         let state = unsafe {
             Proxy::<Self>::from_vtable(list).unwrap_or_else(|e| {
@@ -88,9 +90,11 @@ impl InputEventQueue {
             fail_test!("clap_input_events::size: plugin messed with the 'ctx' pointer");
         }
 
-        state.0.lock().unwrap().len() as u32
+        let events = state.0.lock().unwrap();
+        events.len() as u32
     }
 
+    #[tracing::instrument(name = "clap_input_events::get", level = 1, skip(list))]
     unsafe extern "C" fn get(list: *const clap_input_events, index: u32) -> *const clap_event_header {
         let state = unsafe {
             Proxy::<Self>::from_vtable(list).unwrap_or_else(|e| {
@@ -106,8 +110,8 @@ impl InputEventQueue {
         match events.get(index as usize) {
             Some(event) => event.header(),
             None => {
-                log::warn!(
-                    "The plugin tried to get an event with index {index} ({} total events)",
+                tracing::warn!(
+                    "The plugin tried to get an out of bounds event with index {index} ({} total events)",
                     events.len()
                 );
                 std::ptr::null()
@@ -129,6 +133,7 @@ impl OutputEventQueue {
         self.0.lock().unwrap().clone()
     }
 
+    #[tracing::instrument(name = "clap_output_events::try_push", level = 1, skip(list, event))]
     unsafe extern "C" fn try_push(list: *const clap_output_events, event: *const clap_event_header) -> bool {
         let state = unsafe {
             Proxy::<Self>::from_vtable(list).unwrap_or_else(|e| {

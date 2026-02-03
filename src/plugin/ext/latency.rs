@@ -27,6 +27,7 @@ impl<'a> Extension for Latency<'a> {
 
 impl<'a> Latency<'a> {
     #[allow(unused)]
+    #[tracing::instrument(name = "clap_plugin_latency::get", level = 1, skip(self))]
     pub fn get(&self) -> u32 {
         self.plugin.status().assert_is_not(PluginStatus::Deactivated);
 

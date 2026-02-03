@@ -1,6 +1,7 @@
 use crate::panic::fail_test;
 use crate::plugin::ext::Extension;
 use crate::plugin::ext::audio_ports::AudioPorts;
+use crate::plugin::ext::audio_ports_config::AudioPortsConfig;
 use crate::plugin::ext::latency::Latency;
 use crate::plugin::ext::note_ports::NotePorts;
 use crate::plugin::ext::params::Params;
@@ -14,6 +15,7 @@ use crate::plugin::preset_discovery::LocationValue;
 use crate::plugin::util::{self, CHECK_POINTER, Proxy, Proxyable, clap_call, validator_version};
 use anyhow::{Context, Result};
 use clap_sys::ext::audio_ports::*;
+use clap_sys::ext::audio_ports_config::{CLAP_EXT_AUDIO_PORTS_CONFIG, clap_host_audio_ports_config};
 use clap_sys::ext::latency::*;
 use clap_sys::ext::note_ports::*;
 use clap_sys::ext::params::*;
@@ -36,6 +38,7 @@ use std::ptr::NonNull;
 use std::sync::Mutex;
 use std::sync::mpsc::{Sender, channel};
 use std::thread::ThreadId;
+use tracing::{Span, instrument};
 
 /// Plugin instance state that is shared between the main thread, audio thread and any external unmanaged threads.
 /// This struct also acts as the `clap_host` implementation for the plugin instance.
@@ -45,7 +48,7 @@ pub struct PluginShared {
     pub callback_error: Mutex<Option<anyhow::Error>>,
 
     /// The plugin's current state in terms of activation and processing status.
-    pub status: AtomicCell<PluginStatus>,
+    status: AtomicCell<PluginStatus>,
 
     /// The plugin instance's main thread. Used for the main thread checks.
     pub main_thread_id: ThreadId,
@@ -99,6 +102,8 @@ impl PluginShared {
     /// The `factory` object must be valid.
     /// The caller must ensure that this is called from the OS main thread.
     pub unsafe fn create_plugin<'a>(factory: *const clap_plugin_factory, plugin_id: &CStr) -> Result<Plugin<'a>> {
+        let span = tracing::debug_span!("Plugin", plugin_id = %plugin_id.to_string_lossy());
+
         let (callback_sender, callback_receiver) = channel();
         let (task_sender, task_receiver) = channel();
 
@@ -138,6 +143,7 @@ impl PluginShared {
 
             _library: std::marker::PhantomData,
             _thread: std::marker::PhantomData,
+            _span: span.entered(),
         })
     }
 
@@ -146,9 +152,13 @@ impl PluginShared {
         self.status().assert_is_not(PluginStatus::Uninitialized);
 
         for id in T::IDS {
+            let span = tracing::trace_span!("clap_plugin::get_extension", extension_id = %id.to_string_lossy(), found = tracing::field::Empty).entered();
+
             let extension_ptr = unsafe {
                 clap_call! { self.clap_plugin=>get_extension(self.clap_plugin, id.as_ptr()) }
             };
+
+            span.record("found", !extension_ptr.is_null());
 
             if !extension_ptr.is_null() {
                 return NonNull::new(extension_ptr as *mut T::Struct);
@@ -168,9 +178,14 @@ impl PluginShared {
         self.status.load()
     }
 
+    pub fn set_status(&self, status: PluginStatus) {
+        let old_status = self.status.swap(status);
+        tracing::trace!(from = ?old_status, to = ?status, "State transition");
+    }
+
     #[track_caller]
-    fn wrap<R>(host: *const clap_host, function_name: &str, f: impl FnOnce(&Self) -> Result<R>) -> Option<R> {
-        log::trace!("'{}' was called by the plugin", function_name);
+    fn wrap<R>(host: *const clap_host, f: impl FnOnce(&Self) -> Result<R>) -> Option<R> {
+        let function_name = Span::current().metadata().map_or("<unknown>", |m| m.name());
 
         let state = unsafe {
             Proxy::<Self>::from_vtable(host).unwrap_or_else(|e| {
@@ -185,6 +200,8 @@ impl PluginShared {
         match f(&state) {
             Ok(result) => Some(result),
             Err(error) => {
+                tracing::error!("{:#}", error);
+
                 let mut guard = state.callback_error.lock().unwrap();
                 if guard.is_none() {
                     *guard = Some(error.context(function_name.to_string()));
@@ -310,10 +327,20 @@ impl PluginShared {
         changed: Some(Self::ext_voice_info_changed),
     };
 
+    const EXT_AUDIO_PORTS_CONFIG: clap_host_audio_ports_config = clap_host_audio_ports_config {
+        rescan: Some(Self::ext_audio_ports_config_rescan),
+    };
+
+    #[instrument(
+        name = "clap_host::get_extension", 
+        level = 1, 
+        skip_all, 
+        fields(extension_id = tracing::field::Empty, found = tracing::field::Empty)
+    )]
     unsafe extern "C" fn clap_get_extension(host: *const clap_host, extension_id: *const c_char) -> *const c_void {
         // Right now there's no way to have the host only expose certain extensions. We can always
         // add that when test cases need it.
-        Self::wrap(host, "clap_host::get_extension", |_| {
+        Self::wrap(host, |_| {
             if extension_id.is_null() {
                 anyhow::bail!("Null extension ID");
             }
@@ -339,48 +366,58 @@ impl PluginShared {
                 &Self::EXT_TAIL as *const _ as *const c_void
             } else if extension_id_cstr == CLAP_EXT_VOICE_INFO {
                 &Self::EXT_VOICE_INFO as *const _ as *const c_void
+            } else if extension_id_cstr == CLAP_EXT_AUDIO_PORTS_CONFIG {
+                &Self::EXT_AUDIO_PORTS_CONFIG as *const _ as *const c_void
             } else {
                 std::ptr::null()
             };
+
+            Span::current().record("extension_id", extension_id_cstr.to_string_lossy().as_ref());
+            Span::current().record("found", !extension_ptr.is_null());
 
             Ok(extension_ptr)
         })
         .unwrap_or_default()
     }
 
+    #[instrument(name = "clap_host::request_restart", level = 1, skip(host))]
     unsafe extern "C" fn clap_request_restart(host: *const clap_host) {
-        Self::wrap(host, "clap_host::request_restart", |this| {
+        Self::wrap(host, |this| {
             this.requested_restart.store(true);
             Ok(())
         });
     }
 
+    #[instrument(name = "clap_host::request_process", level = 1, skip(host))]
     unsafe extern "C" fn clap_request_process(host: *const clap_host) {
-        Self::wrap(host, "clap_host::request_process", |this| {
+        Self::wrap(host, |this| {
             this.callback_sender.send(CallbackEvent::RequestProcess).unwrap();
             Ok(())
         });
     }
 
+    #[instrument(name = "clap_host::request_callback", level = 1, skip(host))]
     unsafe extern "C" fn clap_request_callback(host: *const clap_host) {
-        Self::wrap(host, "clap_host::request_callback", |this| {
+        Self::wrap(host, |this| {
             this.requested_callback.store(true);
             this.task_sender.send(MainThreadTask::CallbackRequest).unwrap();
             Ok(())
         });
     }
 
-    unsafe extern "C" fn ext_audio_ports_is_rescan_flag_supported(host: *const clap_host, _flag: u32) -> bool {
-        Self::wrap(host, "clap_host_audio_ports::is_rescan_flag_supported", |this| {
+    #[instrument(name = "clap_host_audio_ports::is_rescan_flag_supported", level = 1, skip(host))]
+    unsafe extern "C" fn ext_audio_ports_is_rescan_flag_supported(host: *const clap_host, flag: u32) -> bool {
+        Self::wrap(host, |this| {
             this.assert_main_thread()?;
             this.assert_has_extension::<AudioPorts>()?;
-            Ok(true)
+            Ok(false)
         })
         .unwrap_or(false)
     }
 
+    #[instrument(name = "clap_host_audio_ports::rescan", level = 1, skip(host))]
     unsafe extern "C" fn ext_audio_ports_rescan(host: *const clap_host, flags: u32) {
-        Self::wrap(host, "clap_host_audio_ports::rescan", |this| {
+        Self::wrap(host, |this| {
             this.assert_main_thread()?;
             this.assert_has_extension::<AudioPorts>()?;
 
@@ -401,8 +438,9 @@ impl PluginShared {
         });
     }
 
+    #[instrument(name = "clap_host_note_ports::supported_dialects", level = 1, skip(host))]
     unsafe extern "C" fn ext_note_ports_supported_dialects(host: *const clap_host) -> clap_note_dialect {
-        Self::wrap(host, "clap_host_note_ports::supported_dialects", |this| {
+        Self::wrap(host, |this| {
             this.assert_main_thread()?;
             this.assert_has_extension::<NotePorts>()?;
             Ok(CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI | CLAP_NOTE_DIALECT_MIDI_MPE)
@@ -410,8 +448,9 @@ impl PluginShared {
         .unwrap_or(0)
     }
 
+    #[instrument(name = "clap_host_note_ports::rescan", level = 1, skip(host))]
     unsafe extern "C" fn ext_note_ports_rescan(host: *const clap_host, flags: u32) {
-        Self::wrap(host, "clap_host_note_ports::rescan", |this| {
+        Self::wrap(host, |this| {
             this.assert_main_thread()?;
             this.assert_has_extension::<NotePorts>()?;
 
@@ -432,6 +471,7 @@ impl PluginShared {
         });
     }
 
+    #[instrument(name = "clap_host_preset_load::on_error", level = 1, skip(host))]
     unsafe extern "C" fn ext_preset_load_on_error(
         host: *const clap_host,
         location_kind: clap_preset_discovery_location_kind,
@@ -440,7 +480,7 @@ impl PluginShared {
         os_error: i32,
         msg: *const c_char,
     ) {
-        Self::wrap(host, "clap_host_preset_load::on_error", |this| -> Result<()> {
+        Self::wrap(host, |this| -> Result<()> {
             this.assert_main_thread()?;
             this.assert_has_extension::<PresetLoad>()?;
 
@@ -465,13 +505,14 @@ impl PluginShared {
         });
     }
 
+    #[instrument(name = "clap_host_preset_load::loaded", level = 1, skip(host))]
     unsafe extern "C" fn ext_preset_load_loaded(
         host: *const clap_host,
         location_kind: clap_preset_discovery_location_kind,
         location: *const c_char,
         load_key: *const c_char,
     ) {
-        Self::wrap(host, "clap_host_preset_load::loaded", |this| {
+        Self::wrap(host, |this| {
             this.assert_main_thread()?;
             this.assert_has_extension::<PresetLoad>()?;
 
@@ -480,13 +521,14 @@ impl PluginShared {
             let _load_key = unsafe { util::cstr_ptr_to_optional_string(load_key) }
                 .context("'Called with an invalid load_key parameter")?;
 
-            log::debug!("TODO: Handle 'clap_host_preset_load::loaded()'");
+            tracing::debug!("TODO: Handle 'clap_host_preset_load::loaded()'");
             Ok(())
         });
     }
 
+    #[instrument(name = "clap_host_params::rescan", level = 1, skip(host))]
     unsafe extern "C" fn ext_params_rescan(host: *const clap_host, flags: clap_param_rescan_flags) {
-        Self::wrap(host, "clap_host_params::rescan", |this| {
+        Self::wrap(host, |this| {
             this.assert_main_thread()?;
             this.assert_has_extension::<Params>()?;
 
@@ -515,17 +557,19 @@ impl PluginShared {
         });
     }
 
-    unsafe extern "C" fn ext_params_clear(host: *const clap_host, _param_id: clap_id, _flags: clap_param_clear_flags) {
-        Self::wrap(host, "clap_host_params::clear", |this| {
+    #[instrument(name = "clap_host_params::clear", level = 1, skip(host))]
+    unsafe extern "C" fn ext_params_clear(host: *const clap_host, param_id: clap_id, flags: clap_param_clear_flags) {
+        Self::wrap(host, |this| {
             this.assert_main_thread()?;
             this.assert_has_extension::<Params>()?;
-            log::debug!("TODO: Handle 'clap_host_params::clear()'");
+            tracing::debug!("TODO: Handle 'clap_host_params::clear()'");
             Ok(())
         });
     }
 
+    #[instrument(name = "clap_host_params::request_flush", level = 1, skip(host))]
     unsafe extern "C" fn ext_params_request_flush(host: *const clap_host) {
-        Self::wrap(host, "clap_host_params::request_flush", |this| {
+        Self::wrap(host, |this| {
             this.assert_not_audio_thread()?;
             this.assert_has_extension::<Params>()?;
             this.callback_sender.send(CallbackEvent::RequestFlush).unwrap();
@@ -533,8 +577,9 @@ impl PluginShared {
         });
     }
 
+    #[instrument(name = "clap_host_state::mark_dirty", level = 1, skip(host))]
     unsafe extern "C" fn ext_state_mark_dirty(host: *const clap_host) {
-        Self::wrap(host, "clap_host_state::mark_dirty", |this| {
+        Self::wrap(host, |this| {
             this.assert_main_thread()?;
             this.assert_has_extension::<State>()?;
             this.callback_sender.send(CallbackEvent::StateMarkDirty).unwrap();
@@ -542,22 +587,22 @@ impl PluginShared {
         });
     }
 
+    #[instrument(name = "clap_host_thread_check::is_main_thread", level = 1, skip(host))]
     unsafe extern "C" fn ext_thread_check_is_main_thread(host: *const clap_host) -> bool {
-        Self::wrap(host, "clap_host_thread_check::is_main_thread", |this| {
-            Ok(this.main_thread_id == std::thread::current().id())
-        })
-        .unwrap_or(false)
+        Self::wrap(host, |this| Ok(this.main_thread_id == std::thread::current().id())).unwrap_or(false)
     }
 
+    #[instrument(name = "clap_host_thread_check::is_audio_thread", level = 1, skip(host))]
     unsafe extern "C" fn ext_thread_check_is_audio_thread(host: *const clap_host) -> bool {
-        Self::wrap(host, "clap_host_thread_check::is_audio_thread", |this| {
+        Self::wrap(host, |this| {
             Ok(this.audio_thread_id.load() == Some(std::thread::current().id()))
         })
         .unwrap_or(false)
     }
 
+    #[instrument(name = "clap_host_latency::changed", level = 1, skip(host))]
     unsafe extern "C" fn ext_latency_changed(host: *const clap_host) {
-        Self::wrap(host, "clap_host_latency::changed", |this| {
+        Self::wrap(host, |this| {
             this.assert_main_thread()?;
             this.assert_has_extension::<Latency>()?;
 
@@ -572,8 +617,9 @@ impl PluginShared {
         });
     }
 
+    #[instrument(name = "clap_host_tail::changed", level = 1, skip(host))]
     unsafe extern "C" fn ext_tail_changed(host: *const clap_host) {
-        Self::wrap(host, "clap_host_tail::changed", |this| {
+        Self::wrap(host, |this| {
             this.assert_audio_thread()?;
             this.assert_has_extension::<Tail>()?;
             this.callback_sender.send(CallbackEvent::TailChanged).unwrap();
@@ -581,8 +627,9 @@ impl PluginShared {
         });
     }
 
+    #[instrument(name = "clap_host_voice_info::changed", level = 1, skip(host))]
     unsafe extern "C" fn ext_voice_info_changed(host: *const clap_host) {
-        Self::wrap(host, "clap_host_voice_info::changed", |this| {
+        Self::wrap(host, |this| {
             this.assert_main_thread()?;
             this.assert_has_extension::<VoiceInfo>()?;
             this.callback_sender.send(CallbackEvent::VoiceInfoChanged).unwrap();
@@ -590,8 +637,19 @@ impl PluginShared {
         });
     }
 
+    #[instrument(name = "clap_host_audio_ports_config::rescan", level = 1, skip(host))]
+    unsafe extern "C" fn ext_audio_ports_config_rescan(host: *const clap_host) {
+        Self::wrap(host, |this| {
+            this.assert_main_thread()?;
+            this.assert_has_extension::<AudioPortsConfig>()?;
+            this.callback_sender.send(CallbackEvent::AudioPortsConfigRescan).unwrap();
+            Ok(())
+        });
+    }
+
+    #[instrument(name = "clap_host_thread_pool::request_exec", level = 1, skip(host))]
     unsafe extern "C" fn ext_thread_pool_request_exec(host: *const clap_host, num_tasks: u32) -> bool {
-        Self::wrap(host, "clap_host_thread_pool::request_exec", |this| {
+        Self::wrap(host, |this| {
             this.assert_audio_thread()?;
             this.assert_has_extension::<ThreadPool>()?;
 

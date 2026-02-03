@@ -42,12 +42,14 @@ pub struct Plugin<'lib> {
     /// [`on_audio_thread()`][Self::on_audio_thread()] method spawns an audio thread that is able to call
     /// the plugin's audio thread functions.
     pub(super) _thread: PhantomData<*const ()>,
+
+    pub(super) _span: tracing::span::EnteredSpan,
 }
 
 impl Drop for Plugin<'_> {
     fn drop(&mut self) {
         if let Some(error) = self.shared.callback_error.lock().unwrap().take() {
-            log::warn!(
+            tracing::warn!(
                 "The validator's host has detected a callback error but this error has not been used as part of the \
                  test result. This could be a clap-validator bug. The error message is: {error}"
             )
@@ -64,6 +66,7 @@ impl Drop for Plugin<'_> {
 
         let plugin = self.as_ptr();
         unsafe {
+            let _span = tracing::trace_span!("clap_plugin::destroy").entered();
             clap_call! { plugin=>destroy(plugin) }
         }
     }
@@ -121,6 +124,7 @@ impl<'lib> Plugin<'lib> {
     ///
     /// If whatever happens on the audio thread caused main-thread callback requests to be emited,
     /// then those will be handled concurrently.
+    #[tracing::instrument(name = "Plugin::on_audio_thread", level = 1, skip(self, f))]
     pub fn on_audio_thread<T: Send, F: FnOnce(PluginAudioThread) -> T + Send>(&self, f: F) -> T {
         let result = crossbeam::scope(|s| {
             if self.shared.audio_thread_id.load().is_some() {
@@ -130,7 +134,7 @@ impl<'lib> Plugin<'lib> {
             let shared = self.shared.clone();
             let thread = s
                 .builder()
-                .name("audio-thread".into())
+                .name("audio".into())
                 .spawn(move |_| f(PluginAudioThread::new(shared)))
                 .unwrap();
 
@@ -157,6 +161,7 @@ impl<'lib> Plugin<'lib> {
 
         let plugin = self.as_ptr();
         let result = unsafe {
+            let _span = tracing::trace_span!("clap_plugin::init").entered();
             clap_call! { plugin=>init(plugin) }
         };
 
@@ -167,7 +172,7 @@ impl<'lib> Plugin<'lib> {
                 "clap_plugin::on_main_thread is null"
             );
 
-            self.shared.status.store(PluginStatus::Deactivated);
+            self.shared.set_status(PluginStatus::Deactivated);
             Ok(())
         } else {
             anyhow::bail!("'clap_plugin::init()' returned false.")
@@ -185,18 +190,19 @@ impl<'lib> Plugin<'lib> {
         assert!(max_buffer_size >= min_buffer_size);
 
         // we need to track the `Activating` state to validate that we call clap_host_latency::changed only within the activation call.
-        self.shared.status.store(PluginStatus::Activating);
+        self.shared.set_status(PluginStatus::Activating);
 
-        let plugin = self.as_ptr();
         let result = unsafe {
-            clap_call! { plugin=>activate(plugin, sample_rate, min_buffer_size, max_buffer_size) }
+            let _span =
+                tracing::trace_span!("clap_plugin::activate", sample_rate, min_buffer_size, max_buffer_size).entered();
+            clap_call! { self.as_ptr()=>activate(self.as_ptr(), sample_rate, min_buffer_size, max_buffer_size) }
         };
 
         if result {
-            self.shared.status.store(PluginStatus::Activated);
+            self.shared.set_status(PluginStatus::Activated);
             Ok(())
         } else {
-            self.shared.status.store(PluginStatus::Deactivated);
+            self.shared.set_status(PluginStatus::Deactivated);
             anyhow::bail!("'clap_plugin::activate()' returned false.")
         }
     }
@@ -207,19 +213,19 @@ impl<'lib> Plugin<'lib> {
     pub fn deactivate(&self) {
         self.status().assert_is(PluginStatus::Activated);
 
-        let plugin = self.as_ptr();
         unsafe {
-            clap_call! { plugin=>deactivate(plugin) }
+            let _span = tracing::trace_span!("clap_plugin::deactivate").entered();
+            clap_call! { self.as_ptr()=>deactivate(self.as_ptr()) }
         }
 
-        self.shared.status.store(PluginStatus::Deactivated);
+        self.shared.set_status(PluginStatus::Deactivated);
     }
 
     fn poll_callback_unchecked(&self) {
         if self.shared.requested_callback.swap(false) {
-            let plugin = self.as_ptr();
             unsafe {
-                clap_call! { plugin=>on_main_thread(plugin) }
+                let _span = tracing::trace_span!("clap_plugin::on_main_thread").entered();
+                clap_call! { self.as_ptr()=>on_main_thread(self.as_ptr()) }
             };
         }
     }

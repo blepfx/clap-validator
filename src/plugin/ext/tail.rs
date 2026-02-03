@@ -5,7 +5,6 @@ use clap_sys::ext::tail::{CLAP_EXT_TAIL, clap_plugin_tail};
 use std::ffi::CStr;
 use std::ptr::NonNull;
 
-#[allow(unused)]
 pub struct Tail<'a> {
     plugin: &'a PluginAudioThread<'a>,
     tail: NonNull<clap_plugin_tail>,
@@ -26,10 +25,11 @@ impl<'a> Extension for Tail<'a> {
 }
 
 impl<'a> Tail<'a> {
-    #[allow(unused)]
+    #[tracing::instrument(name = "clap_plugin_tail::get", level = 1, skip(self))]
     pub fn get(&self) -> u32 {
         let tail = self.tail.as_ptr();
         let plugin = self.plugin.as_ptr();
+
         unsafe {
             clap_call! { tail=>get(plugin) }
         }

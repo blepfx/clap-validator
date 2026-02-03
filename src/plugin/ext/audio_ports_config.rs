@@ -133,6 +133,7 @@ impl AudioPortsConfig<'_> {
             .collect()
     }
 
+    #[tracing::instrument(name = "clap_plugin_audio_ports_config::select", level = 1, skip(self))]
     pub fn select(&self, config_id: clap_id) -> Result<()> {
         let audio_ports_config = self.audio_ports_config.as_ptr();
         let plugin = self.plugin.as_ptr();

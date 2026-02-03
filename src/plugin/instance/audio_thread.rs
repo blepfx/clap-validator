@@ -79,6 +79,7 @@ impl<'a> PluginAudioThread<'a> {
     /// for the task to complete and return its result.
     ///
     /// TODO: this could be optimized and the 'static requirement dropped.
+    #[tracing::instrument(name = "PluginAudioThread::on_main_thread", level = 1, skip(self, callback))]
     pub fn on_main_thread<F: FnOnce(&Plugin) -> T + Send, T: Send + 'static>(&self, callback: F) -> T {
         struct Context<F, T> {
             sender: SyncSender<Result<T, Box<dyn Any + Send>>>,
@@ -117,13 +118,13 @@ impl<'a> PluginAudioThread<'a> {
     pub fn start_processing(&self) -> Result<()> {
         self.status().assert_is(PluginStatus::Activated);
 
-        let plugin = self.as_ptr();
         let result = unsafe {
-            clap_call! { plugin=>start_processing(plugin) }
+            let _span = tracing::trace_span!("clap_plugin::start_processing").entered();
+            clap_call! { self.as_ptr()=>start_processing(self.as_ptr()) }
         };
 
         if result {
-            self.shared.status.store(PluginStatus::Processing);
+            self.shared.set_status(PluginStatus::Processing);
             Ok(())
         } else {
             anyhow::bail!("'clap_plugin::start_processing()' returned false.")
@@ -164,9 +165,9 @@ impl<'a> PluginAudioThread<'a> {
     pub fn reset(&self) {
         self.status().assert_active();
 
-        let plugin = self.as_ptr();
         unsafe {
-            clap_call! { plugin=>reset(plugin) }
+            let _span = tracing::trace_span!("clap_plugin::reset").entered();
+            clap_call! { self.as_ptr()=>reset(self.as_ptr()) }
         };
     }
 
@@ -176,11 +177,11 @@ impl<'a> PluginAudioThread<'a> {
     pub fn stop_processing(&self) {
         self.status().assert_is(PluginStatus::Processing);
 
-        let plugin = self.as_ptr();
         unsafe {
-            clap_call! { plugin=>stop_processing(plugin) }
+            let _span = tracing::trace_span!("clap_plugin::stop_processing").entered();
+            clap_call! { self.as_ptr()=>stop_processing(self.as_ptr()) }
         };
 
-        self.shared.status.store(PluginStatus::Activated);
+        self.shared.set_status(PluginStatus::Activated);
     }
 }

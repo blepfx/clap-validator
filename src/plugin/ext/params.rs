@@ -1,7 +1,7 @@
 //! Abstractions for interacting with the `params` extension.
 
 use super::Extension;
-use crate::plugin::instance::{Plugin, PluginStatus};
+use crate::plugin::instance::Plugin;
 use crate::plugin::process::{InputEventQueue, OutputEventQueue};
 use crate::plugin::util::{self, Proxy, c_char_slice_to_string, clap_call};
 use anyhow::{Context, Result};
@@ -54,12 +54,8 @@ unsafe impl Send for Param {}
 unsafe impl Sync for Param {}
 
 impl Params<'_> {
-    /// Used by the status assertion macros.
-    fn status(&self) -> PluginStatus {
-        self.plugin.status()
-    }
-
     /// Get a parameter's value.
+    #[tracing::instrument(name = "clap_plugin_params::get_value", level = 1, skip(self))]
     pub fn get(&self, param_id: clap_id) -> Result<f64> {
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();
@@ -78,6 +74,7 @@ impl Params<'_> {
     /// Convert a parameter value's to a string. Returns `Ok(None)` if the plugin doesn't support
     /// this, or an error if the returned string did not contain any null bytes or if it isn't
     /// invalid UTF-8.
+    #[tracing::instrument(name = "clap_plugin_params::value_to_text", level = 1, skip(self))]
     pub fn value_to_text(&self, param_id: clap_id, value: f64) -> Result<Option<String>> {
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();
@@ -107,6 +104,7 @@ impl Params<'_> {
 
     /// Convert a string representation for a parameter to a value. Returns an `Ok(None)` if the
     /// plugin doesn't support this, or an error if the string contained internal null bytes.
+    #[tracing::instrument(name = "clap_plugin_params::text_to_value", level = 1, skip(self))]
     pub fn text_to_value(&self, param_id: clap_id, text: &str) -> Result<Option<f64>> {
         let text_cstring = CString::new(text)?;
 
@@ -321,10 +319,11 @@ impl Params<'_> {
     }
 
     /// Perform a parameter flush.
+    #[tracing::instrument(name = "clap_plugin_params::flush", level = 1, skip_all)]
     pub fn flush(&self, input_events: &Proxy<InputEventQueue>, output_events: &Proxy<OutputEventQueue>) {
         // This may only be called on the audio thread when the plugin is active. This object is the
         // main thread interface for the parameters extension.
-        self.status().assert_inactive();
+        self.plugin.status().assert_inactive();
 
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();

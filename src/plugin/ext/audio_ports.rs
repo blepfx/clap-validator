@@ -74,33 +74,12 @@ impl AudioPorts<'_> {
     /// Get the audio port configuration for this plugin. This automatically performs a number of
     /// consistency checks on the plugin's audio port configuration.
     pub fn config(&self) -> Result<AudioPortConfig> {
-        fn get_raw_port_info(this: &AudioPorts, is_input: bool, port_index: u32) -> Option<clap_audio_port_info> {
-            let audio_ports = this.audio_ports.as_ptr();
-            let plugin = this.plugin.as_ptr();
-
-            unsafe {
-                let mut info = clap_audio_port_info { ..zeroed() };
-                if !clap_call! { audio_ports=>get(plugin, port_index, is_input, &mut info) } {
-                    return None;
-                }
-
-                Some(info)
-            }
-        }
-
         let mut config = AudioPortConfig::default();
-
-        let audio_ports = self.audio_ports.as_ptr();
-        let plugin = self.plugin.as_ptr();
-        let (num_inputs, num_outputs) = unsafe {
-            (
-                clap_call! { audio_ports=>count(plugin, true) },
-                clap_call! { audio_ports=>count(plugin, false) },
-            )
-        };
+        let num_inputs = self.get_raw_port_count(true);
+        let num_outputs = self.get_raw_port_count(false);
 
         for index in 0..num_inputs {
-            let info = match get_raw_port_info(self, true, index) {
+            let info = match self.get_raw_port_info(true, index) {
                 Some(info) => info,
                 None => {
                     anyhow::bail!(
@@ -117,7 +96,7 @@ impl AudioPorts<'_> {
         }
 
         for index in 0..num_outputs {
-            let info = match get_raw_port_info(self, false, index) {
+            let info = match self.get_raw_port_info(false, index) {
                 Some(info) => info,
                 None => {
                     anyhow::bail!(
@@ -172,6 +151,31 @@ impl AudioPorts<'_> {
         }
 
         Ok(config)
+    }
+
+    #[tracing::instrument(name = "clap_plugin_audio_ports::count", level = 1, skip(self))]
+    fn get_raw_port_count(&self, is_input: bool) -> u32 {
+        let audio_ports = self.audio_ports.as_ptr();
+        let plugin = self.plugin.as_ptr();
+
+        unsafe {
+            clap_call! { audio_ports=>count(plugin, is_input) }
+        }
+    }
+
+    #[tracing::instrument(name = "clap_plugin_audio_ports::get", level = 1, skip(self))]
+    fn get_raw_port_info(&self, is_input: bool, port_index: u32) -> Option<clap_audio_port_info> {
+        let audio_ports = self.audio_ports.as_ptr();
+        let plugin = self.plugin.as_ptr();
+
+        unsafe {
+            let mut info = clap_audio_port_info { ..zeroed() };
+            if !clap_call! { audio_ports=>get(plugin, port_index, is_input, &mut info) } {
+                return None;
+            }
+
+            Some(info)
+        }
     }
 }
 
@@ -319,7 +323,7 @@ pub fn check_audio_port_type_consistent(
 
         Ok(())
     } else {
-        log::warn!("Unknown audio port type '{port_type:?}'");
+        tracing::warn!("Unknown audio port type '{port_type:?}'");
         Ok(())
     }
 }

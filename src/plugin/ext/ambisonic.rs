@@ -26,6 +26,7 @@ impl<'a> Extension for Ambisonic<'a> {
 }
 
 impl<'a> Ambisonic<'a> {
+    #[tracing::instrument(name = "clap_plugin_ambisonic::is_config_supported", level = 1, skip(self))]
     pub fn is_config_supported(&self, config: &clap_ambisonic_config) -> bool {
         let ambisonic = self.ambisonic.as_ptr();
         let plugin = self.plugin.as_ptr();
@@ -34,6 +35,7 @@ impl<'a> Ambisonic<'a> {
         }
     }
 
+    #[tracing::instrument(name = "clap_plugin_ambisonic::get_config", level = 1, skip(self))]
     pub fn get_config(&self, is_input: bool, port_index: u32) -> Option<clap_ambisonic_config> {
         let ambisonic = self.ambisonic.as_ptr();
         let plugin = self.plugin.as_ptr();

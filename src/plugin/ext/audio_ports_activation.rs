@@ -28,6 +28,11 @@ impl<'a> Extension for AudioPortsActivation<'a> {
 impl<'a> AudioPortsActivation<'a> {
     /// TODO: extra test where we do this while processing
     #[allow(unused)]
+    #[tracing::instrument(
+        name = "clap_plugin_audio_ports_activation::can_activate_while_processing",
+        level = 1,
+        skip(self)
+    )]
     pub fn can_activate_while_processing(&self) -> bool {
         let audio_ports_activation = self.audio_ports_activation.as_ptr();
         let plugin = self.plugin.as_ptr();
@@ -37,6 +42,8 @@ impl<'a> AudioPortsActivation<'a> {
     }
 
     /// Activates or deactivates audio ports while inactive.
+    #[allow(unused)]
+    #[tracing::instrument(name = "clap_plugin_audio_ports_activation::set_active", level = 1, skip(self))]
     pub fn set_active(&mut self, is_input: bool, port_index: u32, is_active: bool, sample_size: u32) -> bool {
         self.plugin.status().assert_inactive();
 

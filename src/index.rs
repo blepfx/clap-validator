@@ -32,7 +32,7 @@ pub fn index() -> Index {
     let directories = match clap_directories() {
         Ok(directories) => directories,
         Err(err) => {
-            log::error!("Could not find the CLAP plugin locations: {err:#}");
+            tracing::error!("Could not find the CLAP plugin locations: {err:#}");
             return index;
         }
     };
@@ -54,7 +54,7 @@ pub fn index() -> Index {
                 Ok(metadata) => {
                     index.0.insert(clap_plugin_path.into_path(), metadata);
                 }
-                Err(err) => log::error!("{err:#}"),
+                Err(err) => tracing::error!("{err:#}"),
             }
         }
     }

@@ -72,24 +72,27 @@ impl<'a> Extension for State<'a> {
 
 impl State<'_> {
     /// Retrieve the plugin's state. Returns an error if the plugin returned `false`.
+    #[tracing::instrument(name = "clap_plugin_state::save", level = 1, skip(self))]
     pub fn save(&self) -> Result<Vec<u8>> {
         let stream = OutputStream::new(None);
 
         let state = self.state.as_ptr();
         let plugin = self.plugin.as_ptr();
         let result = unsafe {
+            let _span = tracing::trace_span!("clap_plugin_state::save").entered();
             clap_call! { state=>save(plugin, Proxy::vtable(&stream)) }
         };
 
         if result {
             Ok(stream.take())
         } else {
-            anyhow::bail!("'clap_plugin_state::save()' returned false.");
+            anyhow::bail!("'clap_plugin_state::save()' returned false");
         }
     }
 
     /// Retrieve the plugin's state while limiting the number of bytes the plugin can write at a
     /// time. Returns an error if the plugin returned `false`.
+    #[tracing::instrument(name = "clap_plugin_state::save", level = 1, skip(self))]
     pub fn save_buffered(&self, max_bytes: usize) -> Result<Vec<u8>> {
         let stream = OutputStream::new(Some(max_bytes));
 
@@ -104,12 +107,13 @@ impl State<'_> {
         } else {
             anyhow::bail!(
                 "'clap_plugin_state::save()' returned false when only allowing the plugin to write {max_bytes} bytes \
-                 at a time."
+                 at a time"
             );
         }
     }
 
     /// Restore previously stored state. Returns an error if the plugin returned `false`.
+    #[tracing::instrument(name = "clap_plugin_state::load", level = 1, skip_all)]
     pub fn load(&self, state: &[u8]) -> Result<()> {
         let stream = InputStream::new(state, None);
 
@@ -122,18 +126,20 @@ impl State<'_> {
         if result {
             Ok(())
         } else {
-            anyhow::bail!("'clap_plugin_state::load()' returned false.");
+            anyhow::bail!("'clap_plugin_state::load()' returned false");
         }
     }
 
     /// Restore previously stored state while limiting the number of bytes the plugin can read at a
     /// time. Returns an error if the plugin returned `false`.
+    #[tracing::instrument(name = "clap_plugin_state::load", level = 1, skip_all)]
     pub fn load_buffered(&self, state: &[u8], max_bytes: usize) -> Result<()> {
         let stream = InputStream::new(state, Some(max_bytes));
 
         let state = self.state.as_ptr();
         let plugin = self.plugin.as_ptr();
         let result = unsafe {
+            let _span = tracing::trace_span!("clap_plugin_state::load").entered();
             clap_call! { state=>load(plugin, Proxy::vtable(&stream)) }
         };
 
@@ -142,7 +148,7 @@ impl State<'_> {
         } else {
             anyhow::bail!(
                 "'clap_plugin_state::load()' returned false when only allowing the plugin to read {max_bytes} bytes \
-                 at a time."
+                 at a time"
             );
         }
     }
@@ -181,6 +187,7 @@ impl<'a> InputStream<'a> {
         })
     }
 
+    #[tracing::instrument(name = "clap_istream::read", level = 1, skip(stream))]
     unsafe extern "C" fn read(stream: *const clap_istream, buffer: *mut c_void, size: u64) -> i64 {
         unsafe {
             let state = Proxy::<Self>::from_vtable(stream).unwrap_or_else(|e| {
@@ -228,6 +235,7 @@ impl OutputStream {
         std::mem::take(&mut *self.write_buffer.lock().unwrap())
     }
 
+    #[tracing::instrument(name = "clap_ostream::write", level = 1, skip(stream))]
     unsafe extern "C" fn write(stream: *const clap_ostream, buffer: *const c_void, size: u64) -> i64 {
         unsafe {
             let state = Proxy::<Self>::from_vtable(stream).unwrap_or_else(|e| {

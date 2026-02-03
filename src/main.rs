@@ -1,5 +1,9 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::process::ExitCode;
+use tracing::level_filters::LevelFilter;
+use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 mod commands;
 mod index;
@@ -54,25 +58,40 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    // For now logging everything to the terminal is fine. In the future it may be useful to have
-    // CLI options for things like the verbosity level.
-    simplelog::TermLogger::init(
-        match cli.verbosity {
-            Verbosity::Quiet => simplelog::LevelFilter::Off,
-            Verbosity::Error => simplelog::LevelFilter::Error,
-            Verbosity::Warn => simplelog::LevelFilter::Warn,
-            Verbosity::Info => simplelog::LevelFilter::Info,
-            Verbosity::Debug => simplelog::LevelFilter::Debug,
-            Verbosity::Trace => simplelog::LevelFilter::Trace,
-        },
-        simplelog::ConfigBuilder::new()
-            .set_thread_mode(simplelog::ThreadLogMode::Both)
-            .set_location_level(simplelog::LevelFilter::Debug)
-            .build(),
-        simplelog::TerminalMode::Stderr,
-        simplelog::ColorChoice::Auto,
-    )
-    .expect("Could not initialize logger");
+    let subscriber_fmt = tracing_subscriber::fmt::Layer::new()
+        .without_time()
+        .pretty()
+        .with_span_events(FmtSpan::ACTIVE)
+        .with_thread_names(true)
+        .with_target(false);
+
+    let subscriber_perfetto = tracing_perfetto::PerfettoLayer::new(std::sync::Mutex::new(
+        std::fs::File::create("/tmp/test.pftrace").unwrap(),
+    ))
+    .with_debug_annotations(true);
+
+    tracing_subscriber::registry()
+        .with(subscriber_perfetto)
+        .with(subscriber_fmt)
+        .init();
+
+    // simplelog::TermLogger::init(
+    //     match cli.verbosity {
+    //         Verbosity::Quiet => simplelog::LevelFilter::Off,
+    //         Verbosity::Error => simplelog::LevelFilter::Error,
+    //         Verbosity::Warn => simplelog::LevelFilter::Warn,
+    //         Verbosity::Info => simplelog::LevelFilter::Info,
+    //         Verbosity::Debug => simplelog::LevelFilter::Debug,
+    //         Verbosity::Trace => simplelog::LevelFilter::Trace,
+    //     },
+    //     simplelog::ConfigBuilder::new()
+    //         .set_thread_mode(simplelog::ThreadLogMode::Both)
+    //         .set_location_level(simplelog::LevelFilter::Debug)
+    //         .build(),
+    //     simplelog::TerminalMode::Stderr,
+    //     simplelog::ColorChoice::Auto,
+    // )
+    // .expect("Could not initialize logger");
 
     // Install the panic hook to log panics instead of printing them to stderr.
     panic::install_panic_hook();
@@ -91,7 +110,7 @@ fn main() -> ExitCode {
     match result {
         Ok(exit_code) => exit_code,
         Err(err) => {
-            log::error!("{err:?}");
+            tracing::error!("{err:?}");
             ExitCode::FAILURE
         }
     }

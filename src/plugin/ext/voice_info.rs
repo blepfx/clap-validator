@@ -28,14 +28,18 @@ impl<'a> Extension for VoiceInfo<'a> {
 
 impl<'a> VoiceInfo<'a> {
     #[allow(unused)]
+    #[tracing::instrument(name = "clap_plugin_voice_info::get", level = 1, skip(self))]
     pub fn get(&self) -> Option<clap_voice_info> {
         let voice_info = self.voice_info.as_ptr();
         let plugin = self.plugin.as_ptr();
 
         unsafe {
             let mut result = clap_voice_info { ..zeroed() };
-            let success = clap_call! { voice_info=>get(plugin, &mut result) };
-            if success { Some(result) } else { None }
+            if clap_call! { voice_info=>get(plugin, &mut result) } {
+                Some(result)
+            } else {
+                None
+            }
         }
     }
 }

@@ -1,13 +1,14 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::process::ExitCode;
 use tracing::level_filters::LevelFilter;
-use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use yansi::Paint;
 
 mod commands;
+mod debug;
 mod index;
-mod panic;
 mod plugin;
 mod tests;
 mod util;
@@ -58,43 +59,35 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    let subscriber_fmt = tracing_subscriber::fmt::Layer::new()
-        .without_time()
-        .pretty()
-        .with_span_events(FmtSpan::ACTIVE)
-        .with_thread_names(true)
-        .with_target(false);
+    // Before doing anything, we need to make sure any temporary artifact files from the previous
+    // run are cleaned up. These are used for things like state dumps when one of the state tests
+    // fail. This is allowed to fail since the directory may not exist and even if it does and we
+    // cannot remove it, then that may not be a problem.
+    let _ = std::fs::remove_dir_all(util::validator_temp_dir());
+    let _ = std::fs::create_dir_all(util::validator_temp_dir());
 
-    let subscriber_perfetto = tracing_perfetto::PerfettoLayer::new(std::sync::Mutex::new(
-        std::fs::File::create("/tmp/test.pftrace").unwrap(),
-    ))
-    .with_debug_annotations(true);
+    let trace_path = util::validator_temp_dir().join("trace.json");
+    let trace_enabled = match &cli.command {
+        Command::Validate(settings) => settings.trace,
+        _ => false,
+    };
+
+    let log_level = match cli.verbosity {
+        Verbosity::Quiet => LevelFilter::OFF,
+        Verbosity::Error => LevelFilter::ERROR,
+        Verbosity::Warn => LevelFilter::WARN,
+        Verbosity::Info => LevelFilter::INFO,
+        Verbosity::Debug => LevelFilter::DEBUG,
+        Verbosity::Trace => LevelFilter::TRACE,
+    };
 
     tracing_subscriber::registry()
-        .with(subscriber_perfetto)
-        .with(subscriber_fmt)
+        .with(debug::LogStderrLayer::new().with_filter(log_level))
+        .with(trace_enabled.then(|| debug::ChromeJsonLayer::new(&trace_path)))
         .init();
 
-    // simplelog::TermLogger::init(
-    //     match cli.verbosity {
-    //         Verbosity::Quiet => simplelog::LevelFilter::Off,
-    //         Verbosity::Error => simplelog::LevelFilter::Error,
-    //         Verbosity::Warn => simplelog::LevelFilter::Warn,
-    //         Verbosity::Info => simplelog::LevelFilter::Info,
-    //         Verbosity::Debug => simplelog::LevelFilter::Debug,
-    //         Verbosity::Trace => simplelog::LevelFilter::Trace,
-    //     },
-    //     simplelog::ConfigBuilder::new()
-    //         .set_thread_mode(simplelog::ThreadLogMode::Both)
-    //         .set_location_level(simplelog::LevelFilter::Debug)
-    //         .build(),
-    //     simplelog::TerminalMode::Stderr,
-    //     simplelog::ColorChoice::Auto,
-    // )
-    // .expect("Could not initialize logger");
-
     // Install the panic hook to log panics instead of printing them to stderr.
-    panic::install_panic_hook();
+    debug::install_panic_hook();
 
     // Mark the main thread as such for plugin instance creation checks.
     unsafe {
@@ -107,11 +100,25 @@ fn main() -> ExitCode {
         Command::List(command) => commands::list::list(&command),
     };
 
-    match result {
-        Ok(exit_code) => exit_code,
+    let status = match &result {
+        Ok(code) => *code,
         Err(err) => {
-            tracing::error!("{err:?}");
+            tracing::error!("{err:#}");
             ExitCode::FAILURE
         }
+    };
+
+    if trace_enabled {
+        eprintln!(
+            "{}",
+            format!(
+                "Trace written to '{}'. Use 'https://ui.perfetto.dev/ to view it.",
+                trace_path.display()
+            )
+            .dim()
+            .italic()
+        );
     }
+
+    status
 }

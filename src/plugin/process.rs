@@ -1,8 +1,7 @@
 //! Data structures and functions surrounding audio processing.
-use crate::plugin::instance::{PluginAudioThread, PluginStatus, ProcessStatus};
+use crate::plugin::instance::{PluginAudioThread, PluginStatus, ProcessInfo, ProcessStatus};
 use crate::plugin::util::Proxy;
 use anyhow::Result;
-use clap_sys::process::*;
 
 mod buffer;
 mod events;
@@ -10,7 +9,6 @@ mod transport;
 
 pub use buffer::*;
 pub use events::*;
-use tracing::span::EnteredSpan;
 pub use transport::*;
 
 pub struct ProcessScope<'a> {
@@ -22,9 +20,6 @@ pub struct ProcessScope<'a> {
 
     transport: TransportState,
     sample_rate: f64,
-
-    span_active: Option<EnteredSpan>,
-    span_processing: Option<EnteredSpan>,
 }
 
 impl<'a> ProcessScope<'a> {
@@ -46,8 +41,6 @@ impl<'a> ProcessScope<'a> {
             events_output: OutputEventQueue::new(),
             transport: TransportState::dummy(),
             sample_rate,
-            span_active: None,
-            span_processing: None,
         })
     }
 
@@ -78,7 +71,6 @@ impl<'a> ProcessScope<'a> {
 
     pub fn reset(&mut self) {
         if self.plugin.status() >= PluginStatus::Activated {
-            tracing::debug!("Resetting plugin");
             self.plugin.reset();
         }
     }
@@ -105,22 +97,11 @@ impl<'a> ProcessScope<'a> {
 
             self.plugin
                 .on_main_thread(move |plugin| plugin.activate(sample_rate, 1, buffer_size))?;
-
-            self.span_active = Some(
-                tracing::debug_span! {
-                    "Plugin::Active",
-                    sample_rate=%sample_rate,
-                    min_buffer_size=1,
-                    max_buffer_size=%buffer_size
-                }
-                .entered(),
-            );
         }
 
         // start processing if needed
         if self.plugin.status() == PluginStatus::Activated {
             self.plugin.start_processing()?;
-            self.span_processing = Some(tracing::debug_span!("Plugin::Processing").entered());
         }
 
         // check that we dont overfill the input event queue
@@ -145,23 +126,15 @@ impl<'a> ProcessScope<'a> {
 
         // run processing
         let status = self.buffer.process(|inputs, outputs| {
-            let _span = tracing::debug_span!("Plugin::Process", buffer_size = samples).entered();
-
             let transport = self.transport.as_clap_transport(0);
-            self.plugin.process(&clap_process {
-                steady_time: self.transport.sample_pos.map_or(-1, |f| f as i64),
+            self.plugin.process(ProcessInfo {
                 frames_count: samples,
-                transport: if self.transport.is_freerun {
-                    std::ptr::null()
-                } else {
-                    &transport as *const _
-                },
-                audio_inputs: inputs.as_ptr(),
-                audio_outputs: outputs.as_mut_ptr(),
-                audio_inputs_count: inputs.len() as u32,
-                audio_outputs_count: outputs.len() as u32,
-                in_events: Proxy::vtable(&self.events_input),
-                out_events: Proxy::vtable(&self.events_output),
+                steady_time: self.transport.sample_pos,
+                audio_inputs: inputs,
+                audio_outputs: outputs,
+                input_events: &self.events_input,
+                output_events: &self.events_output,
+                transport: (!self.transport.is_freerun).then_some(&transport),
             })
         })?;
 
@@ -178,12 +151,10 @@ impl<'a> ProcessScope<'a> {
     pub fn restart(&mut self) {
         if self.plugin.status() == PluginStatus::Processing {
             self.plugin.stop_processing();
-            self.span_processing.take();
         }
 
         if self.plugin.status() == PluginStatus::Activated {
             self.plugin.on_main_thread(|plugin| plugin.deactivate());
-            self.span_active.take();
         }
     }
 }

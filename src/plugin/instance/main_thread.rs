@@ -43,6 +43,7 @@ pub struct Plugin<'lib> {
     /// the plugin's audio thread functions.
     pub(super) _thread: PhantomData<*const ()>,
 
+    /// Tracing span entered when this plugin instance was created
     pub(super) _span: tracing::span::EnteredSpan,
 }
 
@@ -156,19 +157,18 @@ impl<'lib> Plugin<'lib> {
     }
 
     /// Initialize the plugin. This needs to be called before doing anything else.
+    #[tracing::instrument(name = "clap_plugin::init", level = 1, skip(self))]
     pub fn init(&self) -> Result<()> {
         self.status().assert_is(PluginStatus::Uninitialized);
 
-        let plugin = self.as_ptr();
         let result = unsafe {
-            let _span = tracing::trace_span!("clap_plugin::init").entered();
-            clap_call! { plugin=>init(plugin) }
+            clap_call! { self.as_ptr()=>init(self.as_ptr()) }
         };
 
         if result {
             // If the plugin never calls `request_callback`, the validator won't catch this
             anyhow::ensure!(
-                unsafe { (*plugin).on_main_thread.is_some() },
+                unsafe { (*self.as_ptr()).on_main_thread.is_some() },
                 "clap_plugin::on_main_thread is null"
             );
 
@@ -182,6 +182,7 @@ impl<'lib> Plugin<'lib> {
     /// Activate the plugin. Returns an error if the plugin returned `false`. See
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
+    #[tracing::instrument(name = "clap_plugin::activate", level = 1, skip(self))]
     pub fn activate(&self, sample_rate: f64, min_buffer_size: u32, max_buffer_size: u32) -> Result<()> {
         self.status().assert_is(PluginStatus::Deactivated);
 
@@ -193,8 +194,6 @@ impl<'lib> Plugin<'lib> {
         self.shared.set_status(PluginStatus::Activating);
 
         let result = unsafe {
-            let _span =
-                tracing::trace_span!("clap_plugin::activate", sample_rate, min_buffer_size, max_buffer_size).entered();
             clap_call! { self.as_ptr()=>activate(self.as_ptr(), sample_rate, min_buffer_size, max_buffer_size) }
         };
 
@@ -210,11 +209,11 @@ impl<'lib> Plugin<'lib> {
     /// Deactivate the plugin. See
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
+    #[tracing::instrument(name = "Plugin::deactivate", level = 1, skip(self))]
     pub fn deactivate(&self) {
         self.status().assert_is(PluginStatus::Activated);
 
         unsafe {
-            let _span = tracing::trace_span!("clap_plugin::deactivate").entered();
             clap_call! { self.as_ptr()=>deactivate(self.as_ptr()) }
         }
 

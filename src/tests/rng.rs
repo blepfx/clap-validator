@@ -164,6 +164,13 @@ impl<'a> NoteGenerator<'a> {
         }
     }
 
+    /// Set the range for the next event's timing relative to the previous event. This will be
+    /// clamped to 0 when generating events.
+    pub fn with_sample_offset_range(mut self, range: RangeInclusive<i32>) -> Self {
+        self.sample_offset_range = range;
+        self
+    }
+
     /// Set the parameter info to generate random polyphonic automation and modulation events for.
     pub fn with_params(mut self, params: &'a ParamInfo) -> Self {
         self.params = Some(params);

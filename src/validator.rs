@@ -3,10 +3,10 @@
 
 use crate::Verbosity;
 use crate::commands::validate::{SingleTestSettings, ValidatorSettings};
-use crate::panic::panic_message;
+use crate::debug::panic_message;
 use crate::plugin::library::{PluginLibrary, PluginMetadata};
 use crate::tests::{PluginLibraryTestCase, PluginTestCase, SerializedTest, TestCase, TestResult, TestStatus};
-use crate::util::{self, IteratorExt};
+use crate::util::IteratorExt;
 use anyhow::{Context, Result};
 use clap::ValueEnum;
 use clap_sys::version::clap_version_is_compatible;
@@ -53,12 +53,6 @@ pub struct ValidationTally {
 /// Run the validator using the specified settings. Returns an error if any of the plugin paths
 /// could not loaded, or if the plugin ID filter did not match any plugins.
 pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<ValidationResult> {
-    // Before doing anything, we need to make sure any temporary artifact files from the previous
-    // run are cleaned up. These are used for things like state dumps when one of the state tests
-    // fail. This is allowed to fail since the directory may not exist and even if it does and we
-    // cannot remove it, then that may not be a problem.
-    let _ = std::fs::remove_dir_all(util::validator_temp_dir());
-
     let test_regex = settings
         .test_filter
         .as_ref()
@@ -228,6 +222,22 @@ fn run_test<'a, T: TestCase<'a>>(
     } else {
         run_test_out_of_process(test, args, verbosity, settings.hide_output)?
     };
+
+    match &status {
+        TestStatus::Success { details } => {
+            tracing::info!(test = %test, details=details, "Test completed")
+        }
+        TestStatus::Warning { details } => {
+            tracing::warn!(test = %test, details=details, "Test completed with a warning")
+        }
+        TestStatus::Failed { details } => {
+            tracing::error!(test = %test, details=details, "Test failed")
+        }
+        TestStatus::Crashed { details } => {
+            tracing::error!(test = %test, details=details, "Test crashed")
+        }
+        _ => {}
+    }
 
     Ok(TestResult {
         name: test.to_string(),

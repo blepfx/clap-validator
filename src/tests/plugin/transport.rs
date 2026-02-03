@@ -32,7 +32,7 @@ pub fn test_transport_null(library: &PluginLibrary, plugin_id: &str) -> Result<T
     };
 
     plugin.on_audio_thread(|plugin| -> Result<()> {
-        let mut note_rng = NoteGenerator::new(&note_ports_config);
+        let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-1..=128);
         let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
@@ -76,7 +76,7 @@ pub fn test_transport_fuzz(library: &PluginLibrary, plugin_id: &str) -> Result<T
 
     plugin.on_audio_thread(|plugin| -> Result<()> {
         let mut transport_fuzz = TransportFuzzer::new();
-        let mut note_rng = NoteGenerator::new(&note_ports_config);
+        let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-1..=128);
         let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
@@ -122,9 +122,11 @@ pub fn test_transport_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &
     };
 
     for &interval in INTERVALS {
+        let _span = tracing::debug_span!("WithInterval", interval).entered();
+
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
-                let mut note_rng = NoteGenerator::new(&note_ports_config);
+                let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-1..=128);
                 let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
                 let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 

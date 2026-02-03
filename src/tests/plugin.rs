@@ -258,9 +258,12 @@ impl<'a> TestCase<'a> for PluginTestCase {
         }
     }
 
+    #[tracing::instrument(name = "PluginTestCase::run", level = "debug", skip_all, fields(
+        test_case = %self, 
+        plugin_id = %plugin_id, 
+        library_path = %library_path.display()
+    ))]
     fn run(&self, (library_path, plugin_id): Self::TestArgs) -> Result<TestStatus> {
-        let _span = tracing::debug_span!("PluginTestCase::run", test_case = %self, plugin_id = %plugin_id, library_path = %library_path.display()).entered();
-
         // SAFETY: This is called on the main thread.
         let library = &PluginLibrary::load(library_path)
             .with_context(|| format!("Could not load '{}'", library_path.display()))?;

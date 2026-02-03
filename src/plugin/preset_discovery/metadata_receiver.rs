@@ -3,7 +3,7 @@
 //! one or more presets to.
 
 use super::{Flags, LocationValue};
-use crate::panic::fail_test;
+use crate::debug::fail_test;
 use crate::plugin::preset_discovery::parse_timestamp;
 use crate::plugin::util::{self, CHECK_POINTER, Proxy, Proxyable};
 use anyhow::{Context, Result};

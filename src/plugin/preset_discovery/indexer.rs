@@ -1,7 +1,7 @@
 //! The indexer abstraction for a CLAP plugin's preset discovery factory. During initialization the
 //! plugin fills this object with its supported locations, file types, and sound packs.
 
-use crate::panic::fail_test;
+use crate::debug::fail_test;
 use crate::plugin::preset_discovery::parse_timestamp;
 use crate::plugin::util::{self, CHECK_POINTER, Proxy, Proxyable, validator_version};
 use anyhow::{Context, Result};

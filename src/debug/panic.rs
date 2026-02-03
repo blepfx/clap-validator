@@ -60,7 +60,7 @@ pub struct TestFailure(pub String);
 /// Prefer regular error handling where possible.
 macro_rules! fail_test {
     ($($arg:tt)*) => {
-        std::panic::panic_any($crate::panic::TestFailure(format!($($arg)*)))
+        std::panic::panic_any($crate::debug::TestFailure(format!($($arg)*)))
     };
 }
 

@@ -131,24 +131,12 @@ impl Params<'_> {
     /// BTreeMap to ensure the order is consistent between runs.
     pub fn info(&self) -> Result<ParamInfo> {
         let mut result = BTreeMap::new();
-
-        let params = self.params.as_ptr();
-        let plugin = self.plugin.as_ptr();
-        let num_params = unsafe {
-            clap_call! { params=>count(plugin) }
-        };
+        let num_params = self.get_raw_param_count();
 
         // Right now this is only used to make sure the plugin doesn't have multiple bypass parameters
         let mut bypass_parameter_id = None;
         for i in 0..num_params {
-            let mut info: clap_param_info = unsafe { std::mem::zeroed() };
-            let success = unsafe {
-                clap_call! { params=>get_info(plugin, i, &mut info) }
-            };
-
-            if !success {
-                anyhow::bail!("Plugin returned false when querying parameter {i} ({num_params} total parameters).");
-            }
+            let info = self.get_raw_param_info(i)?;
 
             if info.id == CLAP_INVALID_ID {
                 anyhow::bail!("The stable ID for parameter {i} is `CLAP_INVALID_ID`.");
@@ -335,6 +323,31 @@ impl Params<'_> {
                     Proxy::vtable(output_events),
                 )
             };
+        }
+    }
+
+    #[tracing::instrument(name = "clap_plugin_params::count", level = 1, skip(self))]
+    fn get_raw_param_count(&self) -> u32 {
+        let params = self.params.as_ptr();
+        let plugin = self.plugin.as_ptr();
+        unsafe {
+            clap_call! { params=>count(plugin) }
+        }
+    }
+
+    #[tracing::instrument(name = "clap_plugin_params::get_info", level = 1, skip(self))]
+    fn get_raw_param_info(&self, index: u32) -> Result<clap_param_info> {
+        let params = self.params.as_ptr();
+        let plugin = self.plugin.as_ptr();
+
+        unsafe {
+            let mut info = clap_param_info { ..std::mem::zeroed() };
+            if !clap_call! { params=>get_info(plugin, index, &mut info) } {
+                let num_params = self.get_raw_param_count();
+                anyhow::bail!("Plugin returned false when querying parameter {index} ({num_params} total parameters).");
+            }
+
+            Ok(info)
         }
     }
 }

@@ -15,7 +15,7 @@ macro_rules! clap_call {
     { $obj_ptr:expr=>$function_name:ident($($args:expr),* $(, )?) } => {
         match (*$obj_ptr).$function_name {
             Some(function_ptr) => function_ptr($($args),*),
-            None => $crate::panic::fail_test!("'{}::{}' is a null pointer, but this is not allowed", $crate::plugin::util::type_name_of_ptr($obj_ptr), stringify!($function_name)),
+            None => $crate::debug::fail_test!("'{}::{}' is a null pointer, but this is not allowed", $crate::plugin::util::type_name_of_ptr($obj_ptr), stringify!($function_name)),
         }
     }
 }

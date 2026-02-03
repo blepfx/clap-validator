@@ -69,9 +69,11 @@ impl<'a> TestCase<'a> for PluginLibraryTestCase {
         }
     }
 
+    #[tracing::instrument(name = "PluginLibraryTestCase::run", level = "debug", skip_all, fields(
+        test_case = %self, 
+        library_path = %library_path.display()
+    ))]
     fn run(&self, library_path: Self::TestArgs) -> Result<TestStatus> {
-        let _span = tracing::debug_span!("PluginLibraryTestCase::run", test_case = %self,  library_path = %library_path.display()).entered();
-
         match self {
             PluginLibraryTestCase::PresetDiscoveryCrawl => preset_discovery::test_crawl(library_path, false),
             PluginLibraryTestCase::PresetDiscoveryDescriptorConsistency => {

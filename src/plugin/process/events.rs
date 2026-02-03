@@ -1,7 +1,9 @@
-use crate::panic::fail_test;
+use crate::debug::fail_test;
 use crate::plugin::util::{CHECK_POINTER, Proxy, Proxyable};
 use clap_sys::events::*;
+use std::fmt::Debug;
 use std::sync::Mutex;
+use tracing::Span;
 
 #[derive(Debug)]
 pub struct InputEventQueue(Mutex<Vec<Event>>);
@@ -11,7 +13,7 @@ pub struct OutputEventQueue(Mutex<Vec<Event>>);
 
 /// An event sent to or from the plugin. This uses an enum to make the implementation simple and
 /// correct at the cost of more wasteful memory usage.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 #[repr(C, align(8))]
 pub enum Event {
     /// `CLAP_EVENT_NOTE_ON`, `CLAP_EVENT_NOTE_OFF`, `CLAP_EVENT_NOTE_CHOKE`, or `CLAP_EVENT_NOTE_END`.
@@ -94,7 +96,7 @@ impl InputEventQueue {
         events.len() as u32
     }
 
-    #[tracing::instrument(name = "clap_input_events::get", level = 1, skip(list))]
+    #[tracing::instrument(name = "clap_input_events::get", level = 1, skip(list), fields(event = tracing::field::Empty))]
     unsafe extern "C" fn get(list: *const clap_input_events, index: u32) -> *const clap_event_header {
         let state = unsafe {
             Proxy::<Self>::from_vtable(list).unwrap_or_else(|e| {
@@ -108,7 +110,10 @@ impl InputEventQueue {
 
         let events = state.0.lock().unwrap();
         match events.get(index as usize) {
-            Some(event) => event.header(),
+            Some(event) => {
+                Span::current().record("event", tracing::field::debug(&event));
+                event.header()
+            }
             None => {
                 tracing::warn!(
                     "The plugin tried to get an out of bounds event with index {index} ({} total events)",
@@ -133,7 +138,7 @@ impl OutputEventQueue {
         self.0.lock().unwrap().clone()
     }
 
-    #[tracing::instrument(name = "clap_output_events::try_push", level = 1, skip(list, event))]
+    #[tracing::instrument(name = "clap_output_events::try_push", level = 1, skip_all, fields(event = tracing::field::Empty))]
     unsafe extern "C" fn try_push(list: *const clap_output_events, event: *const clap_event_header) -> bool {
         let state = unsafe {
             Proxy::<Self>::from_vtable(list).unwrap_or_else(|e| {
@@ -149,9 +154,12 @@ impl OutputEventQueue {
             fail_test!("clap_output_events::try_push: 'event' pointer is null");
         }
 
+        let event = unsafe { Event::from_raw(event) };
+
         // The monotonicity of the plugin's event insertion order is checked as part of the output
         // consistency checks
-        state.0.lock().unwrap().push(unsafe { Event::from_raw(event) });
+        Span::current().record("event", tracing::field::debug(&event));
+        state.0.lock().unwrap().push(event);
         true
     }
 }
@@ -195,6 +203,20 @@ impl Event {
             Event::Midi(event) => &event.header,
             Event::Transport(event) => &event.header,
             Event::Unknown(header) => header,
+        }
+    }
+}
+
+impl Debug for Event {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Event::Note(event) => event.fmt(f),
+            Event::NoteExpression(event) => event.fmt(f),
+            Event::ParamValue(event) => event.fmt(f),
+            Event::ParamMod(event) => event.fmt(f),
+            Event::Midi(event) => event.fmt(f),
+            Event::Transport(event) => event.fmt(f),
+            Event::Unknown(header) => header.fmt(f),
         }
     }
 }

@@ -71,19 +71,9 @@ impl AudioPortsConfig<'_> {
         let ext_ambisonic = self.plugin.get_extension::<Ambisonic>();
         let ext_surround = self.plugin.get_extension::<Surround>();
 
-        let audio_ports_config = self.audio_ports_config.as_ptr();
-        let plugin = self.plugin.as_ptr();
-        let count = unsafe {
-            clap_call! { audio_ports_config=>count(plugin) }
-        };
-
-        (0..count)
+        (0..self.get_raw_config_count())
             .map(|i| unsafe {
-                let mut info = clap_audio_ports_config { ..zeroed() };
-                let result = clap_call! { audio_ports_config=>get(plugin, i, &mut info) };
-                if !result {
-                    anyhow::bail!("audio_ports_config::get({}) returned false", i);
-                }
+                let info = self.get_raw_config_info(i)?;
 
                 if info.has_main_input {
                     let port_type = if info.main_input_port_type.is_null() {
@@ -137,20 +127,49 @@ impl AudioPortsConfig<'_> {
     pub fn select(&self, config_id: clap_id) -> Result<()> {
         let audio_ports_config = self.audio_ports_config.as_ptr();
         let plugin = self.plugin.as_ptr();
-        let result = unsafe {
-            clap_call! { audio_ports_config=>select(plugin, config_id) }
-        };
 
-        if !result {
-            anyhow::bail!("audio_ports_config::select() returned false");
+        unsafe {
+            if !clap_call! { audio_ports_config=>select(plugin, config_id) } {
+                anyhow::bail!("audio_ports_config::select() returned false");
+            }
         }
 
         Ok(())
+    }
+
+    #[tracing::instrument(name = "clap_plugin_audio_ports_config::count", level = 1, skip(self))]
+    fn get_raw_config_count(&self) -> u32 {
+        let audio_ports_config = self.audio_ports_config.as_ptr();
+        let plugin = self.plugin.as_ptr();
+
+        unsafe {
+            clap_call! { audio_ports_config=>count(plugin) }
+        }
+    }
+
+    #[tracing::instrument(name = "clap_plugin_audio_ports_config::get", level = 1, skip(self))]
+    fn get_raw_config_info(&self, index: u32) -> Result<clap_audio_ports_config> {
+        let audio_ports_config = self.audio_ports_config.as_ptr();
+        let plugin = self.plugin.as_ptr();
+
+        unsafe {
+            let mut info = clap_audio_ports_config { ..zeroed() };
+            if !clap_call! { audio_ports_config=>get(plugin, index, &mut info) } {
+                anyhow::bail!(
+                    "audio_ports_config::get({}) returned false ({} total configs)",
+                    index,
+                    self.get_raw_config_count()
+                );
+            }
+
+            Ok(info)
+        }
     }
 }
 
 impl AudioPortsConfigInfo<'_> {
     /// Get the current selected audio ports configuration ID.
+    #[tracing::instrument(name = "clap_plugin_audio_ports_config_info::current_config", level = 1, skip(self))]
     pub fn current(&self) -> clap_id {
         let audio_ports_config_info = self.audio_ports_config_info.as_ptr();
         let plugin = self.plugin.as_ptr();
@@ -161,6 +180,7 @@ impl AudioPortsConfigInfo<'_> {
     }
 
     /// Get information about an audio port for a configuration.
+    #[tracing::instrument(name = "clap_plugin_audio_ports_config_info::get", level = 1, skip(self))]
     pub fn get(&self, config_id: clap_id, is_input: bool, port_index: u32) -> Result<AudioPort> {
         let info = unsafe {
             let audio_ports_config_info = self.audio_ports_config_info.as_ptr();

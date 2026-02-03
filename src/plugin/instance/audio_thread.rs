@@ -3,8 +3,11 @@
 use super::{Plugin, PluginStatus};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::{CallbackEvent, MainThreadTask, PluginShared};
+use crate::plugin::process::{InputEventQueue, OutputEventQueue};
 use crate::plugin::util::{Proxy, clap_call};
 use anyhow::Result;
+use clap_sys::audio_buffer::clap_audio_buffer;
+use clap_sys::events::clap_event_transport;
 use clap_sys::plugin::clap_plugin;
 use clap_sys::process::*;
 use std::any::Any;
@@ -12,6 +15,7 @@ use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc::SyncSender;
+use std::fmt::Debug;
 
 /// An audio thread equivalent to [`Plugin`]. This version only allows audio thread functions to be
 /// called. It can be constructed using [`Plugin::on_audio_thread()`].
@@ -25,16 +29,40 @@ pub struct PluginAudioThread<'a> {
     /// To honor CLAP's thread safety guidelines, the thread this object was created from is
     /// designated the 'audio thread', and this object cannot be shared with other threads.
     _send_sync_marker: PhantomData<*const ()>,
+
+    _span: tracing::span::EnteredSpan,
 }
 
 /// The equivalent of `clap_process_status`, minus the `CLAP_PROCESS_ERROR` value as this is already
 /// treated as an error by `PluginAudioThread::process()`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProcessStatus {
     Continue,
     ContinueIfNotQuiet,
     Tail,
     Sleep,
+}
+
+#[derive(Debug)]
+pub struct ProcessInfo<'a> {
+    pub frames_count: u32,
+    pub steady_time: Option<u64>,
+    pub transport: Option<&'a clap_event_transport>,
+    pub audio_inputs: &'a [clap_audio_buffer],
+    pub audio_outputs: &'a mut [clap_audio_buffer],
+    pub input_events: &'a Proxy<InputEventQueue>,
+    pub output_events: &'a Proxy<OutputEventQueue>,
+}
+
+impl Debug for ProcessStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProcessStatus::Continue => write!(f, "CLAP_PROCESS_CONTINUE"),
+            ProcessStatus::ContinueIfNotQuiet => write!(f, "CLAP_PROCESS_CONTINUE_IF_NOT_QUIET"),
+            ProcessStatus::Tail => write!(f, "CLAP_PROCESS_TAIL"),
+            ProcessStatus::Sleep => write!(f, "CLAP_PROCESS_SLEEP"),
+        }
+    }
 }
 
 impl Drop for PluginAudioThread<'_> {
@@ -46,11 +74,18 @@ impl Drop for PluginAudioThread<'_> {
 
 impl<'a> PluginAudioThread<'a> {
     pub(super) fn new(shared: Proxy<PluginShared>) -> PluginAudioThread<'a> {
+        let span = tracing::info_span!(
+            "AudioThread", 
+            plugin_id = %shared.plugin_id.to_string_lossy()
+        ).entered();
+
         shared.audio_thread_id.store(Some(std::thread::current().id()));
+
         PluginAudioThread {
             shared,
             _plugin_marker: PhantomData,
             _send_sync_marker: PhantomData,
+            _span: span,
         }
     }
 
@@ -115,11 +150,11 @@ impl<'a> PluginAudioThread<'a> {
     /// Prepare for audio processing. Returns an error if the plugin returned `false`. See
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
+    #[tracing::instrument(name = "clap_plugin::start_processing", level = 1, skip(self))]
     pub fn start_processing(&self) -> Result<()> {
         self.status().assert_is(PluginStatus::Activated);
 
         let result = unsafe {
-            let _span = tracing::trace_span!("clap_plugin::start_processing").entered();
             clap_call! { self.as_ptr()=>start_processing(self.as_ptr()) }
         };
 
@@ -135,38 +170,62 @@ impl<'a> PluginAudioThread<'a> {
     /// status code, then this will return an error. See
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
-    pub fn process(&self, process_data: &clap_process) -> Result<ProcessStatus> {
+    #[tracing::instrument(
+        name = "clap_plugin::process", 
+        level = 1, 
+        skip_all, 
+        fields(
+            frames_count = process.frames_count,
+            steady_time = process.steady_time.map(|t| t as i64).unwrap_or(-1),
+            transport = ?process.transport,
+            result = tracing::field::Empty,
+        )
+    )]
+    pub fn process(&self, process: ProcessInfo) -> Result<ProcessStatus> {
         self.status().assert_is(PluginStatus::Processing);
 
         self.shared.is_currently_in_process_call.store(true);
 
-        let plugin = self.as_ptr();
         let result = unsafe {
-            clap_call! { plugin=>process(plugin, process_data) }
+            clap_call! { self.as_ptr()=>process(self.as_ptr(), &clap_process {
+                frames_count: process.frames_count,
+                steady_time: process.steady_time.map(|t| t as i64).unwrap_or(-1),
+                transport: process.transport.map_or(std::ptr::null(), |t| t as *const clap_event_transport),
+                audio_inputs: process.audio_inputs.as_ptr(),
+                audio_outputs: process.audio_outputs.as_mut_ptr(),
+                audio_inputs_count: process.audio_inputs.len() as u32,
+                audio_outputs_count: process.audio_outputs.len() as u32,
+                in_events: Proxy::vtable(process.input_events),
+                out_events: Proxy::vtable(process.output_events),
+            }) }
         };
 
         self.shared.is_currently_in_process_call.store(false);
 
-        match result {
+        let result = match result {
             CLAP_PROCESS_ERROR => {
                 anyhow::bail!("The plugin returned 'CLAP_PROCESS_ERROR' from 'clap_plugin::process()'.")
             }
-            CLAP_PROCESS_CONTINUE => Ok(ProcessStatus::Continue),
-            CLAP_PROCESS_CONTINUE_IF_NOT_QUIET => Ok(ProcessStatus::ContinueIfNotQuiet),
-            CLAP_PROCESS_TAIL => Ok(ProcessStatus::Tail),
-            CLAP_PROCESS_SLEEP => Ok(ProcessStatus::Sleep),
+            CLAP_PROCESS_CONTINUE => ProcessStatus::Continue,
+            CLAP_PROCESS_CONTINUE_IF_NOT_QUIET => ProcessStatus::ContinueIfNotQuiet,
+            CLAP_PROCESS_TAIL => ProcessStatus::Tail,
+            CLAP_PROCESS_SLEEP => ProcessStatus::Sleep,
             result => anyhow::bail!(
                 "The plugin returned an unknown 'clap_process_status' value {result} from 'clap_plugin::process()'."
             ),
-        }
+        };
+
+        tracing::Span::current().record("result", tracing::field::debug(&result));
+
+        Ok(result)
     }
 
     /// Reset the internal state of the plugin.
+    #[tracing::instrument(name = "clap_plugin::reset", level = 1, skip(self))]
     pub fn reset(&self) {
         self.status().assert_active();
 
         unsafe {
-            let _span = tracing::trace_span!("clap_plugin::reset").entered();
             clap_call! { self.as_ptr()=>reset(self.as_ptr()) }
         };
     }
@@ -174,11 +233,11 @@ impl<'a> PluginAudioThread<'a> {
     /// Stop processing audio. See
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
+    #[tracing::instrument(name = "clap_plugin::stop_processing", level = 1, skip(self))]
     pub fn stop_processing(&self) {
         self.status().assert_is(PluginStatus::Processing);
 
         unsafe {
-            let _span = tracing::trace_span!("clap_plugin::stop_processing").entered();
             clap_call! { self.as_ptr()=>stop_processing(self.as_ptr()) }
         };
 

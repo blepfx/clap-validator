@@ -78,18 +78,21 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
     // We keep track of how many parameters support these conversions. A plugin
     // should support either conversion either for all of its parameters, or for
     // none of them.
-    let expected_conversions = param_infos.len() * 101;
+
+    let conversions_per_param = 4000usize.div_ceil(param_infos.len()).min(100);
+    let expected_conversions = param_infos.len() * conversions_per_param;
 
     let mut num_supported_value_to_text = 0;
     let mut num_supported_text_to_value = 0;
     let mut failed_value_to_text_calls: Vec<(String, f64)> = Vec::new();
     let mut failed_text_to_value_calls: Vec<(String, String)> = Vec::new();
+
     'param_loop: for (param_id, param_info) in param_infos {
         let param_name = &param_info.name;
 
-        'value_loop: for i in 0..=100 {
-            let starting_value =
-                param_info.range.start() + (param_info.range.end() - param_info.range.start()) * (i as f64 / 100.0);
+        'value_loop: for i in 0..conversions_per_param {
+            let starting_value = param_info.range.start()
+                + (param_info.range.end() - param_info.range.start()) * (i as f64 / (conversions_per_param - 1) as f64);
 
             // If the plugin rounds string representations then `value` may very
             // will not roundtrip correctly, so we'll start at the string
@@ -212,7 +215,7 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str, snap_to_b
         param_fuzzer = param_fuzzer.snap_to_bounds();
     }
 
-    let mut note_rng = NoteGenerator::new(&note_ports_config);
+    let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-1..=128);
 
     // We'll keep track of the current and the previous set of parameter value so we can write them
     // to a file if the test fails
@@ -307,22 +310,24 @@ pub fn test_param_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &str)
         .transpose()
         .context("Could not fetch the plugin's audio port config")?
         .unwrap_or_default();
+
     let note_ports_config = note_ports
         .map(|ports| ports.config())
         .transpose()
         .context("Could not fetch the plugin's note port config")?
         .unwrap_or_default();
+
     let param_infos = params.info().context("Could not fetch the plugin's parameters")?;
 
     // For each set of runs we'll generate new parameter values, and if the plugin supports notes
     // we'll also generate note events.
     let param_fuzzer = ParamFuzzer::new(&param_infos);
-    let mut note_rng = NoteGenerator::new(&note_ports_config);
+    let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-1..=128);
     let mut current_events: Option<Vec<Event>> = None;
-
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
 
     for &interval in INTERVALS {
+        let _span = tracing::debug_span!("WithInterval", interval).entered();
         let num_steps = (interval * 4).div_ceil(BUFFER_SIZE);
 
         plugin.on_audio_thread(|plugin| -> Result<()> {

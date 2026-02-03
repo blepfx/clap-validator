@@ -1,7 +1,7 @@
 //! Abstractions for interacting with the `state` extension.
 
 use super::Extension;
-use crate::panic::fail_test;
+use crate::debug::fail_test;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::{CHECK_POINTER, Proxy, Proxyable, clap_call};
 use anyhow::Result;

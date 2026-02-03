@@ -1,4 +1,4 @@
-use crate::panic::fail_test;
+use crate::debug::fail_test;
 use crate::plugin::ext::Extension;
 use crate::plugin::ext::audio_ports::AudioPorts;
 use crate::plugin::ext::audio_ports_config::AudioPortsConfig;
@@ -33,7 +33,7 @@ use clap_sys::plugin::clap_plugin;
 use clap_sys::version::CLAP_VERSION;
 use crossbeam::atomic::AtomicCell;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use std::ffi::{CStr, c_char, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr::NonNull;
 use std::sync::Mutex;
 use std::sync::mpsc::{Sender, channel};
@@ -49,6 +49,9 @@ pub struct PluginShared {
 
     /// The plugin's current state in terms of activation and processing status.
     status: AtomicCell<PluginStatus>,
+
+    /// The plugin's unique identifier.
+    pub plugin_id: CString,
 
     /// The plugin instance's main thread. Used for the main thread checks.
     pub main_thread_id: ThreadId,
@@ -113,6 +116,7 @@ impl PluginShared {
             callback_error: Mutex::new(None),
 
             status: AtomicCell::new(PluginStatus::Uninitialized),
+            plugin_id: plugin_id.to_owned(),
             main_thread_id: std::thread::current().id(),
             audio_thread_id: AtomicCell::new(None),
             requested_callback: AtomicCell::new(false),

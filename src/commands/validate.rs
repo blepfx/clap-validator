@@ -5,9 +5,9 @@ use crate::tests::{TestResult, TestStatus};
 use crate::{Verbosity, validator};
 use anyhow::{Context, Result};
 use clap::Args;
-use colored::Colorize;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use yansi::Paint;
 
 /// Options for the validator.
 #[derive(Debug, Args)]
@@ -54,6 +54,12 @@ pub struct ValidatorSettings {
     /// --in-process option is used. Can be useful for keeping plugin output in the correct order.
     #[arg(long, conflicts_with = "in_process")]
     pub no_parallel: bool,
+    /// When running the validation in-process, emit a JSON trace file that can be viewed with
+    /// Chrome's tracing viewer or <https://ui.perfetto.dev>.
+    ///
+    /// This has a non-negligible performance impact.
+    #[arg(long, requires = "in_process")]
+    pub trace: bool,
 }
 
 /// Options for running a single test. This is used for the out-of-process testing method. This
@@ -132,11 +138,12 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Ex
 
             let status_text = match test.status {
                 TestStatus::Success { .. } => "PASSED".green(),
-                TestStatus::Skipped { .. } => "SKIPPED".dimmed(),
+                TestStatus::Skipped { .. } => "SKIPPED".dim(),
                 TestStatus::Warning { .. } => "WARNING".yellow(),
                 TestStatus::Failed { .. } => "FAILED".red(),
                 TestStatus::Crashed { .. } => "CRASHED".red().bold(),
             };
+
             let test_result = match test.status.details() {
                 Some(reason) => format!("     {status_text}: {reason}"),
                 None => format!("     {status_text}"),

@@ -205,7 +205,7 @@ pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) 
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
                 let mut audio_buffers = AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE)?;
-                let mut note_rng = NoteGenerator::new(&note_ports_config);
+                let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-1..=128);
                 let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
                 for _ in 0..5 {
@@ -307,7 +307,7 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
                 let mut audio_buffers = AudioBuffers::new_in_place_f32(&config_audio_ports, BUFFER_SIZE)?;
-                let mut note_rng = NoteGenerator::new(&note_ports_config);
+                let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-1..=128);
                 let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
                 for _ in 0..5 {

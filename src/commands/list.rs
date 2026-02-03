@@ -5,9 +5,9 @@ use crate::index::PresetIndexResult;
 use crate::plugin::preset_discovery::PresetFile;
 use anyhow::{Context, Result};
 use clap::Subcommand;
-use colored::Colorize;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use yansi::Paint;
 
 /// Commands for listing tests and data realted to the installed plugins.
 #[derive(Subcommand)]

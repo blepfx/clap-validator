@@ -17,6 +17,7 @@ use clack_extensions::state::PluginState;
 use clack_plugin::events::spaces::CoreEventSpace;
 use clack_plugin::prelude::*;
 use clack_plugin::process::ConstantMask;
+use std::f32;
 use std::ffi::CString;
 
 mod oscillator;
@@ -74,6 +75,8 @@ impl DefaultPluginFactory for PolySynthPlugin {
 
 pub struct PolySynthAudioProcessor<'a> {
     channels: u32,
+    active: bool,
+
     poly_osc: PolyOscillator,
     modulation_values: PolySynthParamModulations,
     shared: &'a PolySynthPluginShared,
@@ -89,6 +92,7 @@ impl<'a> PluginAudioProcessor<'a, PolySynthPluginShared, PolySynthPluginMainThre
         audio_config: PluginAudioConfiguration,
     ) -> Result<Self, PluginError> {
         Ok(Self {
+            active: main_thread.active,
             channels: main_thread.config.get(),
             poly_osc: PolyOscillator::new(16, audio_config.sample_rate as f32),
             modulation_values: PolySynthParamModulations::new(),
@@ -126,6 +130,11 @@ impl<'a> PluginAudioProcessor<'a, PolySynthPluginShared, PolySynthPluginMainThre
             );
 
             is_non_silent |= self.poly_osc.has_active_voices()
+        }
+
+        // it is legal; when an output port is deactivated, the host must not use its contents
+        if !self.active {
+            output_buffer.fill(f32::NAN);
         }
 
         assert!(output_channels.channel_count() == self.channels);
@@ -233,6 +242,7 @@ impl PluginAudioPortsConfigImpl for PolySynthPluginMainThread<'_> {
     fn select(&mut self, config_id: ClapId) -> Result<(), PluginError> {
         if config_id.get() <= 8 {
             self.config = config_id;
+            self.active = true;
             Ok(())
         } else {
             Err(PluginError::Message("Invalid configuration ID"))

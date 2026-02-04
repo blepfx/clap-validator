@@ -8,6 +8,7 @@ use crate::plugin::process::{AudioBuffers, ProcessScope};
 use crate::tests::TestStatus;
 use crate::tests::rng::{NoteGenerator, new_prng, random_layout_requests};
 use anyhow::{Context, Result};
+use rand::Rng;
 
 const BUFFER_SIZE: u32 = 512;
 
@@ -341,6 +342,8 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
 }
 
 /// The test for `PluginTestCase::LayoutAudioPortsActivation`.
+/// TODO: fix deactivated output ports false positive
+/// TODO: audio ports activation invalidation test (audio-ports-config extension and port rescan)
 pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
 
@@ -379,6 +382,98 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
             });
         }
     };
+
+    let full_input_mask = 1u64
+        .unbounded_shl(audio_ports_config.inputs.len() as u32)
+        .wrapping_sub(1);
+    let full_output_mask = 1u64
+        .unbounded_shl(audio_ports_config.outputs.len() as u32)
+        .wrapping_sub(1);
+
+    let mut next_input_mask = full_input_mask;
+    let mut next_output_mask = full_output_mask;
+
+    // 32 different attempts
+    for _ in 0..32 {
+        let prev_input_mask = std::mem::replace(&mut next_input_mask, prng.random());
+        let prev_output_mask = std::mem::replace(&mut next_output_mask, prng.random());
+
+        next_input_mask &= full_input_mask;
+        next_output_mask &= full_output_mask;
+
+        let _span = tracing::debug_span!(
+            "WithAudioPortsActivation",
+            input_mask = format_args!("0b{:b}", next_input_mask),
+            output_mask = format_args!("0b{:b}", next_output_mask),
+        )
+        .entered();
+
+        for input in 0..audio_ports_config.inputs.len() {
+            let currently_active = (prev_input_mask & (1 << input)) != 0;
+            let should_be_active = (next_input_mask & (1 << input)) != 0;
+
+            if currently_active != should_be_active {
+                audio_ports_activation
+                    .set_active(true, input as u32, should_be_active, 32)
+                    .with_context(|| {
+                        format!(
+                            "Could not make input port {} {}",
+                            input,
+                            if should_be_active { "active" } else { "inactive" }
+                        )
+                    })?;
+            }
+        }
+
+        for output in 0..audio_ports_config.outputs.len() {
+            let currently_active = (prev_output_mask & (1 << output)) != 0;
+            let should_be_active = (next_output_mask & (1 << output)) != 0;
+
+            if currently_active != should_be_active {
+                audio_ports_activation
+                    .set_active(false, output as u32, should_be_active, 32)
+                    .with_context(|| {
+                        format!(
+                            "Could not make output port {} {}",
+                            output,
+                            if should_be_active { "active" } else { "inactive" }
+                        )
+                    })?;
+            }
+        }
+
+        plugin
+            .on_audio_thread(|plugin| -> Result<()> {
+                let mut audio_buffers = AudioBuffers::new_in_place_f32(&audio_ports_config, BUFFER_SIZE)?;
+                let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-1..=128);
+                let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
+
+                for _ in 0..5 {
+                    for buffer in process.audio_buffers().iter_mut() {
+                        if let Some(input) = buffer.port().input() {
+                            if (next_input_mask & (1 << input)) == 0 {
+                                buffer.fill_silence();
+                            } else {
+                                buffer.fill_white_noise(&mut prng);
+                            }
+                        }
+
+                        // TODO: output ports deactivated false positive
+                    }
+
+                    process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+                    process.run()?;
+                }
+
+                Ok(())
+            })
+            .with_context(|| {
+                format!(
+                    "Error while processing audio with input mask 0b{:b} and output mask 0b{:b}",
+                    next_input_mask, next_output_mask
+                )
+            })?;
+    }
 
     Ok(TestStatus::Success { details: None })
 }

@@ -591,12 +591,12 @@ impl PluginShared {
         });
     }
 
-    #[instrument(name = "clap_host_thread_check::is_main_thread", level = 1, skip(host))]
+  //  #[instrument(name = "clap_host_thread_check::is_main_thread", level = 1, skip(host))]
     unsafe extern "C" fn ext_thread_check_is_main_thread(host: *const clap_host) -> bool {
         Self::wrap(host, |this| Ok(this.main_thread_id == std::thread::current().id())).unwrap_or(false)
     }
 
-    #[instrument(name = "clap_host_thread_check::is_audio_thread", level = 1, skip(host))]
+   //  #[instrument(name = "clap_host_thread_check::is_audio_thread", level = 1, skip(host))]
     unsafe extern "C" fn ext_thread_check_is_audio_thread(host: *const clap_host) -> bool {
         Self::wrap(host, |this| {
             Ok(this.audio_thread_id.load() == Some(std::thread::current().id()))

@@ -1,9 +1,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::process::ExitCode;
+use std::sync::Arc;
 use tracing::level_filters::LevelFilter;
-use tracing_subscriber::Layer;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 use yansi::Paint;
 
 mod commands;
@@ -67,24 +65,25 @@ fn main() -> ExitCode {
     let _ = std::fs::create_dir_all(util::validator_temp_dir());
 
     let trace_path = util::validator_temp_dir().join("trace.json");
-    let trace_enabled = match &cli.command {
-        Command::Validate(settings) => settings.trace,
-        _ => false,
+    let trace_writer = if matches!(&cli.command, Command::Validate(settings) if settings.trace) {
+        Some(Arc::new(debug::ChromeJsonSubscriber::new(&trace_path)))
+    } else {
+        None
     };
 
-    let log_level = match cli.verbosity {
-        Verbosity::Quiet => LevelFilter::OFF,
-        Verbosity::Error => LevelFilter::ERROR,
-        Verbosity::Warn => LevelFilter::WARN,
-        Verbosity::Info => LevelFilter::INFO,
-        Verbosity::Debug => LevelFilter::DEBUG,
-        Verbosity::Trace => LevelFilter::TRACE,
-    };
-
-    tracing_subscriber::registry()
-        .with(debug::LogStderrLayer::new().with_filter(log_level))
-        .with(trace_enabled.then(|| debug::ChromeJsonLayer::new(&trace_path)))
-        .init();
+    if let Some(trace) = trace_writer.clone() {
+        tracing::subscriber::set_global_default(trace).unwrap();
+    } else {
+        tracing::subscriber::set_global_default(debug::LogStderrSubscriber::new(match cli.verbosity {
+            Verbosity::Quiet => LevelFilter::OFF,
+            Verbosity::Error => LevelFilter::ERROR,
+            Verbosity::Warn => LevelFilter::WARN,
+            Verbosity::Info => LevelFilter::INFO,
+            Verbosity::Debug => LevelFilter::DEBUG,
+            Verbosity::Trace => LevelFilter::TRACE,
+        }))
+        .unwrap();
+    }
 
     // Install the panic hook to log panics instead of printing them to stderr.
     debug::install_panic_hook();
@@ -108,16 +107,19 @@ fn main() -> ExitCode {
         }
     };
 
-    if trace_enabled {
-        eprintln!(
-            "{}",
-            format!(
-                "Trace written to '{}'. Use 'https://ui.perfetto.dev/ to view it.",
-                trace_path.display()
-            )
-            .dim()
-            .italic()
-        );
+    if let Some(trace) = trace_writer {
+        match trace.check_error() {
+            Ok(()) => eprintln!(
+                "{}",
+                format!(
+                    "Trace written to '{}'. Use 'https://ui.perfetto.dev/ to view it.",
+                    trace_path.display()
+                )
+                .dim()
+                .italic()
+            ),
+            Err(e) => eprintln!("{}: {}", "Failed to write trace".red().italic(), e),
+        }
     }
 
     status

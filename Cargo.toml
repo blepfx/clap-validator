@@ -39,8 +39,8 @@ time = { version = "0.3", features = ["serde"]}
 walkdir = "2.3"
 wait-timeout = "0.2.1"
 rustc-hash = "2.1.1"
-tracing = { version = "0.1.44", features = ["max_level_off"] }
-tracing-subscriber = { version = "0.3.18", default-features = false, features = ["registry"] }
+tracing = "0.1.44"
+tracing-core = "0.1.36"
 yansi = "1.0.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]

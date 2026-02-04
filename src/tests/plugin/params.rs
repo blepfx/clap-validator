@@ -79,7 +79,7 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
     // should support either conversion either for all of its parameters, or for
     // none of them.
 
-    let conversions_per_param = 4000usize.div_ceil(param_infos.len()).min(100);
+    let conversions_per_param = 4000usize.div_ceil(param_infos.len()).clamp(5, 100);
     let expected_conversions = param_infos.len() * conversions_per_param;
 
     let mut num_supported_value_to_text = 0;
@@ -89,6 +89,8 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
 
     'param_loop: for (param_id, param_info) in param_infos {
         let param_name = &param_info.name;
+
+        let _span = tracing::debug_span!("WithParam", param_id = param_id, param_name = param_name.as_str()).entered();
 
         'value_loop: for i in 0..conversions_per_param {
             let starting_value = param_info.range.start()

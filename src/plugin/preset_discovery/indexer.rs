@@ -7,7 +7,7 @@ use crate::plugin::util::{self, CHECK_POINTER, Proxy, Proxyable, validator_versi
 use anyhow::{Context, Result};
 use clap_sys::factory::preset_discovery::*;
 use clap_sys::version::CLAP_VERSION;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
 use std::path::Path;
@@ -85,7 +85,7 @@ pub struct Location {
     pub value: LocationValue,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Flags {
     pub is_factory_content: bool,
@@ -160,7 +160,7 @@ impl Location {
 /// A location as used by the preset discovery API. These are used to refer to single files,
 /// directories, and internal plugin data. Previous versions of the API used URIs instead of a
 /// location kind and a location path field.
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Serialize, Deserialize)]
 pub enum LocationValue {
     /// An absolute path to a file or a directory. The spec says nothing about trailing slashes, but
     /// the paths must at least be absolute.
@@ -180,30 +180,6 @@ impl Display for LocationValue {
                 write!(f, "CLAP_PRESET_DISCOVERY_LOCATION_FILE with path {path:?}")
             }
             LocationValue::Internal => write!(f, "CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN"),
-        }
-    }
-}
-
-impl Serialize for LocationValue {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            LocationValue::File(path) => serializer.serialize_newtype_variant(
-                "LocationValue",
-                1,
-                "CLAP_PRESET_DISCOVERY_LOCATION_FILE",
-                // This should have alreayd been checked at this point
-                path.to_str().expect("Invalid UTF-8"),
-            ),
-            LocationValue::Internal => serializer.serialize_newtype_variant(
-                "LocationValue",
-                1,
-                "CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN",
-                // This should just resolve to a `null` value, to keep the format consistent
-                &None::<()>,
-            ),
         }
     }
 }
@@ -271,7 +247,7 @@ impl LocationValue {
 
 /// Data parsed from a `clap_preset_discovery_soundpack`. All of these fields except for the ID may
 /// be empty.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Soundpack {
     pub flags: Flags,

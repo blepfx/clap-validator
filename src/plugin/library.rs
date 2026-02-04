@@ -11,7 +11,7 @@ use clap_sys::factory::preset_discovery::{CLAP_PRESET_DISCOVERY_FACTORY_ID, clap
 use clap_sys::plugin::clap_plugin_descriptor;
 use clap_sys::version::clap_version;
 use crossbeam::atomic::AtomicCell;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::ffi::CString;
 use std::marker::PhantomData;
@@ -34,11 +34,12 @@ pub struct PluginLibrary {
     /// designated the 'main thread', and this object cannot be shared with other threads.
     _thread: PhantomData<*const ()>,
 
+    /// The tracing span for this plugin library.
     _span: tracing::span::EnteredSpan,
 }
 
 /// Metadata for a CLAP plugin library, which may contain multiple plugins.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PluginLibraryMetadata {
     pub version: (u32, u32, u32),
     pub plugins: Vec<PluginMetadata>,
@@ -47,7 +48,7 @@ pub struct PluginLibraryMetadata {
 /// Metadata for a single plugin within a CLAP plugin library. See
 /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for a description
 /// of the fields.
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PluginMetadata {
     pub id: String,
     pub name: String,

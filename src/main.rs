@@ -25,6 +25,28 @@ struct Cli {
     command: Command,
 }
 
+/// The validator's subcommands.
+#[derive(Subcommand)]
+enum Command {
+    /// Validate one or more plugins.
+    Validate(commands::validate::ValidatorSettings),
+
+    /// List available tests, scan plugins, presets, etc.
+    #[command(subcommand)]
+    List(commands::list::ListCommand),
+
+    /// Run a single test.
+    ///
+    /// This is used for the out-of-process testing. Since it's merely an implementation detail, the
+    /// option is not shown in the CLI.
+    #[command(hide = true)]
+    ValidateOutOfProcess(commands::validate::OutOfProcessSettings),
+
+    /// Run a plugin scan out of process
+    #[command(hide = true)]
+    ScanOutOfProcess(commands::list::scan_out_of_process::Settings),
+}
+
 /// The verbosity level. Set to `Debug` by default. `Trace` can be used to get more information on
 /// what the validator is actually doing.
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -36,22 +58,6 @@ pub enum Verbosity {
     Info,
     Debug,
     Trace,
-}
-
-/// The validator's subcommands.
-#[derive(Subcommand)]
-enum Command {
-    /// Validate one or more plugins.
-    Validate(commands::validate::ValidatorSettings),
-    /// Run a single test.
-    ///
-    /// This is used for the out-of-process testing. Since it's merely an implementation detail, the
-    /// option is not shown in the CLI.
-    #[command(hide = true)]
-    RunSingleTest(commands::validate::SingleTestSettings),
-
-    #[command(subcommand)]
-    List(commands::list::ListCommand),
 }
 
 fn main() -> ExitCode {
@@ -95,8 +101,10 @@ fn main() -> ExitCode {
 
     let result = match cli.command {
         Command::Validate(settings) => commands::validate::validate(cli.verbosity, &settings),
-        Command::RunSingleTest(settings) => commands::validate::run_single(&settings),
-        Command::List(command) => commands::list::list(&command),
+        Command::List(command) => commands::list::list(cli.verbosity, &command),
+
+        Command::ValidateOutOfProcess(settings) => commands::validate::validate_out_of_process(&settings),
+        Command::ScanOutOfProcess(settings) => commands::list::scan_out_of_process::run(&settings),
     };
 
     let status = match &result {

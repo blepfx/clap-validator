@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use clap_sys::factory::preset_discovery::*;
 use clap_sys::timestamp::clap_timestamp;
 use clap_sys::universal_plugin_id::clap_universal_plugin_id;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ffi::c_char;
@@ -67,7 +67,7 @@ pub struct MetadataReceiver {
 }
 
 /// One or more presets declared by the plugin through a preset provider metadata receiver.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PresetFile {
     Single(Preset),
@@ -137,7 +137,7 @@ impl PartialPreset {
 
 /// The docs specify that you are not allowed to specify a preset name unless the preset is part of
 /// a container file.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "type", content = "value")]
 pub enum PresetName {
     Explicit(String),
@@ -155,24 +155,11 @@ impl Display for PresetName {
 
 /// The plugin ABI the preset was defined for. Most plugins will define only presets for CLAP
 /// plugins.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PluginId {
-    #[serde(serialize_with = "plugin_abi_to_string")]
     pub abi: PluginAbi,
     pub id: String,
-}
-
-/// Always serialize this as a string. Having the `Other` enum variant is nice but it looks out of
-/// place in the JSON output.
-fn plugin_abi_to_string<S>(plugin_abi: &PluginAbi, ser: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    match plugin_abi {
-        PluginAbi::Clap => "clap".serialize(ser),
-        PluginAbi::Other(s) => s.serialize(ser),
-    }
 }
 
 /// The plugin ABI the preset was defined for. Most plugins will define only presets for CLAP
@@ -183,8 +170,34 @@ pub enum PluginAbi {
     Other(String),
 }
 
+impl Serialize for PluginAbi {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            PluginAbi::Clap => serializer.serialize_str("clap"),
+            PluginAbi::Other(abi) => serializer.serialize_str(abi),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for PluginAbi {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s: String = Deserialize::deserialize(deserializer)?;
+        if s == "clap" {
+            Ok(PluginAbi::Clap)
+        } else {
+            Ok(PluginAbi::Other(s))
+        }
+    }
+}
+
 /// A preset as declared by the plugin. Constructed from a [`PartialPreset`].
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Preset {
     pub name: PresetName,
@@ -203,7 +216,7 @@ pub struct Preset {
 
 /// The flags applying to a preset. These are either explicitly set for the preset or inherited from
 /// the location.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "type")]
 pub enum PresetFlags {
     /// The fall back to the location's flags if the provider did not explicitly set flags for the

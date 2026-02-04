@@ -2,7 +2,7 @@
 //! way that somewhat mimics a real host.
 
 use crate::Verbosity;
-use crate::commands::validate::{SingleTestSettings, ValidatorSettings};
+use crate::commands::validate::{OutOfProcessSettings, ValidatorSettings};
 use crate::config::Config;
 use crate::debug::panic_message;
 use crate::plugin::library::{PluginLibrary, PluginMetadata};
@@ -51,21 +51,10 @@ pub struct ValidationTally {
     pub num_warnings: u32,
 }
 
-impl ValidationResult {
-    pub fn filter(mut self, mut f: impl FnMut(&TestResult) -> bool) -> Self {
-        self.plugin_tests.values_mut().for_each(|tests| tests.retain(&mut f));
-        self.plugin_library_tests
-            .values_mut()
-            .for_each(|tests| tests.retain(&mut f));
-
-        self
-    }
-}
-
 /// Run the validator using the specified settings. Returns an error if any of the plugin paths
 /// could not loaded, or if the plugin ID filter did not match any plugins.
 pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings, config: &Config) -> Result<ValidationResult> {
-    let test_filter = {
+    let filter_test = {
         let test_filter_regex = settings
             .filter
             .as_ref()
@@ -80,6 +69,13 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings, config: &Con
 
             config_enabled && filter_enabled
         }
+    };
+
+    let filter_plugin = |metadata: &PluginMetadata| {
+        settings
+            .plugin_id
+            .as_ref()
+            .is_none_or(|plugin_id| &metadata.id == plugin_id)
     };
 
     // The tests can optionally be run in parallel. This is not the default since some plugins may
@@ -102,7 +98,7 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings, config: &Con
             plugin_library_tests.insert(
                 library_path.clone(),
                 PluginLibraryTestCase::iter()
-                    .filter(|test| test_filter(&test.to_string()))
+                    .filter(|test| filter_test(&test.to_string()))
                     .map_parallel(parallel, |test| run_test(&test, verbosity, settings, library_path))
                     .collect::<Result<Vec<TestResult>>>()?,
             );
@@ -133,10 +129,10 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings, config: &Con
             let plugin_tests = plugin_metadata
                 .plugins
                 .iter()
-                .filter(|plugin_metadata| plugin_filter(plugin_metadata, settings))
+                .filter(|plugin_metadata| filter_plugin(plugin_metadata))
                 .map_parallel(parallel, |plugin_metadata| {
                     let tests = PluginTestCase::iter()
-                        .filter(|test| test_filter(&test.to_string()))
+                        .filter(|test| filter_test(&test.to_string()))
                         .map_parallel(parallel, |test| {
                             run_test(&test, verbosity, settings, (library_path, &plugin_metadata.id))
                         });
@@ -186,7 +182,8 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings, config: &Con
     Ok(results)
 }
 
-pub fn run_single_test(settings: &SingleTestSettings) -> Result<()> {
+/// Validate a single test, this is used for out-of-process testing.
+pub fn validate_out_of_process(settings: &OutOfProcessSettings) -> Result<()> {
     let test = SerializedTest {
         test_type: settings.test_type.clone(),
         test_name: settings.test_name.clone(),
@@ -207,17 +204,6 @@ pub fn run_single_test(settings: &SingleTestSettings) -> Result<()> {
     })?;
 
     Ok(())
-}
-
-/// The filter function for determining whether or not tests should be run for a particular plugin.
-fn plugin_filter(plugin_metadata: &PluginMetadata, settings: &ValidatorSettings) -> bool {
-    // It's possible to filter by plugin ID in case you want to validate a single plugin
-    // from a plugin library containing multiple plugins
-    #[allow(clippy::match_like_matches_macro)]
-    match &settings.plugin_id {
-        Some(plugin_id) if &plugin_metadata.id != plugin_id => false,
-        _ => true,
-    }
 }
 
 /// The filter function for determining whether or not a test should be run based on the validator's
@@ -259,14 +245,14 @@ fn run_test<'a, T: TestCase<'a>>(
     })
 }
 
-const WAIT_TIMEOUT: Duration = Duration::from_secs(30);
-
 fn run_test_out_of_process<'a, T: TestCase<'a>>(
     test: &T,
     args: T::TestArgs,
     verbosity: Verbosity,
     hide_output: bool,
 ) -> Result<TestStatus> {
+    const WAIT_TIMEOUT: Duration = Duration::from_secs(30);
+
     let test = SerializedTest::from_test(test, &args)?;
 
     // The idea here is that we'll invoke the same clap-validator binary with a special hidden command
@@ -289,7 +275,7 @@ fn run_test_out_of_process<'a, T: TestCase<'a>>(
     command
         .arg("--verbosity")
         .arg(verbosity.to_possible_value().unwrap().get_name())
-        .arg("run-single-test")
+        .arg("validate-out-of-process")
         .args([OsStr::new("--output-file"), output_file_path.as_os_str()])
         .arg(test.test_type)
         .arg(test.test_name)
@@ -397,6 +383,15 @@ impl ValidationResult {
     pub fn union(mut self, other: Self) -> Self {
         self.plugin_library_tests.extend(other.plugin_library_tests);
         self.plugin_tests.extend(other.plugin_tests);
+        self
+    }
+
+    /// Filter the test results using the specified filter function.
+    pub fn filter(mut self, mut f: impl FnMut(&TestResult) -> bool) -> Self {
+        self.plugin_tests.values_mut().for_each(|tests| tests.retain(&mut f));
+        self.plugin_library_tests
+            .values_mut()
+            .for_each(|tests| tests.retain(&mut f));
         self
     }
 }

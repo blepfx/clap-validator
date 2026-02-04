@@ -63,7 +63,7 @@ pub struct ValidatorSettings {
 /// Options for running a single test. This is used for the out-of-process testing method. This
 /// option is hidden from the CLI as it's merely an implementation detail.
 #[derive(Debug, Args)]
-pub struct SingleTestSettings {
+pub struct OutOfProcessSettings {
     /// The type of test (plugin library or plugin) to run.
     pub test_type: String,
     /// The name of the test to run.
@@ -169,7 +169,7 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Ex
 
 /// Run a single test and write the output to a file. This command is a hidden implementation detail
 /// used by the validator to run tests in a different process.
-pub fn run_single(settings: &SingleTestSettings) -> Result<ExitCode> {
-    validator::run_single_test(settings)?;
+pub fn validate_out_of_process(settings: &OutOfProcessSettings) -> Result<ExitCode> {
+    validator::validate_out_of_process(settings)?;
     Ok(ExitCode::SUCCESS)
 }

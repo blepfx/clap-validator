@@ -13,7 +13,6 @@ use crate::util;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::any::TypeId;
-use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::fs;
 use std::path::PathBuf;
@@ -68,8 +67,16 @@ pub enum TestStatus {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct TestList {
-    pub plugin_library_tests: BTreeMap<String, String>,
-    pub plugin_tests: BTreeMap<String, String>,
+    pub plugin_library_tests: Vec<TestListItem>,
+    pub plugin_tests: Vec<TestListItem>,
+}
+
+/// A single item in the test list.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct TestListItem {
+    pub name: String,
+    pub description: String,
 }
 
 /// An abstraction for a test case. This mostly exists because we need two separate kinds of tests
@@ -138,15 +145,20 @@ impl TestStatus {
     }
 }
 
+impl TestListItem {
+    pub fn from<'a, T: TestCase<'a>>(test_case: &T) -> Self {
+        Self {
+            name: test_case.to_string(),
+            description: test_case.description(),
+        }
+    }
+}
+
 impl Default for TestList {
     fn default() -> Self {
         Self {
-            plugin_library_tests: PluginLibraryTestCase::iter()
-                .map(|c| (c.to_string(), c.description()))
-                .collect(),
-            plugin_tests: PluginTestCase::iter()
-                .map(|c| (c.to_string(), c.description()))
-                .collect(),
+            plugin_library_tests: PluginLibraryTestCase::iter().map(|c| TestListItem::from(&c)).collect(),
+            plugin_tests: PluginTestCase::iter().map(|c| TestListItem::from(&c)).collect(),
         }
     }
 }

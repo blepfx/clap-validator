@@ -1,3 +1,4 @@
+use crate::debug::record;
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::clap_call;
@@ -33,18 +34,27 @@ impl<'a> AudioPortsActivation<'a> {
         name = "clap_plugin_audio_ports_activation::can_activate_while_processing",
         level = 1,
         skip(self)
+        fields(result),
     )]
     pub fn can_activate_while_processing(&self) -> bool {
         let audio_ports_activation = self.audio_ports_activation.as_ptr();
         let plugin = self.plugin.as_ptr();
         unsafe {
-            clap_call! { audio_ports_activation=>can_activate_while_processing(plugin) }
+            record(
+                "result",
+                clap_call! { audio_ports_activation=>can_activate_while_processing(plugin) },
+            )
         }
     }
 
     /// Activates or deactivates audio ports while inactive.
     #[allow(unused)]
-    #[tracing::instrument(name = "clap_plugin_audio_ports_activation::set_active", level = 1, skip(self))]
+    #[tracing::instrument(
+        name = "clap_plugin_audio_ports_activation::set_active",
+        level = 1,
+        skip(self),
+        fields(result)
+    )]
     pub fn set_active(&self, is_input: bool, port_index: u32, is_active: bool, sample_size: u32) -> Result<()> {
         self.plugin.status().assert_inactive();
 
@@ -52,8 +62,11 @@ impl<'a> AudioPortsActivation<'a> {
         let plugin = self.plugin.as_ptr();
 
         unsafe {
-            let success =
-                clap_call! { audio_ports_activation=>set_active(plugin, is_input, port_index, is_active, sample_size) };
+            let success = record(
+                "result",
+                clap_call! { audio_ports_activation=>set_active(plugin, is_input, port_index, is_active, sample_size) },
+            );
+
             if success {
                 Ok(())
             } else {

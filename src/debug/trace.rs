@@ -70,14 +70,15 @@ impl Subscriber for ChromeJsonSubscriber {
     fn new_span(&self, span: &Attributes<'_>) -> Id {
         THREAD_DATA.with_borrow_mut(|thread| {
             let id = Id::from_u64(NEXT_SPAN_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
-            let mut args = thread.new_args();
 
+            let mut args = TraceArgs::default();
             span.record(&mut args);
-            thread.active_spans.push(ThreadSpan {
+
+            thread.spans.push(ThreadSpan {
                 id: id.clone(),
                 meta: span.metadata(),
-                args,
                 uses: 1,
+                args,
             });
 
             id
@@ -99,11 +100,8 @@ impl Subscriber for ChromeJsonSubscriber {
             if let Some(span) = thread.span_mut(&id) {
                 span.uses -= 1;
                 if span.uses == 0 {
-                    let span = thread.remove_span(&id);
-                    if let Some(span) = span {
-                        thread.free_args(span.args);
-                        return true;
-                    }
+                    thread.remove_span(&id);
+                    return true;
                 }
             }
 
@@ -123,7 +121,7 @@ impl Subscriber for ChromeJsonSubscriber {
 
     fn current_span(&self) -> Current {
         THREAD_DATA.with_borrow(|thread| {
-            if let Some(span) = thread.active_spans.last() {
+            if let Some(span) = thread.spans.last() {
                 Current::new(span.id.clone(), span.meta)
             } else {
                 Current::none()
@@ -135,8 +133,9 @@ impl Subscriber for ChromeJsonSubscriber {
         let time = self.start.elapsed().as_micros();
 
         THREAD_DATA.with_borrow_mut(|thread| {
-            let mut args = thread.new_args();
+            let mut args = TraceArgs::default();
             event.record(&mut args);
+            args.values.insert("level", format!("{:?}", event.metadata().level()));
 
             self.emit(TraceEvent {
                 name: args.values.get("message").map(|s| s.as_str()).unwrap_or("?"),
@@ -147,8 +146,6 @@ impl Subscriber for ChromeJsonSubscriber {
                 pid: 1,
                 ph: "n",
             });
-
-            thread.reuse_args.push(args);
         });
     }
 
@@ -211,10 +208,7 @@ struct ThreadData {
 
     /// A "stack" of currently active spans on this thread, in the order they were entered
     /// In most cases (FIFO) this is extremely fast, but this also allows for out-of-order/overlapping spans at the cost of O(n) lookups
-    active_spans: Vec<ThreadSpan>,
-
-    /// A list of `TraceArgs` for reuse, to minimize allocations.
-    reuse_args: Vec<TraceArgs>,
+    spans: Vec<ThreadSpan>,
 }
 
 impl ThreadData {
@@ -224,39 +218,26 @@ impl ThreadData {
                 .name()
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("{:?}", std::thread::current().id())),
-            active_spans: Vec::new(),
-            reuse_args: Vec::new(),
+            spans: Vec::new(),
         }
     }
 
     /// Find a span by its ID
     fn span(&self, id: &Id) -> Option<&ThreadSpan> {
-        self.active_spans.iter().find(|span| &span.id == id)
+        self.spans.iter().find(|span| &span.id == id)
     }
 
     /// Find a span by its ID
     fn span_mut(&mut self, id: &Id) -> Option<&mut ThreadSpan> {
-        self.active_spans.iter_mut().rfind(|span| &span.id == id)
+        self.spans.iter_mut().rfind(|span| &span.id == id)
     }
 
     /// Remove a span by its ID, returning it if found
     fn remove_span(&mut self, id: &Id) -> Option<ThreadSpan> {
-        self.active_spans
+        self.spans
             .iter()
             .rposition(|span| &span.id == id)
-            .map(|idx| self.active_spans.remove(idx))
-    }
-
-    /// Constructs a new `TraceArgs`, reusing one from the pool if available.
-    fn new_args(&mut self) -> TraceArgs {
-        let mut args = self.reuse_args.pop().unwrap_or_default();
-        args.values.clear();
-        args
-    }
-
-    /// Returns a `TraceArgs` to the pool for reuse.
-    fn free_args(&mut self, args: TraceArgs) {
-        self.reuse_args.push(args);
+            .map(|idx| self.spans.remove(idx))
     }
 }
 

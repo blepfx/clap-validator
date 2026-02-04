@@ -1,6 +1,7 @@
 //! Commands for validating plugins.
 
 use super::{TextWrapper, println_wrapped};
+use crate::config::Config;
 use crate::tests::{TestResult, TestStatus};
 use crate::{Verbosity, validator};
 use anyhow::{Context, Result};
@@ -27,10 +28,7 @@ pub struct ValidatorSettings {
     pub json: bool,
     /// Only run the tests that match this case-insensitive regular expression.
     #[arg(short = 'f', long)]
-    pub test_filter: Option<String>,
-    /// Changes the behavior of -f/--test-filter to skip matching tests instead.
-    #[arg(short = 'v', long)]
-    pub invert_filter: bool,
+    pub filter: Option<String>,
     /// When running the validation out-of-process, hide the plugin's output.
     ///
     /// This can be useful for validating noisy plugins.
@@ -81,51 +79,17 @@ pub struct SingleTestSettings {
 
 /// The main validator command. This will validate one or more plugins and print the results.
 pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<ExitCode> {
-    let mut result = validator::validate(verbosity, settings).context("Could not run the validator")?;
+    let config = Config::from_current()?;
+
+    let mut result = validator::validate(verbosity, settings, &config).context("Could not run the validator")?;
     let tally = result.tally();
 
-    // Filtering out tests should be done after we did the tally for consistency's sake
     if settings.only_failed {
-        // The `.drain_filter()` methods have not been stabilized yet, so to make things
-        // easy for us we'll just inefficiently rebuild the data structures
-        result.plugin_library_tests = result
-            .plugin_library_tests
-            .into_iter()
-            .filter_map(|(library_path, tests)| {
-                let tests: Vec<_> = tests
-                    .into_iter()
-                    .filter(|test| test.status.failed_or_warning())
-                    .collect();
-                if tests.is_empty() {
-                    None
-                } else {
-                    Some((library_path, tests))
-                }
-            })
-            .collect();
-
-        result.plugin_tests = result
-            .plugin_tests
-            .into_iter()
-            .filter_map(|(plugin_id, tests)| {
-                let tests: Vec<_> = tests
-                    .into_iter()
-                    .filter(|test| test.status.failed_or_warning())
-                    .collect();
-                if tests.is_empty() {
-                    None
-                } else {
-                    Some((plugin_id, tests))
-                }
-            })
-            .collect();
+        result = result.filter(|test| test.status.failed_or_warning());
     }
 
     if settings.json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&result).expect("Could not format JSON")
-        );
+        println!("{}", serde_json::to_string_pretty(&result)?);
     } else {
         fn print_test(wrapper: &mut TextWrapper, test: &TestResult) {
             println_wrapped!(

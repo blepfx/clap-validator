@@ -3,6 +3,7 @@
 
 use crate::Verbosity;
 use crate::commands::validate::{SingleTestSettings, ValidatorSettings};
+use crate::config::Config;
 use crate::debug::panic_message;
 use crate::plugin::library::{PluginLibrary, PluginMetadata};
 use crate::tests::{PluginLibraryTestCase, PluginTestCase, SerializedTest, TestCase, TestResult, TestStatus};
@@ -50,14 +51,36 @@ pub struct ValidationTally {
     pub num_warnings: u32,
 }
 
+impl ValidationResult {
+    pub fn filter(mut self, mut f: impl FnMut(&TestResult) -> bool) -> Self {
+        self.plugin_tests.values_mut().for_each(|tests| tests.retain(&mut f));
+        self.plugin_library_tests
+            .values_mut()
+            .for_each(|tests| tests.retain(&mut f));
+
+        self
+    }
+}
+
 /// Run the validator using the specified settings. Returns an error if any of the plugin paths
 /// could not loaded, or if the plugin ID filter did not match any plugins.
-pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<ValidationResult> {
-    let test_regex = settings
-        .test_filter
-        .as_ref()
-        .map(|x| Regex::new(x).with_context(|| format!("Could not parse the test filter regular expression '{}'", x)))
-        .transpose()?;
+pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings, config: &Config) -> Result<ValidationResult> {
+    let test_filter = {
+        let test_filter_regex = settings
+            .filter
+            .as_ref()
+            .map(|x| {
+                Regex::new(x).with_context(|| format!("Could not parse the test filter regular expression '{}'", x))
+            })
+            .transpose()?;
+
+        move |id: &str| {
+            let config_enabled = config.is_test_enabled(id);
+            let filter_enabled = test_filter_regex.as_ref().is_none_or(|f| f.is_match(id));
+
+            config_enabled && filter_enabled
+        }
+    };
 
     // The tests can optionally be run in parallel. This is not the default since some plugins may
     // not handle it correctly, event when the plugins are loaded in different processes. It's also
@@ -79,7 +102,7 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Va
             plugin_library_tests.insert(
                 library_path.clone(),
                 PluginLibraryTestCase::iter()
-                    .filter(|test| test_filter(test, settings, test_regex.as_ref()))
+                    .filter(|test| test_filter(&test.to_string()))
                     .map_parallel(parallel, |test| run_test(&test, verbosity, settings, library_path))
                     .collect::<Result<Vec<TestResult>>>()?,
             );
@@ -113,7 +136,7 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Va
                 .filter(|plugin_metadata| plugin_filter(plugin_metadata, settings))
                 .map_parallel(parallel, |plugin_metadata| {
                     let tests = PluginTestCase::iter()
-                        .filter(|test| test_filter(test, settings, test_regex.as_ref()))
+                        .filter(|test| test_filter(&test.to_string()))
                         .map_parallel(parallel, |test| {
                             run_test(&test, verbosity, settings, (library_path, &plugin_metadata.id))
                         });
@@ -184,17 +207,6 @@ pub fn run_single_test(settings: &SingleTestSettings) -> Result<()> {
     })?;
 
     Ok(())
-}
-
-/// The filter function for determining whether or not a test should be run based on the validator's
-/// settings settings.
-fn test_filter<'a, T: TestCase<'a>>(test: &T, settings: &ValidatorSettings, test_filter: Option<&Regex>) -> bool {
-    let test_name = test.to_string();
-    match (test_filter, settings.invert_filter) {
-        (Some(test_filter), false) if !test_filter.is_match(&test_name) => false,
-        (Some(test_filter), true) if test_filter.is_match(&test_name) => false,
-        _ => true,
-    }
 }
 
 /// The filter function for determining whether or not tests should be run for a particular plugin.

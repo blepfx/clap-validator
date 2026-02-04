@@ -5,8 +5,8 @@ use tracing::level_filters::LevelFilter;
 use yansi::Paint;
 
 mod commands;
+mod config;
 mod debug;
-mod index;
 mod plugin;
 mod tests;
 mod util;
@@ -102,7 +102,7 @@ fn main() -> ExitCode {
     let status = match &result {
         Ok(code) => *code,
         Err(err) => {
-            tracing::error!("{err:#}");
+            eprintln!("{} {err:#}", "error:".red().bold());
             ExitCode::FAILURE
         }
     };

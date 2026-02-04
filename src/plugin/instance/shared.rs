@@ -1,4 +1,4 @@
-use crate::debug::fail_test;
+use crate::debug::{fail_test, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::ext::audio_ports::AudioPorts;
 use crate::plugin::ext::audio_ports_config::AudioPortsConfig;
@@ -156,13 +156,13 @@ impl PluginShared {
         self.status().assert_is_not(PluginStatus::Uninitialized);
 
         for id in T::IDS {
-            let span = tracing::trace_span!("clap_plugin::get_extension", extension_id = %id.to_string_lossy(), found = tracing::field::Empty).entered();
+            let _span = tracing::trace_span!("clap_plugin::get_extension", extension_id = %id.to_string_lossy(), found = tracing::field::Empty).entered();
 
             let extension_ptr = unsafe {
                 clap_call! { self.clap_plugin=>get_extension(self.clap_plugin, id.as_ptr()) }
             };
 
-            span.record("found", !extension_ptr.is_null());
+            record("found", !extension_ptr.is_null());
 
             if !extension_ptr.is_null() {
                 return NonNull::new(extension_ptr as *mut T::Struct);
@@ -376,8 +376,8 @@ impl PluginShared {
                 std::ptr::null()
             };
 
-            Span::current().record("extension_id", extension_id_cstr.to_string_lossy().as_ref());
-            Span::current().record("found", !extension_ptr.is_null());
+            record("extension_id", extension_id_cstr.to_string_lossy());
+            record("found", !extension_ptr.is_null());
 
             Ok(extension_ptr)
         })

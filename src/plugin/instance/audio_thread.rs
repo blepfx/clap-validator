@@ -1,6 +1,7 @@
 //! Abstractions for single CLAP plugin instances for audio thread interactions.
 
 use super::{Plugin, PluginStatus};
+use crate::debug::record;
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::{CallbackEvent, MainThreadTask, PluginShared};
 use crate::plugin::process::{InputEventQueue, OutputEventQueue};
@@ -215,9 +216,8 @@ impl<'a> PluginAudioThread<'a> {
             ),
         };
 
-        tracing::Span::current().record("result", tracing::field::debug(&result));
 
-        Ok(result)
+        Ok(record("status", result))
     }
 
     /// Reset the internal state of the plugin.

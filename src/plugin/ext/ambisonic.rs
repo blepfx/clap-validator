@@ -1,3 +1,4 @@
+use crate::debug::record;
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::clap_call;
@@ -26,16 +27,19 @@ impl<'a> Extension for Ambisonic<'a> {
 }
 
 impl<'a> Ambisonic<'a> {
-    #[tracing::instrument(name = "clap_plugin_ambisonic::is_config_supported", level = 1, skip(self))]
+    #[tracing::instrument(
+        name = "clap_plugin_ambisonic::is_config_supported",
+        level = 1,
+        skip(self),
+        fields(result)
+    )]
     pub fn is_config_supported(&self, config: &clap_ambisonic_config) -> bool {
         let ambisonic = self.ambisonic.as_ptr();
         let plugin = self.plugin.as_ptr();
-        unsafe {
-            clap_call! { ambisonic=>is_config_supported(plugin, config) }
-        }
+        unsafe { record("result", clap_call! { ambisonic=>is_config_supported(plugin, config) }) }
     }
 
-    #[tracing::instrument(name = "clap_plugin_ambisonic::get_config", level = 1, skip(self))]
+    #[tracing::instrument(name = "clap_plugin_ambisonic::get_config", level = 1, skip(self), fields(result))]
     pub fn get_config(&self, is_input: bool, port_index: u32) -> Option<clap_ambisonic_config> {
         let ambisonic = self.ambisonic.as_ptr();
         let plugin = self.plugin.as_ptr();
@@ -43,7 +47,7 @@ impl<'a> Ambisonic<'a> {
         unsafe {
             let mut config = clap_ambisonic_config { ..zeroed() };
             let result = clap_call! { ambisonic=>get_config(plugin, is_input, port_index, &mut config) };
-            if result { Some(config) } else { None }
+            if result { Some(record("result", config)) } else { None }
         }
     }
 }

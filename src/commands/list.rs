@@ -1,7 +1,7 @@
 //! Commands for listing information about the validator or installed plugins.
 
 use super::{TextWrapper, println_wrapped, println_wrapped_no_indent};
-use crate::index::PresetIndexResult;
+use crate::plugin::index::{PresetIndexResult, index, index_presets};
 use crate::plugin::preset_discovery::PresetFile;
 use anyhow::{Context, Result};
 use clap::Subcommand;
@@ -49,7 +49,7 @@ pub fn list(command: &ListCommand) -> Result<ExitCode> {
 
 /// Lists basic information about all installed CLAP plugins.
 fn list_plugins(json: bool) -> Result<ExitCode> {
-    let plugin_index = crate::index::index();
+    let plugin_index = index();
 
     if json {
         println!(
@@ -119,14 +119,14 @@ where
     P: AsRef<Path>,
 {
     let preset_index = match plugin_paths {
-        Some(plugin_paths) => crate::index::index_presets(plugin_paths, false),
+        Some(plugin_paths) => index_presets(plugin_paths, false),
         None => {
-            let plugin_index = crate::index::index();
+            let plugin_index = index();
             let all_plugin_paths = plugin_index.0.keys();
 
             // This 'true' indicates that plugins that don't support the preset discovery mechanism
             // should be silently skipped
-            crate::index::index_presets(all_plugin_paths, true)
+            index_presets(all_plugin_paths, true)
         }
     }
     .context("Error while crawling presets")?;
@@ -337,6 +337,7 @@ where
 /// Lists all available test cases.
 fn list_tests(json: bool) -> Result<ExitCode> {
     let list = crate::tests::TestList::default();
+    let config = crate::config::Config::from_current()?;
 
     if json {
         println!(
@@ -345,15 +346,28 @@ fn list_tests(json: bool) -> Result<ExitCode> {
         );
     } else {
         let mut wrapper = TextWrapper::default();
+        let mut print_test = |test: &crate::tests::TestListItem| {
+            if config.is_test_enabled(&test.name) {
+                println_wrapped!(wrapper, "- {}: {}\n", test.name.bold(), test.description);
+            } else {
+                println_wrapped!(
+                    wrapper,
+                    "- {} {}: {}\n",
+                    test.name.bold(),
+                    "disabled".dim().italic(),
+                    test.description
+                );
+            }
+        };
 
         println!("Plugin library tests:");
-        for (test_name, test_description) in list.plugin_library_tests {
-            println_wrapped!(wrapper, "- {test_name}: {test_description}");
+        for test in list.plugin_library_tests {
+            print_test(&test);
         }
 
         println!("\nPlugin tests:");
-        for (test_name, test_description) in list.plugin_tests {
-            println_wrapped!(wrapper, "- {test_name}: {test_description}");
+        for test in list.plugin_tests {
+            print_test(&test);
         }
     }
 

@@ -1,9 +1,8 @@
-use crate::debug::fail_test;
+use crate::debug::{fail_test, record};
 use crate::plugin::util::{CHECK_POINTER, Proxy, Proxyable};
 use clap_sys::events::*;
 use std::fmt::Debug;
 use std::sync::Mutex;
-use tracing::Span;
 
 #[derive(Debug)]
 pub struct InputEventQueue(Mutex<Vec<Event>>);
@@ -111,7 +110,7 @@ impl InputEventQueue {
         let events = state.0.lock().unwrap();
         match events.get(index as usize) {
             Some(event) => {
-                Span::current().record("event", tracing::field::debug(&event));
+                record("event", &event);
                 event.header()
             }
             None => {
@@ -158,7 +157,7 @@ impl OutputEventQueue {
 
         // The monotonicity of the plugin's event insertion order is checked as part of the output
         // consistency checks
-        Span::current().record("event", tracing::field::debug(&event));
+        record("event", &event);
         state.0.lock().unwrap().push(event);
         true
     }

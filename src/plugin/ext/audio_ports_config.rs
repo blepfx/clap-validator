@@ -1,3 +1,4 @@
+use crate::debug::record;
 use crate::plugin::ext::Extension;
 use crate::plugin::ext::ambisonic::Ambisonic;
 use crate::plugin::ext::audio_ports::{AudioPort, check_audio_port_info_valid, check_audio_port_type_consistent};
@@ -154,6 +155,7 @@ impl AudioPortsConfig<'_> {
 
         unsafe {
             let mut info = clap_audio_ports_config { ..zeroed() };
+
             if !clap_call! { audio_ports_config=>get(plugin, index, &mut info) } {
                 anyhow::bail!(
                     "audio_ports_config::get({}) returned false ({} total configs)",
@@ -162,7 +164,7 @@ impl AudioPortsConfig<'_> {
                 );
             }
 
-            Ok(info)
+            Ok(record("result", info))
         }
     }
 }

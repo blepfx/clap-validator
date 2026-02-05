@@ -101,7 +101,7 @@ fn main() -> ExitCode {
 
     let result = match cli.command {
         Command::Validate(settings) => commands::validate::validate(cli.verbosity, &settings),
-        Command::List(command) => commands::list::list(cli.verbosity, &command),
+        Command::List(command) => commands::list::list(cli.verbosity, command),
 
         Command::ValidateOutOfProcess(settings) => commands::validate::validate_out_of_process(&settings),
         Command::ScanOutOfProcess(settings) => commands::list::scan_out_of_process::run(&settings),

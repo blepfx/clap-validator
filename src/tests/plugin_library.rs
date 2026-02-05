@@ -70,7 +70,7 @@ impl<'a> TestCase<'a> for PluginLibraryTestCase {
     }
 
     #[tracing::instrument(name = "PluginLibraryTestCase::run", level = "debug", skip_all, fields(
-        test_case = %self, 
+        test_case = %self,
         library_path = %library_path.display()
     ))]
     fn run(&self, library_path: Self::TestArgs) -> Result<TestStatus> {

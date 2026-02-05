@@ -3,14 +3,15 @@
 use super::{TextWrapper, println_wrapped, println_wrapped_no_indent};
 use crate::Verbosity;
 use crate::commands::list::scan_out_of_process::ScanStatus;
-use crate::plugin::index::{index_plugins, scan_plugin};
+use crate::plugin::index::{index_plugins, scan_library};
 use crate::plugin::preset_discovery::PresetFile;
+use crate::util::IteratorExt;
 use anyhow::{Context, Result};
 use clap::Subcommand;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Instant;
 use yansi::Paint;
 
 /// Commands for listing tests and data realted to the installed plugins.
@@ -24,6 +25,10 @@ pub enum ListCommand {
         /// Run the plugin indexing in-process instead of out-of-process.
         #[arg(long)]
         in_process: bool,
+        /// Paths to one or more plugins that should be loaded and scanned, optional.
+        ///
+        /// All installed plugins are crawled if this value is missing.
+        paths: Option<Vec<PathBuf>>,
     },
     /// Lists the available presets for one, more, or all installed CLAP plugins.
     Presets {
@@ -46,15 +51,19 @@ pub enum ListCommand {
     },
 }
 
-pub fn list(verbosity: Verbosity, command: &ListCommand) -> Result<ExitCode> {
+pub fn list(verbosity: Verbosity, command: ListCommand) -> Result<ExitCode> {
     match command {
-        ListCommand::Tests { json } => list_tests(*json),
-        ListCommand::Plugins { json, in_process } => list_plugins(*json, *in_process, verbosity),
+        ListCommand::Tests { json } => list_tests(json),
+        ListCommand::Plugins {
+            json,
+            in_process,
+            paths,
+        } => list_plugins(json, in_process, verbosity, paths),
         ListCommand::Presets {
             json,
             in_process,
             paths,
-        } => list_presets(*json, *in_process, verbosity, paths.clone()),
+        } => list_presets(json, in_process, verbosity, paths),
     }
 }
 
@@ -65,28 +74,10 @@ fn list_presets(json: bool, in_process: bool, verbosity: Verbosity, paths: Optio
         None => index_plugins().context("Error while crawling plugins")?,
     };
 
-    let results = if in_process {
-        plugins
-            .into_iter()
-            .map(|path| match scan_plugin(&path, true) {
-                Ok(library) => (path, ScanStatus::Success { library }),
-                Err(err) => (
-                    path,
-                    ScanStatus::Error {
-                        details: format!("{err:#}"),
-                    },
-                ),
-            })
-            .collect::<BTreeMap<_, _>>()
-    } else {
-        plugins
-            .into_par_iter()
-            .map(|path| {
-                let result = scan_out_of_process::spawn(&path, true, verbosity)?;
-                Ok((path, result))
-            })
-            .collect::<Result<BTreeMap<_, _>>>()?
-    };
+    let results = plugins
+        .into_iter()
+        .map_parallel(!in_process, |path| scan_single(path, in_process, true, verbosity))
+        .collect::<Result<BTreeMap<_, _>>>()?;
 
     if json {
         println!(
@@ -95,11 +86,7 @@ fn list_presets(json: bool, in_process: bool, verbosity: Verbosity, paths: Optio
         );
     } else {
         let mut wrapper = TextWrapper::default();
-        for (i, (plugin_path, status)) in results.into_iter().enumerate() {
-            if i > 0 {
-                println!();
-            }
-
+        for (plugin_path, status) in results {
             match status {
                 ScanStatus::Error { details } => {
                     println_wrapped!(wrapper, "{} - {}: {}", plugin_path.display(), "ERROR".red(), details);
@@ -115,11 +102,16 @@ fn list_presets(json: bool, in_process: bool, verbosity: Verbosity, paths: Optio
                     );
                 }
 
-                ScanStatus::Success { library } => {
+                ScanStatus::Success { library, duration } => {
+                    if library.preset_providers.is_empty() {
+                        continue;
+                    }
+
                     println_wrapped!(
                         wrapper,
-                        "{}: (contains {} {})",
+                        "{} {}: (contains {} {})",
                         plugin_path.display(),
+                        format!("({}ms)", duration.as_millis()).dim().bold(),
                         library.preset_providers.len(),
                         if library.preset_providers.len() == 1 {
                             "preset provider"
@@ -309,30 +301,16 @@ fn list_presets(json: bool, in_process: bool, verbosity: Verbosity, paths: Optio
 }
 
 /// Lists basic information about all installed CLAP plugins.
-fn list_plugins(json: bool, in_process: bool, verbosity: Verbosity) -> Result<ExitCode> {
-    let plugins = index_plugins().context("Error while crawling plugins")?;
-    let results = if in_process {
-        plugins
-            .into_iter()
-            .map(|path| match scan_plugin(&path, false) {
-                Ok(library) => (path, ScanStatus::Success { library }),
-                Err(err) => (
-                    path,
-                    ScanStatus::Error {
-                        details: format!("{err:#}"),
-                    },
-                ),
-            })
-            .collect::<BTreeMap<_, _>>()
-    } else {
-        plugins
-            .into_par_iter()
-            .map(|path| {
-                let result = scan_out_of_process::spawn(&path, false, verbosity)?;
-                Ok((path, result))
-            })
-            .collect::<Result<BTreeMap<_, _>>>()?
+fn list_plugins(json: bool, in_process: bool, verbosity: Verbosity, paths: Option<Vec<PathBuf>>) -> Result<ExitCode> {
+    let plugins = match paths {
+        Some(paths) => paths,
+        None => index_plugins().context("Error while crawling plugins")?,
     };
+
+    let results = plugins
+        .into_iter()
+        .map_parallel(!in_process, |path| scan_single(path, in_process, false, verbosity))
+        .collect::<Result<BTreeMap<_, _>>>()?;
 
     if json {
         println!(
@@ -361,23 +339,24 @@ fn list_plugins(json: bool, in_process: bool, verbosity: Verbosity) -> Result<Ex
                     );
                 }
 
-                ScanStatus::Success { library } => {
+                ScanStatus::Success { library, duration } => {
                     println_wrapped!(
                         wrapper,
-                        "{}: (CLAP {}.{}.{}, contains {} {})",
+                        "{} {}: (CLAP {}.{}.{}, contains {} {})",
                         plugin_path.display(),
-                        library.metadata.version.0,
-                        library.metadata.version.1,
-                        library.metadata.version.2,
-                        library.metadata.plugins.len(),
-                        if library.metadata.plugins.len() == 1 {
+                        format!("({}ms)", duration.as_millis()).dim().bold(),
+                        library.version.0,
+                        library.version.1,
+                        library.version.2,
+                        library.plugins.len(),
+                        if library.plugins.len() == 1 {
                             "plugin"
                         } else {
                             "plugins"
                         },
                     );
 
-                    for plugin in library.metadata.plugins {
+                    for plugin in library.plugins {
                         println!();
                         println_wrapped!(
                             wrapper,
@@ -454,16 +433,41 @@ fn list_tests(json: bool) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+fn scan_single(
+    path: PathBuf,
+    in_process: bool,
+    scan_presets: bool,
+    verbosity: Verbosity,
+) -> Result<(PathBuf, ScanStatus)> {
+    if in_process {
+        let start = Instant::now();
+        let status = match scan_library(&path, scan_presets) {
+            Ok(library) => ScanStatus::Success {
+                library,
+                duration: start.elapsed(),
+            },
+            Err(err) => ScanStatus::Error {
+                details: format!("{err:#}"),
+            },
+        };
+
+        Ok((path, status))
+    } else {
+        let status = scan_out_of_process::spawn(&path, scan_presets, verbosity)?;
+        Ok((path, status))
+    }
+}
+
 pub mod scan_out_of_process {
     use crate::Verbosity;
-    use crate::plugin::index::{ScannedPlugin, scan_plugin};
+    use crate::plugin::index::{ScannedLibrary, scan_library};
     use anyhow::{Context, Result};
     use clap::{Args, ValueEnum};
     use serde::{Deserialize, Serialize};
     use std::ffi::OsStr;
     use std::path::{Path, PathBuf};
     use std::process::{Command, ExitCode};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
     use wait_timeout::ChildExt;
 
     #[derive(Debug, Args)]
@@ -477,10 +481,20 @@ pub mod scan_out_of_process {
     }
 
     #[derive(Debug, Serialize, Deserialize)]
+    #[serde(rename_all = "kebab-case")]
+    #[serde(tag = "status")]
     pub enum ScanStatus {
-        Success { library: ScannedPlugin },
-        Error { details: String },
-        Crashed { details: String },
+        Success {
+            #[serde(flatten)]
+            library: ScannedLibrary,
+            duration: Duration,
+        },
+        Error {
+            details: String,
+        },
+        Crashed {
+            details: String,
+        },
     }
 
     pub fn spawn(plugin_path: &Path, scan_presets: bool, verbosity: Verbosity) -> Result<ScanStatus> {
@@ -539,8 +553,12 @@ pub mod scan_out_of_process {
     }
 
     pub fn run(settings: &Settings) -> Result<ExitCode> {
-        let result = match scan_plugin(&settings.plugin_path, settings.scan_presets) {
-            Ok(plugin) => ScanStatus::Success { library: plugin },
+        let start = Instant::now();
+        let result = match scan_library(&settings.plugin_path, settings.scan_presets) {
+            Ok(library) => ScanStatus::Success {
+                library,
+                duration: start.elapsed(),
+            },
             Err(err) => ScanStatus::Error {
                 details: format!("{err:#}"),
             },

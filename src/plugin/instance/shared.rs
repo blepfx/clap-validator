@@ -17,6 +17,7 @@ use anyhow::{Context, Result};
 use clap_sys::ext::audio_ports::*;
 use clap_sys::ext::audio_ports_config::{CLAP_EXT_AUDIO_PORTS_CONFIG, clap_host_audio_ports_config};
 use clap_sys::ext::latency::*;
+use clap_sys::ext::log::*;
 use clap_sys::ext::note_ports::*;
 use clap_sys::ext::params::*;
 use clap_sys::ext::preset_load::{CLAP_EXT_PRESET_LOAD, clap_host_preset_load};
@@ -315,6 +316,10 @@ impl PluginShared {
         is_main_thread: Some(Self::ext_thread_check_is_main_thread),
     };
 
+    const EXT_LOG: clap_host_log = clap_host_log {
+        log: Some(Self::ext_log_log),
+    };
+
     const EXT_THREAD_POOL: clap_host_thread_pool = clap_host_thread_pool {
         request_exec: Some(Self::ext_thread_pool_request_exec),
     };
@@ -337,8 +342,8 @@ impl PluginShared {
 
     #[instrument(
         name = "clap_host::get_extension", 
-        level = 1, 
-        skip_all, 
+        level = 1,
+        skip_all,
         fields(extension_id = tracing::field::Empty, found = tracing::field::Empty)
     )]
     unsafe extern "C" fn clap_get_extension(host: *const clap_host, extension_id: *const c_char) -> *const c_void {
@@ -364,6 +369,8 @@ impl PluginShared {
                 &Self::EXT_THREAD_CHECK as *const _ as *const c_void
             } else if extension_id_cstr == CLAP_EXT_THREAD_POOL {
                 &Self::EXT_THREAD_POOL as *const _ as *const c_void
+            } else if extension_id_cstr == CLAP_EXT_LOG {
+                &Self::EXT_LOG as *const _ as *const c_void
             } else if extension_id_cstr == CLAP_EXT_LATENCY {
                 &Self::EXT_LATENCY as *const _ as *const c_void
             } else if extension_id_cstr == CLAP_EXT_TAIL {
@@ -591,17 +598,44 @@ impl PluginShared {
         });
     }
 
-  //  #[instrument(name = "clap_host_thread_check::is_main_thread", level = 1, skip(host))]
+    // these 3 functions are explicitly uninstrumented to avoid overhead and unnecesary noise
     unsafe extern "C" fn ext_thread_check_is_main_thread(host: *const clap_host) -> bool {
         Self::wrap(host, |this| Ok(this.main_thread_id == std::thread::current().id())).unwrap_or(false)
     }
 
-   //  #[instrument(name = "clap_host_thread_check::is_audio_thread", level = 1, skip(host))]
     unsafe extern "C" fn ext_thread_check_is_audio_thread(host: *const clap_host) -> bool {
         Self::wrap(host, |this| {
             Ok(this.audio_thread_id.load() == Some(std::thread::current().id()))
         })
         .unwrap_or(false)
+    }
+
+    unsafe extern "C" fn ext_log_log(_host: *const clap_host, level: i32, msg: *const c_char) {
+        let msg = if msg.is_null() {
+            c"<null>"
+        } else {
+            unsafe { CStr::from_ptr(msg) }
+        };
+
+        match level {
+            CLAP_LOG_ERROR => tracing::error!(kind = "plugin", level = "error", "{}", msg.to_string_lossy()),
+            CLAP_LOG_FATAL => tracing::error!(kind = "plugin", level = "fatal", "{}", msg.to_string_lossy()),
+            CLAP_LOG_WARNING => tracing::warn!(kind = "plugin", level = "warning", "{}", msg.to_string_lossy()),
+            CLAP_LOG_INFO => tracing::info!(kind = "plugin", level = "info", "{}", msg.to_string_lossy()),
+            CLAP_LOG_DEBUG => tracing::debug!(kind = "plugin", level = "debug", "{}", msg.to_string_lossy()),
+            CLAP_LOG_HOST_MISBEHAVING => {
+                tracing::error!(kind = "plugin", level = "host-misbehaving", "{}", msg.to_string_lossy())
+            }
+            CLAP_LOG_PLUGIN_MISBEHAVING => {
+                tracing::error!(
+                    kind = "plugin",
+                    level = "plugin-misbehaving",
+                    "{}",
+                    msg.to_string_lossy()
+                )
+            }
+            _ => tracing::debug!(kind = "plugin", "{}", msg.to_string_lossy()),
+        }
     }
 
     #[instrument(name = "clap_host_latency::changed", level = 1, skip(host))]
@@ -646,7 +680,9 @@ impl PluginShared {
         Self::wrap(host, |this| {
             this.assert_main_thread()?;
             this.assert_has_extension::<AudioPortsConfig>()?;
-            this.callback_sender.send(CallbackEvent::AudioPortsConfigRescan).unwrap();
+            this.callback_sender
+                .send(CallbackEvent::AudioPortsConfigRescan)
+                .unwrap();
             Ok(())
         });
     }

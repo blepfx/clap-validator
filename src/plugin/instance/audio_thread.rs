@@ -12,11 +12,11 @@ use clap_sys::events::clap_event_transport;
 use clap_sys::plugin::clap_plugin;
 use clap_sys::process::*;
 use std::any::Any;
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc::SyncSender;
-use std::fmt::Debug;
 
 /// An audio thread equivalent to [`Plugin`]. This version only allows audio thread functions to be
 /// called. It can be constructed using [`Plugin::on_audio_thread()`].
@@ -76,9 +76,10 @@ impl Drop for PluginAudioThread<'_> {
 impl<'a> PluginAudioThread<'a> {
     pub(super) fn new(shared: Proxy<PluginShared>) -> PluginAudioThread<'a> {
         let span = tracing::info_span!(
-            "AudioThread", 
+            "AudioThread",
             plugin_id = %shared.plugin_id.to_string_lossy()
-        ).entered();
+        )
+        .entered();
 
         shared.audio_thread_id.store(Some(std::thread::current().id()));
 
@@ -173,8 +174,8 @@ impl<'a> PluginAudioThread<'a> {
     /// preconditions.
     #[tracing::instrument(
         name = "clap_plugin::process", 
-        level = 1, 
-        skip_all, 
+        level = 1,
+        skip_all,
         fields(
             frames_count = process.frames_count,
             steady_time = process.steady_time.map(|t| t as i64).unwrap_or(-1),
@@ -215,7 +216,6 @@ impl<'a> PluginAudioThread<'a> {
                 "The plugin returned an unknown 'clap_process_status' value {result} from 'clap_plugin::process()'."
             ),
         };
-
 
         Ok(record("status", result))
     }

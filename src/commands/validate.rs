@@ -96,7 +96,7 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Ex
                 wrapper,
                 "   - {} {}: {}",
                 test.name,
-                format!("({}ms)", test.duration.as_millis()).black().bold(),
+                format!("({}ms)", test.duration.as_millis()).dim().bold(),
                 test.description
             );
 

@@ -1,6 +1,6 @@
 //! Utilities and data structures for indexing plugins and presets.
 
-use crate::plugin::library::PluginLibraryMetadata;
+use crate::plugin::library::PluginMetadata;
 use crate::plugin::preset_discovery::{LocationValue, PresetFile, Soundpack};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -17,8 +17,9 @@ const PATH_SEPARATOR: char = ';';
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct ScannedPlugin {
-    pub metadata: PluginLibraryMetadata,
+pub struct ScannedLibrary {
+    pub version: (u32, u32, u32),
+    pub plugins: Vec<PluginMetadata>,
     pub preset_providers: Vec<ScannedPresets>,
 }
 
@@ -39,7 +40,7 @@ pub struct ScannedPresets {
 }
 
 /// Load the CLAP plugin at `plugin_path`, read plugin metadata, and optionally scan for presets.
-pub fn scan_plugin(plugin_path: &Path, scan_presets: bool) -> Result<ScannedPlugin> {
+pub fn scan_library(plugin_path: &Path, scan_presets: bool) -> Result<ScannedLibrary> {
     let library = crate::plugin::library::PluginLibrary::load(plugin_path)?;
     let metadata = library.metadata()?;
 
@@ -79,8 +80,9 @@ pub fn scan_plugin(plugin_path: &Path, scan_presets: bool) -> Result<ScannedPlug
         vec![]
     };
 
-    Ok(ScannedPlugin {
-        metadata,
+    Ok(ScannedLibrary {
+        version: metadata.version,
+        plugins: metadata.plugins,
         preset_providers: presets,
     })
 }

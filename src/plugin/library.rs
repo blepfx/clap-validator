@@ -39,7 +39,7 @@ pub struct PluginLibrary {
 }
 
 /// Metadata for a CLAP plugin library, which may contain multiple plugins.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct PluginLibraryMetadata {
     pub version: (u32, u32, u32),
     pub plugins: Vec<PluginMetadata>,
@@ -49,6 +49,7 @@ pub struct PluginLibraryMetadata {
 /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for a description
 /// of the fields.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
 pub struct PluginMetadata {
     pub id: String,
     pub name: String,

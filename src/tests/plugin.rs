@@ -20,39 +20,39 @@ pub enum PluginTestCase {
     #[strum(serialize = "descriptor-consistency")]
     DescriptorConsistency,
     #[strum(serialize = "features-categories")]
-    FeaturesCategories, 
+    FeaturesCategories,
     #[strum(serialize = "features-duplicates")]
-    FeaturesDuplicates, 
+    FeaturesDuplicates,
     #[strum(serialize = "layout-audio-ports-activation")]
-    LayoutAudioPortsActivation, 
+    LayoutAudioPortsActivation,
     #[strum(serialize = "layout-audio-ports-config")]
-    LayoutAudioPortsConfig, 
+    LayoutAudioPortsConfig,
     #[strum(serialize = "layout-configurable-audio-ports")]
-    LayoutConfigurableAudioPorts, 
+    LayoutConfigurableAudioPorts,
     #[strum(serialize = "process-audio-basic-out-of-place")]
-    ProcessAudioBasicOutOfPlace, 
+    ProcessAudioBasicOutOfPlace,
     #[strum(serialize = "process-audio-basic-in-place")]
     ProcessAudioBasicInPlace,
     #[strum(serialize = "process-audio-double-out-of-place")]
     ProcessAudioDoubleOutOfPlace,
     #[strum(serialize = "process-audio-double-in-place")]
-    ProcessAudioDoubleInPlace, 
+    ProcessAudioDoubleInPlace,
     #[strum(serialize = "process-sleep-constant-mask")]
     ProcessSleepConstantMask,
     #[strum(serialize = "process-sleep-process-status")]
     ProcessSleepProcessStatus,
     #[strum(serialize = "process-audio-reset-determinism")]
-    ProcessAudioResetDeterminism, 
+    ProcessAudioResetDeterminism,
     #[strum(serialize = "process-note-out-of-place-basic")]
-    ProcessNoteOutOfPlaceBasic, 
+    ProcessNoteOutOfPlaceBasic,
     #[strum(serialize = "process-note-inconsistent")]
     ProcessNoteInconsistent,
     #[strum(serialize = "process-varying-sample-rates")]
     ProcessVaryingSampleRates,
     #[strum(serialize = "process-varying-block-sizes")]
-    ProcessVaryingBlockSizes, 
+    ProcessVaryingBlockSizes,
     #[strum(serialize = "process-random-block-sizes")]
-    ProcessRandomBlockSizes, 
+    ProcessRandomBlockSizes,
     #[strum(serialize = "param-conversions")]
     ParamConversions,
     #[strum(serialize = "param-fuzz-basic")]
@@ -259,8 +259,8 @@ impl<'a> TestCase<'a> for PluginTestCase {
     }
 
     #[tracing::instrument(name = "PluginTestCase::run", level = "debug", skip_all, fields(
-        test_case = %self, 
-        plugin_id = %plugin_id, 
+        test_case = %self,
+        plugin_id = %plugin_id,
         library_path = %library_path.display()
     ))]
     fn run(&self, (library_path, plugin_id): Self::TestArgs) -> Result<TestStatus> {

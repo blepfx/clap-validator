@@ -27,10 +27,14 @@ pub struct ScannedLibrary {
 #[derive(Debug, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct ScannedPresets {
+    /// The preset provider's ID.
+    pub provider_id: String,
     /// The preset provider's name.
     pub provider_name: String,
     /// The preset provider's vendor.
     pub provider_vendor: Option<String>,
+    /// The preset provider's version.
+    pub provider_version: (u32, u32, u32),
     // All sound packs declared by the plugin.
     pub soundpacks: Vec<Soundpack>,
     // All presets declared by the plugin, indexed by their location. Represented by a tuple list
@@ -68,8 +72,10 @@ pub fn scan_library(plugin_path: &Path, scan_presets: bool) -> Result<ScannedLib
             }
 
             index.push(ScannedPresets {
+                provider_id: provider_metadata.id,
                 provider_name: provider_metadata.name,
                 provider_vendor: provider_metadata.vendor,
+                provider_version: provider_metadata.version,
                 soundpacks: declared_data.soundpacks.clone(),
                 presets: presets.into_iter().collect(),
             });

@@ -106,7 +106,7 @@ impl PluginShared {
     /// The `factory` object must be valid.
     /// The caller must ensure that this is called from the OS main thread.
     pub unsafe fn create_plugin<'a>(factory: *const clap_plugin_factory, plugin_id: &CStr) -> Result<Plugin<'a>> {
-        let span = tracing::debug_span!("Plugin", plugin_id = %plugin_id.to_string_lossy());
+        let span = tracing::trace_span!("Plugin", plugin_id = %plugin_id.to_string_lossy());
 
         let (callback_sender, callback_receiver) = channel();
         let (task_sender, task_receiver) = channel();

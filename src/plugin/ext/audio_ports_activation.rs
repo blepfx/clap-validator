@@ -1,7 +1,7 @@
-use crate::debug::record;
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::clap_call;
+use crate::util::spanned;
 use anyhow::Result;
 use clap_sys::ext::audio_ports_activation::*;
 use std::ffi::CStr;
@@ -30,48 +30,41 @@ impl<'a> Extension for AudioPortsActivation<'a> {
 impl<'a> AudioPortsActivation<'a> {
     /// TODO: extra test where we do this while processing
     #[allow(unused)]
-    #[tracing::instrument(
-        name = "clap_plugin_audio_ports_activation::can_activate_while_processing",
-        level = 1,
-        skip(self)
-        fields(result),
-    )]
     pub fn can_activate_while_processing(&self) -> bool {
         let audio_ports_activation = self.audio_ports_activation.as_ptr();
         let plugin = self.plugin.as_ptr();
-        unsafe {
-            record(
-                "result",
-                clap_call! { audio_ports_activation=>can_activate_while_processing(plugin) },
-            )
-        }
+
+        spanned!("clap_plugin_audio_ports_activation::can_activate_while_processing", {
+            unsafe {
+                clap_call! { audio_ports_activation=>can_activate_while_processing(plugin) }
+            }
+        })
     }
 
     /// Activates or deactivates audio ports while inactive.
-    #[allow(unused)]
-    #[tracing::instrument(
-        name = "clap_plugin_audio_ports_activation::set_active",
-        level = 1,
-        skip(self),
-        fields(result)
-    )]
     pub fn set_active(&self, is_input: bool, port_index: u32, is_active: bool, sample_size: u32) -> Result<()> {
         self.plugin.status().assert_inactive();
 
         let audio_ports_activation = self.audio_ports_activation.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        unsafe {
-            let success = record(
-                "result",
-                clap_call! { audio_ports_activation=>set_active(plugin, is_input, port_index, is_active, sample_size) },
-            );
-
-            if success {
-                Ok(())
-            } else {
-                anyhow::bail!("clap_plugin_audio_ports_activation::set_active returned false")
+        let result = spanned!(
+            "clap_plugin_audio_ports_activation::set_active",
+            is_input: is_input,
+            port_index: port_index,
+            is_active: is_active,
+            sample_size: sample_size,
+            {
+                unsafe {
+                    clap_call! { audio_ports_activation=>set_active(plugin, is_input, port_index, is_active, sample_size) }
+                }
             }
+        );
+
+        if result {
+            Ok(())
+        } else {
+            anyhow::bail!("clap_plugin_audio_ports_activation::set_active returned false")
         }
     }
 }

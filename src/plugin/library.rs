@@ -127,7 +127,7 @@ impl PluginLibrary {
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(path);
 
-        let span = tracing::debug_span!("PluginLibrary", library_path = %path.display()).entered();
+        let span = tracing::trace_span!("PluginLibrary", library_path = %path.display()).entered();
 
         // This is the path passed to `clap_entry::init()`. On macOS this should point to the
         // bundle, not the DSO.

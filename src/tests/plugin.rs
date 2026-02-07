@@ -23,6 +23,8 @@ pub enum PluginTestCase {
     FeaturesCategories,
     #[strum(serialize = "features-duplicates")]
     FeaturesDuplicates,
+    #[strum(serialize = "features-standard")]
+    FeaturesStandard,
     #[strum(serialize = "layout-audio-ports-activation")]
     LayoutAudioPortsActivation,
     #[strum(serialize = "layout-audio-ports-config")]
@@ -104,6 +106,9 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::FeaturesDuplicates => {
                 String::from("The plugin's features array should not contain any duplicates.")
             }
+            PluginTestCase::FeaturesStandard => String::from(
+                "Check that every unnamespaced feature that the plugin declares is part of the CLAP standard features.",
+            ),
             PluginTestCase::ProcessAudioBasicOutOfPlace => String::from(
                 "Processes random audio through the plugin with its default parameter values and tests whether the \
                  output does not contain any non-finite or subnormal values. Uses out-of-place audio processing.",
@@ -272,6 +277,7 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::DescriptorConsistency => descriptor::test_consistency(library, plugin_id),
             PluginTestCase::FeaturesCategories => descriptor::test_features_categories(library, plugin_id),
             PluginTestCase::FeaturesDuplicates => descriptor::test_features_duplicates(library, plugin_id),
+            PluginTestCase::FeaturesStandard => descriptor::test_features_standard(library, plugin_id),
             PluginTestCase::LayoutAudioPortsActivation => {
                 layout::test_layout_audio_ports_activation(library, plugin_id)
             }

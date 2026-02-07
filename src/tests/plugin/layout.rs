@@ -401,7 +401,7 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
         next_input_mask &= full_input_mask;
         next_output_mask &= full_output_mask;
 
-        let _span = tracing::debug_span!(
+        let _span = tracing::trace_span!(
             "WithAudioPortsActivation",
             input_mask = format_args!("0b{:b}", next_input_mask),
             output_mask = format_args!("0b{:b}", next_output_mask),

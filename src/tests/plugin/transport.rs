@@ -122,7 +122,7 @@ pub fn test_transport_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &
     };
 
     for &interval in INTERVALS {
-        let _span = tracing::debug_span!("WithInterval", interval).entered();
+        let _span = tracing::trace_span!("WithInterval", interval).entered();
 
         plugin
             .on_audio_thread(|plugin| -> Result<()> {

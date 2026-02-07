@@ -90,7 +90,7 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
     'param_loop: for (param_id, param_info) in param_infos {
         let param_name = &param_info.name;
 
-        let _span = tracing::debug_span!("WithParam", param_id = param_id, param_name = param_name.as_str()).entered();
+        let _span = tracing::trace_span!("WithParam", param_id = param_id, param_name = param_name.as_str()).entered();
 
         'value_loop: for i in 0..conversions_per_param {
             let starting_value = param_info.range.start()
@@ -329,7 +329,7 @@ pub fn test_param_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &str)
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
 
     for &interval in INTERVALS {
-        let _span = tracing::debug_span!("WithInterval", interval).entered();
+        let _span = tracing::trace_span!("WithInterval", interval).entered();
         let num_steps = (interval * 4).div_ceil(BUFFER_SIZE);
 
         plugin.on_audio_thread(|plugin| -> Result<()> {

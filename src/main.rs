@@ -8,6 +8,7 @@ mod commands;
 mod config;
 mod debug;
 mod plugin;
+mod term;
 mod tests;
 mod util;
 mod validator;
@@ -18,7 +19,7 @@ struct Cli {
     /// clap-validator's own logging verbosity.
     ///
     /// This can be used to silence all non-essential output, or to enable more in depth tracing.
-    #[arg(short, long, default_value = "debug")]
+    #[arg(short, long, default_value = "info")]
     verbosity: Verbosity,
 
     #[command(subcommand)]

@@ -225,7 +225,7 @@ pub fn test_process_varying_sample_rates(library: &PluginLibrary, plugin_id: &st
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
 
     for &sample_rate in SAMPLE_RATES {
-        let _span = tracing::debug_span!("WithSampleRate", sample_rate).entered();
+        let _span = tracing::trace_span!("WithSampleRate", sample_rate).entered();
 
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
@@ -274,7 +274,7 @@ pub fn test_process_varying_block_sizes(library: &PluginLibrary, plugin_id: &str
         .unwrap_or_default();
 
     for &buffer_size in BLOCK_SIZES {
-        let _span = tracing::debug_span!("WithBlockSize", buffer_size).entered();
+        let _span = tracing::trace_span!("WithBlockSize", buffer_size).entered();
 
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
@@ -380,7 +380,7 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         // first run, the "control"
-        tracing::debug_span!("RunControl").in_scope(|| {
+        tracing::trace_span!("RunControl").in_scope(|| {
             process.audio_buffers().fill_white_noise(&mut new_prng());
             process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
             process.run()
@@ -396,7 +396,7 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
         process.restart();
 
         // second run, deactivate and reactivate the plugin, see if the output changes
-        tracing::debug_span!("RunReactivate", comment = "Check if output changes after reactivation").in_scope(
+        tracing::trace_span!("RunReactivate", comment = "Check if output changes after reactivation").in_scope(
             || {
                 process.audio_buffers().fill_white_noise(&mut new_prng());
                 process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
@@ -414,7 +414,7 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
         process.reset();
 
         // third run, reset the plugin, see if the output matches the control run
-        tracing::debug_span!("RunReset", comment = "Check if output changes after clap_plugin::reset").in_scope(
+        tracing::trace_span!("RunReset", comment = "Check if output changes after clap_plugin::reset").in_scope(
             || {
                 process.audio_buffers().fill_white_noise(&mut new_prng());
                 process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
@@ -519,7 +519,7 @@ pub fn test_process_sleep_constant_mask(library: &PluginLibrary, plugin_id: &str
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         // block 1: silent inputs, see what the plugin does
-        tracing::debug_span!(
+        tracing::trace_span!(
             "BlockPrerollSilent",
             comment = "A block of silence before the initial sound, to check if the plugin marks output as constant \
                        with no tail"
@@ -530,7 +530,7 @@ pub fn test_process_sleep_constant_mask(library: &PluginLibrary, plugin_id: &str
         })?;
 
         // block 2: randomize inputs, see if the plugin tracks constant channels
-        tracing::debug_span!(
+        tracing::trace_span!(
             "BlockRandomInput",
             comment = "A block filled with white noise, to check if the plugin correctly handles non-constant input \
                        (and does not mark output as constant)"
@@ -544,7 +544,7 @@ pub fn test_process_sleep_constant_mask(library: &PluginLibrary, plugin_id: &str
 
         // block 3-40: silent inputs again, see if the plugin updates the constant mask accordingly
         // 40 blocks to give the output tail to fully decay to silence if there is any reverb/delay
-        tracing::debug_span!("BlockTailSilent", comment = "A tail of silent blocks").in_scope(|| {
+        tracing::trace_span!("BlockTailSilent", comment = "A tail of silent blocks").in_scope(|| {
             process.audio_buffers().fill_silence();
             process.add_events(note_rng.stop_all_voices(0));
             for _ in 3..=40 {

@@ -1,7 +1,7 @@
 //! Commands for validating plugins.
 
-use super::{TextWrapper, println_wrapped};
 use crate::config::Config;
+use crate::term::{Report, ReportItem};
 use crate::tests::{TestResult, TestStatus};
 use crate::{Verbosity, validator};
 use anyhow::{Context, Result};
@@ -91,15 +91,7 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Ex
     if settings.json {
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else {
-        fn print_test(wrapper: &mut TextWrapper, test: &TestResult) {
-            println_wrapped!(
-                wrapper,
-                "   - {} {}: {}",
-                test.name,
-                format!("({}ms)", test.duration.as_millis()).dim().bold(),
-                test.description
-            );
-
+        fn report_test(test: &TestResult) -> Report {
             let status_text = match test.status {
                 TestStatus::Success { .. } => "PASSED".green(),
                 TestStatus::Skipped { .. } => "SKIPPED".dim(),
@@ -108,50 +100,62 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Ex
                 TestStatus::Crashed { .. } => "CRASHED".red().bold(),
             };
 
-            let test_result = match test.status.details() {
-                Some(reason) => format!("     {status_text}: {reason}"),
-                None => format!("     {status_text}"),
+            let mut items = vec![ReportItem::Text(test.description.clone())];
+
+            if let Some(details) = test.status.details() {
+                items.push(ReportItem::Child(Report {
+                    header: "".to_string(),
+                    footer: vec![],
+                    items: vec![ReportItem::Text(details.to_string())],
+                }));
+            }
+
+            Report {
+                items,
+                header: test.name.clone(),
+                footer: vec![
+                    status_text.to_string(),
+                    format!("{}ms", test.duration.as_millis()).dim().to_string(),
+                ],
+            }
+        }
+
+        for (library_path, tests) in result.plugin_library_tests {
+            let mut items = vec![ReportItem::Text(library_path.to_string_lossy().to_string())];
+
+            for test in &tests {
+                items.push(ReportItem::Child(report_test(test)));
+            }
+
+            let group = Report {
+                header: "Plugin Library".to_string(),
+                footer: vec![format!("{} tests", tests.len())],
+                items,
             };
-            wrapper.print_auto(test_result);
+
+            println!("\n{}", group.print());
         }
 
-        let mut wrapper = TextWrapper::default();
-        if !result.plugin_library_tests.is_empty() {
-            println!("Plugin library tests:");
-            for (library_path, tests) in result.plugin_library_tests {
-                println!();
-                println_wrapped!(wrapper, " - {}", library_path.display());
+        for (plugin_id, tests) in result.plugin_tests {
+            let mut items = vec![ReportItem::Text(plugin_id)];
 
-                for test in tests {
-                    println!();
-                    print_test(&mut wrapper, &test);
-                }
+            for test in &tests {
+                items.push(ReportItem::Child(report_test(test)));
             }
 
-            println!();
+            let group = Report {
+                header: "Plugin".to_string(),
+                footer: vec![format!("{} tests", tests.len())],
+                items,
+            };
+
+            println!("\n{}", group.print());
         }
 
-        if !result.plugin_tests.is_empty() {
-            println!("Plugin tests:");
-            for (plugin_id, tests) in result.plugin_tests {
-                println!();
-                println_wrapped!(wrapper, " - {plugin_id}");
-
-                for test in tests {
-                    println!();
-                    print_test(&mut wrapper, &test);
-                }
-            }
-
-            println!();
-        }
-
-        let num_tests = tally.total();
-        println_wrapped!(
-            wrapper,
+        println!(
             "{} {} run, {} passed, {} failed, {} skipped, {} warnings",
-            num_tests,
-            if num_tests == 1 { "test" } else { "tests" },
+            tally.total(),
+            if tally.total() == 1 { "test" } else { "tests" },
             tally.num_passed,
             tally.num_failed,
             tally.num_skipped,

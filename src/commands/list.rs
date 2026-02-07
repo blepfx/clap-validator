@@ -1,10 +1,10 @@
 //! Commands for listing information about the validator or installed plugins.
 
-use super::{TextWrapper, println_wrapped, println_wrapped_no_indent};
 use crate::Verbosity;
 use crate::commands::list::scan_out_of_process::ScanStatus;
 use crate::plugin::index::{index_plugins, scan_library};
 use crate::plugin::preset_discovery::PresetFile;
+use crate::term::{Report, ReportItem};
 use crate::util::IteratorExt;
 use anyhow::{Context, Result};
 use clap::Subcommand;
@@ -85,21 +85,26 @@ fn list_presets(json: bool, in_process: bool, verbosity: Verbosity, paths: Optio
             serde_json::to_string_pretty(&results).expect("Could not format JSON")
         );
     } else {
-        let mut wrapper = TextWrapper::default();
-        for (plugin_path, status) in results {
+        for (plugin_path, status) in results.into_iter() {
             match status {
                 ScanStatus::Error { details } => {
-                    println_wrapped!(wrapper, "{} - {}: {}", plugin_path.display(), "ERROR".red(), details);
+                    let report = Report {
+                        header: plugin_path.display().to_string(),
+                        items: vec![ReportItem::Text(details)],
+                        footer: vec!["ERROR".red().to_string()],
+                    };
+
+                    println!("\n{}", report.print());
                 }
 
                 ScanStatus::Crashed { details } => {
-                    println_wrapped!(
-                        wrapper,
-                        "{} - {}: {}",
-                        plugin_path.display(),
-                        "CRASHED".red().bold(),
-                        details
-                    );
+                    let report = Report {
+                        header: plugin_path.display().to_string(),
+                        items: vec![ReportItem::Text(details)],
+                        footer: vec!["CRASHED".red().bold().to_string()],
+                    };
+
+                    println!("\n{}", report.print());
                 }
 
                 ScanStatus::Success { library, duration } => {
@@ -107,191 +112,68 @@ fn list_presets(json: bool, in_process: bool, verbosity: Verbosity, paths: Optio
                         continue;
                     }
 
-                    println_wrapped!(
-                        wrapper,
-                        "{} {}: (contains {} {})",
-                        plugin_path.display(),
-                        format!("({}ms)", duration.as_millis()).dim().bold(),
-                        library.preset_providers.len(),
-                        if library.preset_providers.len() == 1 {
-                            "preset provider"
-                        } else {
-                            "preset providers"
-                        }
-                    );
-                    println!();
+                    let mut group = Report {
+                        header: plugin_path.display().to_string(),
 
-                    for (i, provider) in library.preset_providers.into_iter().enumerate() {
-                        if i > 0 {
-                            println!();
-                        }
+                        items: vec![ReportItem::Text(format!(
+                            "CLAP {}.{}.{}",
+                            library.version.0, library.version.1, library.version.2
+                        ))],
 
-                        println_wrapped!(
-                            wrapper,
-                            " - {} ({}) (contains {} {}, {} {}):",
+                        footer: vec![
+                            "OK".green().to_string(),
+                            format!(
+                                "{} {}",
+                                library.preset_providers.len(),
+                                if library.preset_providers.len() == 1 {
+                                    "preset provider"
+                                } else {
+                                    "preset providers"
+                                }
+                            ),
+                            format!("{}ms", duration.as_millis()).dim().to_string(),
+                        ],
+                    };
+
+                    for provider in library.preset_providers {
+                        let mut report = Report {
+                            header: provider.provider_id,
+                            ..Default::default()
+                        };
+
+                        report.items.push(ReportItem::Text(format!(
+                            "{} {}.{}.{} ({})",
                             provider.provider_name,
+                            provider.provider_version.0,
+                            provider.provider_version.1,
+                            provider.provider_version.2,
                             provider.provider_vendor.as_deref().unwrap_or("unknown vendor"),
+                        )));
+
+                        report.footer.push(format!(
+                            "{} {}",
                             provider.soundpacks.len(),
                             if provider.soundpacks.len() == 1 {
                                 "soundpack"
                             } else {
                                 "soundpacks"
-                            },
+                            }
+                        ));
+
+                        report.footer.push(format!(
+                            "{} {}",
                             provider.presets.len(),
                             if provider.presets.len() == 1 {
                                 "preset"
                             } else {
                                 "presets"
-                            },
-                        );
-
-                        if !provider.soundpacks.is_empty() {
-                            println!();
-                            println!("   Soundpacks:");
-
-                            for soundpack in provider.soundpacks {
-                                println!();
-                                println_wrapped!(wrapper, "   - {} ({})", soundpack.name, soundpack.id);
-                                if let Some(description) = soundpack.description {
-                                    println_wrapped_no_indent!(wrapper, "     {}", description);
-                                }
-                                println!();
-                                println_wrapped!(
-                                    wrapper,
-                                    "     vendor: {}",
-                                    soundpack.vendor.as_deref().unwrap_or("(unknown)")
-                                );
-                                if let Some(homepage_url) = soundpack.homepage_url {
-                                    println_wrapped!(wrapper, "     homepage url: {homepage_url}");
-                                }
-                                if let Some(image_path) = soundpack.image_path {
-                                    println_wrapped!(wrapper, "     image path: {image_path}");
-                                }
-                                if let Some(release_timestamp) = soundpack.release_timestamp {
-                                    println_wrapped!(wrapper, "     released: {release_timestamp}");
-                                }
-                                println_wrapped!(wrapper, "     flags: {}", soundpack.flags);
                             }
-                        }
+                        ));
 
-                        if !provider.presets.is_empty() {
-                            println!();
-                            println!("   Presets:");
-
-                            for (preset_uri, preset_file) in provider.presets {
-                                println!();
-                                match preset_file {
-                                    PresetFile::Single(preset) => {
-                                        println_wrapped!(wrapper, "   - {}", preset_uri);
-
-                                        println!();
-                                        println_wrapped!(
-                                            wrapper,
-                                            "     {} ({})",
-                                            preset.name,
-                                            preset.plugin_ids_string()
-                                        );
-                                        if let Some(description) = preset.description {
-                                            println_wrapped_no_indent!(wrapper, "     {}", description);
-                                        }
-                                        println!();
-                                        if !preset.creators.is_empty() {
-                                            println_wrapped!(
-                                                wrapper,
-                                                "     {}: {}",
-                                                if preset.creators.len() == 1 {
-                                                    "creator"
-                                                } else {
-                                                    "creators"
-                                                },
-                                                preset.creators.join(", ")
-                                            );
-                                        }
-                                        if let Some(soundpack_id) = preset.soundpack_id {
-                                            println_wrapped!(wrapper, "     soundpack: {soundpack_id}");
-                                        }
-                                        if let Some(creation_time) = preset.creation_time {
-                                            println_wrapped!(wrapper, "     created: {creation_time}");
-                                        }
-                                        if let Some(modification_time) = preset.modification_time {
-                                            println_wrapped!(wrapper, "     modified: {modification_time}");
-                                        }
-                                        println_wrapped!(wrapper, "     flags: {}", preset.flags);
-                                        if !preset.features.is_empty() {
-                                            println_wrapped!(
-                                                wrapper,
-                                                "     features: [{}]",
-                                                preset.features.join(", ")
-                                            );
-                                        }
-                                        if !preset.extra_info.is_empty() {
-                                            println_wrapped!(wrapper, "     extra info: {:#?}", preset.extra_info);
-                                        }
-                                    }
-                                    PresetFile::Container(presets) => {
-                                        println_wrapped!(
-                                            wrapper,
-                                            "   - {} (contains {} {})",
-                                            preset_uri,
-                                            presets.len(),
-                                            if presets.len() == 1 { "preset" } else { "presets" }
-                                        );
-
-                                        for (load_key, preset) in presets {
-                                            println!();
-                                            println_wrapped!(
-                                                wrapper,
-                                                "     - {} ({}, {})",
-                                                preset.name,
-                                                load_key,
-                                                preset.plugin_ids_string()
-                                            );
-                                            if let Some(description) = preset.description {
-                                                println_wrapped_no_indent!(wrapper, "       {}", description);
-                                            }
-                                            println!();
-                                            if !preset.creators.is_empty() {
-                                                println_wrapped!(
-                                                    wrapper,
-                                                    "       {}: {}",
-                                                    if preset.creators.len() == 1 {
-                                                        "creator"
-                                                    } else {
-                                                        "creators"
-                                                    },
-                                                    preset.creators.join(", ")
-                                                );
-                                            }
-                                            if let Some(soundpack_id) = preset.soundpack_id {
-                                                println_wrapped!(wrapper, "       soundpack: {soundpack_id}");
-                                            }
-                                            if let Some(creation_time) = preset.creation_time {
-                                                println_wrapped!(wrapper, "       created: {creation_time}");
-                                            }
-                                            if let Some(modification_time) = preset.modification_time {
-                                                println_wrapped!(wrapper, "       modified: {modification_time}");
-                                            }
-                                            println_wrapped!(wrapper, "       flags: {}", preset.flags);
-                                            if !preset.features.is_empty() {
-                                                println_wrapped!(
-                                                    wrapper,
-                                                    "       features: [{}]",
-                                                    preset.features.join(", ")
-                                                );
-                                            }
-                                            if !preset.extra_info.is_empty() {
-                                                println_wrapped!(
-                                                    wrapper,
-                                                    "       extra info: {:#?}",
-                                                    preset.extra_info
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        group.items.push(ReportItem::Child(report));
                     }
+
+                    println!("\n{}", group.print());
                 }
             }
         }
@@ -318,76 +200,114 @@ fn list_plugins(json: bool, in_process: bool, verbosity: Verbosity, paths: Optio
             serde_json::to_string_pretty(&results).expect("Could not format JSON")
         );
     } else {
-        let mut wrapper = TextWrapper::default();
-        for (i, (plugin_path, status)) in results.into_iter().enumerate() {
-            if i > 0 {
-                println!();
-            }
+        let mut num_errors = 0;
+        let mut num_libraries = 0;
+        let mut num_plugins = 0;
 
+        for (plugin_path, status) in results.into_iter() {
             match status {
                 ScanStatus::Error { details } => {
-                    println_wrapped!(wrapper, "{} - {}: {}", plugin_path.display(), "ERROR".red(), details);
+                    num_errors += 1;
+
+                    let report = Report {
+                        header: plugin_path.display().to_string(),
+                        items: vec![ReportItem::Text(details)],
+                        footer: vec!["ERROR".red().to_string()],
+                    };
+
+                    println!("\n{}", report.print());
                 }
 
                 ScanStatus::Crashed { details } => {
-                    println_wrapped!(
-                        wrapper,
-                        "{} - {}: {}",
-                        plugin_path.display(),
-                        "CRASHED".red().bold(),
-                        details
-                    );
+                    num_errors += 1;
+
+                    let report = Report {
+                        header: plugin_path.display().to_string(),
+                        items: vec![ReportItem::Text(details)],
+                        footer: vec!["CRASHED".red().bold().to_string()],
+                    };
+
+                    println!("\n{}", report.print());
                 }
 
                 ScanStatus::Success { library, duration } => {
-                    println_wrapped!(
-                        wrapper,
-                        "{} {}: (CLAP {}.{}.{}, contains {} {})",
-                        plugin_path.display(),
-                        format!("({}ms)", duration.as_millis()).dim().bold(),
-                        library.version.0,
-                        library.version.1,
-                        library.version.2,
-                        library.plugins.len(),
-                        if library.plugins.len() == 1 {
-                            "plugin"
-                        } else {
-                            "plugins"
-                        },
-                    );
+                    num_libraries += 1;
+
+                    let mut group = Report {
+                        header: plugin_path.display().to_string(),
+
+                        items: vec![ReportItem::Text(format!(
+                            "CLAP {}.{}.{}",
+                            library.version.0, library.version.1, library.version.2
+                        ))],
+
+                        footer: vec![
+                            "OK".green().to_string(),
+                            format!(
+                                "{} {}",
+                                library.plugins.len(),
+                                if library.plugins.len() == 1 {
+                                    "plugin"
+                                } else {
+                                    "plugins"
+                                }
+                            ),
+                            format!("{}ms", duration.as_millis()).dim().to_string(),
+                        ],
+                    };
 
                     for plugin in library.plugins {
-                        println!();
-                        println_wrapped!(
-                            wrapper,
-                            " - {} {} ({})",
+                        num_plugins += 1;
+
+                        let mut report = Report {
+                            header: plugin.id,
+                            ..Default::default()
+                        };
+
+                        report.items.push(ReportItem::Text(format!(
+                            "{} {} ({})",
                             plugin.name,
                             plugin.version.as_deref().unwrap_or("(unknown version)"),
-                            plugin.id
-                        );
+                            plugin.vendor.as_deref().unwrap_or("unknown vendor"),
+                        )));
 
-                        // Whether it makes sense to always show optional fields or not depends on
-                        // the field
                         if let Some(description) = plugin.description {
-                            println_wrapped_no_indent!(wrapper, "   {description}");
+                            report.items.push(ReportItem::Text(description));
                         }
-                        println!();
-                        println_wrapped!(
-                            wrapper,
-                            "   vendor: {}",
-                            plugin.vendor.as_deref().unwrap_or("(unknown)")
-                        );
+
                         if let Some(manual_url) = plugin.manual_url {
-                            println_wrapped!(wrapper, "   manual url: {manual_url}");
+                            report
+                                .items
+                                .push(ReportItem::Text(format!("manual url: {}", manual_url)));
                         }
+
                         if let Some(support_url) = plugin.support_url {
-                            println_wrapped!(wrapper, "   support url: {support_url}");
+                            report
+                                .items
+                                .push(ReportItem::Text(format!("support url: {}", support_url)));
                         }
-                        println_wrapped!(wrapper, "   features: [{}]", plugin.features.join(", "));
+
+                        report
+                            .items
+                            .push(ReportItem::Text(format!("features: [{}]", plugin.features.join(", "))));
+
+                        group.items.push(ReportItem::Child(report));
                     }
+
+                    println!("\n{}", group.print());
                 }
             }
         }
+
+        println!(
+            "{} {}, {} {}, {} {}",
+            num_libraries,
+            if num_libraries == 1 { "library" } else { "libraries" },
+            num_plugins,
+            if num_plugins == 1 { "plugin" } else { "plugins" },
+            num_errors,
+            if num_errors == 1 { "error" } else { "errors" }
+        )
     }
 
     Ok(ExitCode::SUCCESS)
@@ -404,35 +324,55 @@ fn list_tests(json: bool) -> Result<ExitCode> {
             serde_json::to_string_pretty(&list).expect("Could not format JSON")
         );
     } else {
-        let mut wrapper = TextWrapper::default();
-        let mut print_test = |test: &crate::tests::TestListItem| {
-            if config.is_test_enabled(&test.name) {
-                println_wrapped!(wrapper, "- {}: {}\n", test.name.bold(), test.description);
-            } else {
-                println_wrapped!(
-                    wrapper,
-                    "- {} {}: {}\n",
-                    test.name.bold(),
-                    "disabled".dim().italic(),
-                    test.description
-                );
+        let report_test = |test: &crate::tests::TestListItem| {
+            let mut report = Report {
+                header: test.name.clone(),
+                items: vec![ReportItem::Text(test.description.clone())],
+                footer: vec![],
+            };
+
+            if !config.is_test_enabled(&test.name) {
+                report.footer.push("disabled".dim().italic().to_string());
             }
+
+            report
         };
 
-        println!("Plugin library tests:");
-        for test in list.plugin_library_tests {
-            print_test(&test);
+        let mut library = Report {
+            header: "Plugin Library".to_string(),
+            items: vec![ReportItem::Text(
+                "Tests for plugin factories, preset providers and plugin libraries (files) in general".to_string(),
+            )],
+            footer: vec![format!("{} tests", list.plugin_library_tests.len())],
+        };
+
+        let mut plugin = Report {
+            header: "Plugin".to_string(),
+            items: vec![ReportItem::Text(
+                "Tests for specific plugins within libraries, including their behavior during initialization, \
+                 deinitialization, audio processing and callback handling."
+                    .to_string(),
+            )],
+            footer: vec![format!("{} tests", list.plugin_tests.len())],
+        };
+
+        for test in &list.plugin_library_tests {
+            library.items.push(ReportItem::Child(report_test(test)));
         }
 
-        println!("\nPlugin tests:");
-        for test in list.plugin_tests {
-            print_test(&test);
+        for test in &list.plugin_tests {
+            plugin.items.push(ReportItem::Child(report_test(test)));
         }
+
+        println!("\n{}", library.print());
+        println!("\n{}", plugin.print());
     }
 
     Ok(ExitCode::SUCCESS)
 }
 
+/// Scan a single plugin library for its basic information and optionally its presets,
+/// either in-process or out-of-process depending on the `in_process` argument.
 fn scan_single(
     path: PathBuf,
     in_process: bool,

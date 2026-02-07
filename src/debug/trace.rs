@@ -11,12 +11,6 @@ use std::time::Instant;
 use tracing_core::span::{Attributes, Current, Id, Record};
 use tracing_core::{Metadata, Subscriber};
 
-static NEXT_SPAN_ID: AtomicU64 = AtomicU64::new(1);
-
-thread_local! {
-    static THREAD_DATA: RefCell<ThreadData> = RefCell::new(ThreadData::new());
-}
-
 pub struct ChromeJsonSubscriber {
     start: Instant,
     writer: Mutex<Result<File, std::io::Error>>,
@@ -73,6 +67,11 @@ impl Subscriber for ChromeJsonSubscriber {
 
             let mut args = TraceArgs::default();
             span.record(&mut args);
+
+            if let Some(file) = span.metadata().file() {
+                let line = span.metadata().line().unwrap_or(0);
+                args.values.insert("location", format!("{file}:{line}"));
+            }
 
             thread.spans.push(ThreadSpan {
                 id: id.clone(),
@@ -135,7 +134,6 @@ impl Subscriber for ChromeJsonSubscriber {
         THREAD_DATA.with_borrow_mut(|thread| {
             let mut args = TraceArgs::default();
             event.record(&mut args);
-            args.values.insert("level", format!("{:?}", event.metadata().level()));
 
             self.emit(TraceEvent {
                 name: args.values.get("message").map(|s| s.as_str()).unwrap_or("?"),
@@ -186,6 +184,12 @@ impl Subscriber for ChromeJsonSubscriber {
     }
 }
 
+static NEXT_SPAN_ID: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    static THREAD_DATA: RefCell<ThreadData> = RefCell::new(ThreadData::new());
+}
+
 /// Per-span tracer data
 struct ThreadSpan {
     /// The span's (per-program unique) ID
@@ -204,7 +208,7 @@ struct ThreadSpan {
 /// Per-thread tracer data
 struct ThreadData {
     /// Current thread display name
-    thread: String,
+    thread: Box<str>,
 
     /// A "stack" of currently active spans on this thread, in the order they were entered
     /// In most cases (FIFO) this is extremely fast, but this also allows for out-of-order/overlapping spans at the cost of O(n) lookups
@@ -214,17 +218,18 @@ struct ThreadData {
 impl ThreadData {
     pub fn new() -> Self {
         Self {
+            spans: Vec::new(),
             thread: std::thread::current()
                 .name()
                 .map(|s| s.to_string())
-                .unwrap_or_else(|| format!("{:?}", std::thread::current().id())),
-            spans: Vec::new(),
+                .unwrap_or_else(|| format!("{:?}", std::thread::current().id()))
+                .into_boxed_str(),
         }
     }
 
     /// Find a span by its ID
     fn span(&self, id: &Id) -> Option<&ThreadSpan> {
-        self.spans.iter().find(|span| &span.id == id)
+        self.spans.iter().rfind(|span| &span.id == id)
     }
 
     /// Find a span by its ID

@@ -56,6 +56,7 @@ pub struct PluginMetadata {
     pub version: Option<String>,
     pub vendor: Option<String>,
     pub description: Option<String>,
+    pub url: Option<String>,
     pub manual_url: Option<String>,
     pub support_url: Option<String>,
     pub features: Vec<String>,
@@ -75,6 +76,8 @@ impl PluginMetadata {
                 .context("Error parsing the plugin descriptor's 'vendor' field")?,
             description: unsafe { util::cstr_ptr_to_optional_string(descriptor.description) }
                 .context("Error parsing the plugin descriptor's 'description' field")?,
+            url: unsafe { util::cstr_ptr_to_optional_string(descriptor.url) }
+                .context("Error parsing the plugin descriptor's 'url' field")?,
             manual_url: unsafe { util::cstr_ptr_to_optional_string(descriptor.manual_url) }
                 .context("Error parsing the plugin descriptor's 'manual_url' field")?,
             support_url: unsafe { util::cstr_ptr_to_optional_string(descriptor.support_url) }

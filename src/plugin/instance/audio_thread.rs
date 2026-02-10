@@ -180,7 +180,7 @@ impl<'a> PluginAudioThread<'a> {
             frames_count = process.frames_count,
             steady_time = process.steady_time.map(|t| t as i64).unwrap_or(-1),
             transport = ?process.transport,
-            result = tracing::field::Empty,
+            status = tracing::field::Empty,
         )
     )]
     pub fn process(&self, process: ProcessInfo) -> Result<ProcessStatus> {

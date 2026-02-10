@@ -122,8 +122,14 @@ impl PartialPreset {
             plugin_ids: self.plugin_ids,
             soundpack_id: self.soundpack_id,
             flags: match self.flags {
-                Some(flags) => PresetFlags::Explicit(flags),
-                None => PresetFlags::Inherited(*location_flags),
+                Some(flags) => PresetFlags {
+                    flags,
+                    is_inherited: false,
+                },
+                None => PresetFlags {
+                    flags: *location_flags,
+                    is_inherited: true,
+                },
             },
             creators: self.creators,
             description: self.description,
@@ -217,39 +223,11 @@ pub struct Preset {
 /// The flags applying to a preset. These are either explicitly set for the preset or inherited from
 /// the location.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case", tag = "type")]
-pub enum PresetFlags {
-    /// The fall back to the location's flags if the provider did not explicitly set flags for the
-    /// preset.
-    Inherited(Flags),
-    /// Flags that were explicitly set for the preset.
-    Explicit(Flags),
-}
-
-impl Display for PresetFlags {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PresetFlags::Inherited(flags) => write!(f, "{flags} (inherited)"),
-            PresetFlags::Explicit(flags) => flags.fmt(f),
-        }
-    }
-}
-
-impl Preset {
-    /// Format the supported plugin IDs as a comma separated string. CLAP plugins are listed as is,
-    /// plugins for other ABIs will have the ABI prepended to them.
-    pub fn plugin_ids_string(&self) -> String {
-        let plugin_id_strings: Vec<_> = self
-            .plugin_ids
-            .iter()
-            .map(|plugin_id| match &plugin_id.abi {
-                PluginAbi::Clap => plugin_id.id.to_owned(),
-                PluginAbi::Other(abi) => format!("{}: {}", abi, plugin_id.id),
-            })
-            .collect();
-
-        plugin_id_strings.join(", ")
-    }
+#[serde(rename_all = "kebab-case")]
+pub struct PresetFlags {
+    #[serde(flatten)]
+    pub flags: Flags,
+    pub is_inherited: bool,
 }
 
 impl Proxyable for MetadataReceiver {

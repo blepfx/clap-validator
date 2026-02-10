@@ -94,47 +94,6 @@ pub struct Flags {
     pub is_favorite: bool,
 }
 
-impl Display for Flags {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut is_first_flag = true;
-
-        if self.is_factory_content {
-            write!(f, "factory content")?;
-            is_first_flag = false;
-        }
-        if self.is_user_content {
-            if is_first_flag {
-                write!(f, "user content")?;
-            } else {
-                write!(f, ", user content")?;
-            }
-            is_first_flag = false;
-        }
-        if self.is_demo_content {
-            if is_first_flag {
-                write!(f, "demo content")?;
-            } else {
-                write!(f, ", demo content")?;
-            }
-            is_first_flag = false;
-        }
-        if self.is_favorite {
-            if is_first_flag {
-                write!(f, "favorite")?;
-            } else {
-                write!(f, ", favorite")?;
-            }
-            is_first_flag = false;
-        }
-
-        if is_first_flag {
-            write!(f, "(none)")?;
-        }
-
-        Ok(())
-    }
-}
-
 impl Location {
     /// Parse a `clap_preset_discovery_location`, returning an error if the data is not valid.
     pub unsafe fn from_descriptor(descriptor: *const clap_preset_discovery_location) -> Result<Self> {
@@ -176,10 +135,8 @@ pub enum LocationValue {
 impl Display for LocationValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LocationValue::File(path) => {
-                write!(f, "CLAP_PRESET_DISCOVERY_LOCATION_FILE with path {path:?}")
-            }
-            LocationValue::Internal => write!(f, "CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN"),
+            LocationValue::File(path) => write!(f, "{}", path.to_string_lossy()),
+            LocationValue::Internal => write!(f, "<internal>"),
         }
     }
 }

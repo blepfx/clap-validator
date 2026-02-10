@@ -184,8 +184,7 @@ impl PluginShared {
     }
 
     pub fn set_status(&self, status: PluginStatus) {
-        let old_status = self.status.swap(status);
-        tracing::trace!(from = ?old_status, to = ?status, "State transition");
+        self.status.store(status);
     }
 
     #[track_caller]

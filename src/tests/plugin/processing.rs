@@ -394,6 +394,7 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
             .collect::<Vec<_>>();
 
         process.restart();
+        note_rng.reset();
 
         // second run, deactivate and reactivate the plugin, see if the output changes
         tracing::trace_span!("RunReactivate", comment = "Check if output changes after reactivation").in_scope(
@@ -412,6 +413,7 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
             .collect::<Vec<_>>();
 
         process.reset();
+        note_rng.reset();
 
         // third run, reset the plugin, see if the output matches the control run
         tracing::trace_span!("RunReset", comment = "Check if output changes after clap_plugin::reset").in_scope(
@@ -490,7 +492,7 @@ pub fn test_process_sleep_constant_mask(library: &PluginLibrary, plugin_id: &str
             };
 
             for channel in 0..buffer.channels() {
-                let is_constant = check_channel_quiet(buffer.channel(channel));
+                let is_constant = check_channel_quiet(buffer.channel(channel), true);
                 let marked_constant = buffer.get_output_constant_mask().is_channel_constant(channel);
 
                 if marked_constant && let Err(db) = is_constant {
@@ -605,78 +607,80 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
         let mut is_sleeping = false;
         let mut quiet_time = 0;
 
-        for i in 0..80 {
-            let is_quiet = (0..5).contains(&i) || (10..20).contains(&i) || (30..).contains(&i);
+        for is_quiet in [true, false, true, false, true, true] {
+            let _span = tracing::trace_span!("WithQuiet", is_quiet).entered();
 
-            if is_quiet {
-                process.add_events(note_rng.stop_all_voices(0));
-                process.audio_buffers().fill_silence();
-            } else {
-                process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
-                process.audio_buffers().fill_white_noise(&mut prng);
-            }
-
-            plugin.poll_callback(|_, event| match event {
-                CallbackEvent::RequestProcess => {
-                    is_sleeping = false;
-                    Ok(())
+            for _ in 0..10 {
+                if is_quiet {
+                    process.add_events(note_rng.stop_all_voices(0));
+                    process.audio_buffers().fill_silence();
+                } else {
+                    process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+                    process.audio_buffers().fill_white_noise(&mut prng);
                 }
 
-                _ => Ok(()),
-            })?;
+                plugin.poll_callback(|_, event| match event {
+                    CallbackEvent::RequestProcess => {
+                        is_sleeping = false;
+                        Ok(())
+                    }
 
-            let status = process.run()?;
+                    _ => Ok(()),
+                })?;
 
-            if is_sleeping && is_quiet {
-                for buffer in process.audio_buffers().iter() {
-                    let Some(output) = buffer.port().output() else {
-                        continue;
-                    };
+                let status = process.run()?;
 
-                    for channel in 0..buffer.channels() {
-                        let is_constant = check_channel_quiet(buffer.channel(channel));
-                        if let Err(db) = is_constant {
-                            anyhow::bail!(
-                                "The plugin is sleeping but output port {output}, channel {channel} contains \
-                                 non-constant data ({db:.2} dBFS)",
-                            );
+                if is_sleeping && is_quiet {
+                    for buffer in process.audio_buffers().iter() {
+                        let Some(output) = buffer.port().output() else {
+                            continue;
+                        };
+
+                        for channel in 0..buffer.channels() {
+                            let is_constant = check_channel_quiet(buffer.channel(channel), true);
+                            if let Err(db) = is_constant {
+                                anyhow::bail!(
+                                    "The plugin is sleeping but output port {output}, channel {channel} contains \
+                                     non-constant data ({db:.2} dBFS)",
+                                );
+                            }
                         }
                     }
                 }
-            }
 
-            has_ever_slept |= is_sleeping;
+                has_ever_slept |= is_sleeping;
 
-            match status {
-                ProcessStatus::Continue => is_sleeping = false,
-                ProcessStatus::Sleep => is_sleeping = true,
-                ProcessStatus::ContinueIfNotQuiet => {
-                    let is_output_quiet = process
-                        .audio_buffers()
-                        .iter()
-                        .filter(|b| b.port().output().is_some())
-                        .all(|b| b.get_output_constant_mask().are_all_channels_constant(b.channels()));
+                match status {
+                    ProcessStatus::Continue => is_sleeping = false,
+                    ProcessStatus::Sleep => is_sleeping = true,
+                    ProcessStatus::ContinueIfNotQuiet => {
+                        let is_output_quiet = process
+                            .audio_buffers()
+                            .iter()
+                            .filter(|b| b.port().output().is_some())
+                            .all(|b| b.get_output_constant_mask().are_all_channels_constant(b.channels()));
 
-                    is_sleeping = is_output_quiet;
-                    has_ever_returned_continue_if_not_quiet = true;
-                }
+                        is_sleeping = is_output_quiet;
+                        has_ever_returned_continue_if_not_quiet = true;
+                    }
 
-                ProcessStatus::Tail => {
-                    let tail = match &tail {
-                        Some(tail) => tail.get(),
-                        None => {
-                            anyhow::bail!(
-                                "Plugin returned `CLAP_PROCESS_TAIL` process status but does not implement the 'tail' \
-                                 extension."
-                            );
+                    ProcessStatus::Tail => {
+                        let tail = match &tail {
+                            Some(tail) => tail.get(),
+                            None => {
+                                anyhow::bail!(
+                                    "Plugin returned `CLAP_PROCESS_TAIL` process status but does not implement the \
+                                     'tail' extension."
+                                );
+                            }
+                        };
+
+                        is_sleeping = tail < quiet_time;
+                        if is_quiet {
+                            quiet_time += BUFFER_SIZE;
+                        } else {
+                            quiet_time = 0;
                         }
-                    };
-
-                    is_sleeping = tail < quiet_time;
-                    if is_quiet {
-                        quiet_time += BUFFER_SIZE;
-                    } else {
-                        quiet_time = 0;
                     }
                 }
             }
@@ -709,7 +713,7 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
 ///
 /// This function is designed to be very lenient in what it considers "quiet", to avoid false positives.
 /// Returns `Ok(())` if the channel is quiet, or `Err(max_amplitude_in_db)` if not.
-fn check_channel_quiet(channel: Either<&[f32], &[f64]>) -> Result<(), f64> {
+fn check_channel_quiet(channel: Either<&[f32], &[f64]>, ignore_dc: bool) -> Result<(), f64> {
     /// -60 dbfs
     const QUIET_THRESHOLD: f64 = 0.001;
 
@@ -726,7 +730,8 @@ fn check_channel_quiet(channel: Either<&[f32], &[f64]>) -> Result<(), f64> {
         }
     };
 
-    let range = (max - min) * 0.5;
+    let range = if ignore_dc { (max - min) * 0.5 } else { max.max(-min) };
+
     if range < QUIET_THRESHOLD {
         Ok(())
     } else {

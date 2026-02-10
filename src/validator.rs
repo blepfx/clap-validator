@@ -42,13 +42,13 @@ pub struct ValidationResult {
 /// Statistics for the validator.
 pub struct ValidationTally {
     /// The number of passed test cases.
-    pub num_passed: u32,
+    pub num_passed: usize,
     /// The number of failed or crashed test cases.
-    pub num_failed: u32,
+    pub num_failed: usize,
     /// The number of skipped test cases.
-    pub num_skipped: u32,
+    pub num_skipped: usize,
     /// The number of test cases resulting in a warning.
-    pub num_warnings: u32,
+    pub num_warnings: usize,
 }
 
 /// Run the validator using the specified settings. Returns an error if any of the plugin paths
@@ -338,6 +338,7 @@ impl ValidationResult {
         let mut num_failed = 0;
         let mut num_skipped = 0;
         let mut num_warnings = 0;
+
         for test in self
             .plugin_library_tests
             .values()
@@ -398,7 +399,7 @@ impl ValidationResult {
 
 impl ValidationTally {
     /// Get the total number of tests run.
-    pub fn total(&self) -> u32 {
+    pub fn total(&self) -> usize {
         self.num_passed + self.num_failed + self.num_skipped + self.num_warnings
     }
 }

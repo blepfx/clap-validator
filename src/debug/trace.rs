@@ -65,13 +65,8 @@ impl Subscriber for ChromeJsonSubscriber {
         THREAD_DATA.with_borrow_mut(|thread| {
             let id = Id::from_u64(NEXT_SPAN_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
 
-            let mut args = TraceArgs::default();
+            let mut args = TraceArgs::new(span.metadata());
             span.record(&mut args);
-
-            if let Some(file) = span.metadata().file() {
-                let line = span.metadata().line().unwrap_or(0);
-                args.values.insert("location", format!("{file}:{line}"));
-            }
 
             thread.spans.push(ThreadSpan {
                 id: id.clone(),
@@ -132,7 +127,7 @@ impl Subscriber for ChromeJsonSubscriber {
         let time = self.start.elapsed().as_micros();
 
         THREAD_DATA.with_borrow_mut(|thread| {
-            let mut args = TraceArgs::default();
+            let mut args = TraceArgs::new(event.metadata());
             event.record(&mut args);
 
             self.emit(TraceEvent {
@@ -263,6 +258,19 @@ struct TraceEvent<'a> {
 #[serde(transparent)]
 struct TraceArgs {
     values: BTreeMap<&'static str, String>,
+}
+
+impl TraceArgs {
+    pub fn new(metadata: &'static Metadata<'static>) -> Self {
+        let mut args = TraceArgs::default();
+
+        if let Some(file) = metadata.file() {
+            let line = metadata.line().unwrap_or(0);
+            args.values.insert("location", format!("{file}:{line}"));
+        }
+
+        args
+    }
 }
 
 impl tracing::field::Visit for TraceArgs {

@@ -1,31 +1,23 @@
-use std::fmt::Write;
+use crate::cli::pretty_wrap;
+use std::fmt::{Display, Write};
 use yansi::Paint;
 
 #[derive(Debug, Default)]
 pub struct Report {
     pub header: String,
-    pub items: Vec<ReportItem>,
     pub footer: Vec<String>,
+    pub items: Vec<ReportItem>,
 }
 
 #[derive(Debug)]
 pub enum ReportItem {
+    Table(Vec<(String, String)>),
     Text(String),
     Child(Report),
 }
 
 impl Report {
-    pub fn print(&self) -> String {
-        self.print_report(
-            &Charset::UNICODE,
-            match textwrap::termwidth() {
-                w if w > 40 => w - 10,
-                w => w,
-            },
-        )
-    }
-
-    fn print_report(&self, charset: &Charset, width: usize) -> String {
+    fn print_with(&self, charset: &Charset, width: usize) -> String {
         let mut result = String::new();
 
         let pipe = charset.pipe.dim();
@@ -40,7 +32,7 @@ impl Report {
         for item in &self.items {
             match item {
                 ReportItem::Text(text) => {
-                    for line in textwrap::wrap(text, width.saturating_sub(2)) {
+                    for line in pretty_wrap(text, width.saturating_sub(2)) {
                         writeln!(result, "{} {}", pipe, line).ok();
                     }
                 }
@@ -48,9 +40,28 @@ impl Report {
                 ReportItem::Child(child) => {
                     writeln!(result, "{} ", pipe).ok();
 
-                    let child = child.print_report(charset, width.saturating_sub(2));
+                    let child = child.print_with(charset, width.saturating_sub(2));
                     for line in child.lines() {
                         writeln!(result, "{} {}", pipe, line).ok();
+                    }
+                }
+
+                ReportItem::Table(rows) => {
+                    let max_key_len = rows.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
+
+                    for (key, value) in rows {
+                        for (index, line) in pretty_wrap(value, width.saturating_sub(2 + max_key_len))
+                            .into_iter()
+                            .enumerate()
+                        {
+                            let pad = if index == 0 {
+                                format!("{:width$}", key, width = max_key_len)
+                            } else {
+                                " ".repeat(max_key_len)
+                            };
+
+                            writeln!(result, "{} {} {}", pipe, pad.dim().italic(), line).ok();
+                        }
                     }
                 }
             }
@@ -69,6 +80,22 @@ impl Report {
         }
 
         result
+    }
+}
+
+impl Display for Report {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.print_with(
+                &Charset::UNICODE,
+                match textwrap::termwidth() {
+                    w if w > 40 => w - 10,
+                    w => w,
+                },
+            )
+        )
     }
 }
 

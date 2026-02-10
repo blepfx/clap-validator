@@ -1,8 +1,9 @@
 //! Commands for validating plugins.
 
+use crate::cli::{Report, ReportItem, pluralize};
 use crate::config::Config;
-use crate::term::{Report, ReportItem};
 use crate::tests::{TestResult, TestStatus};
+use crate::validator::{ValidationResult, ValidationTally};
 use crate::{Verbosity, validator};
 use anyhow::{Context, Result};
 use clap::Args;
@@ -91,76 +92,7 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Ex
     if settings.json {
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else {
-        fn report_test(test: &TestResult) -> Report {
-            let status_text = match test.status {
-                TestStatus::Success { .. } => "PASSED".green(),
-                TestStatus::Skipped { .. } => "SKIPPED".dim(),
-                TestStatus::Warning { .. } => "WARNING".yellow(),
-                TestStatus::Failed { .. } => "FAILED".red(),
-                TestStatus::Crashed { .. } => "CRASHED".red().bold(),
-            };
-
-            let mut items = vec![ReportItem::Text(test.description.clone())];
-
-            if let Some(details) = test.status.details() {
-                items.push(ReportItem::Child(Report {
-                    header: "".to_string(),
-                    footer: vec![],
-                    items: vec![ReportItem::Text(details.to_string())],
-                }));
-            }
-
-            Report {
-                items,
-                header: test.name.clone(),
-                footer: vec![
-                    status_text.to_string(),
-                    format!("{}ms", test.duration.as_millis()).dim().to_string(),
-                ],
-            }
-        }
-
-        for (library_path, tests) in result.plugin_library_tests {
-            let mut items = vec![ReportItem::Text(library_path.to_string_lossy().to_string())];
-
-            for test in &tests {
-                items.push(ReportItem::Child(report_test(test)));
-            }
-
-            let group = Report {
-                header: "Plugin Library".to_string(),
-                footer: vec![format!("{} tests", tests.len())],
-                items,
-            };
-
-            println!("\n{}", group.print());
-        }
-
-        for (plugin_id, tests) in result.plugin_tests {
-            let mut items = vec![ReportItem::Text(plugin_id)];
-
-            for test in &tests {
-                items.push(ReportItem::Child(report_test(test)));
-            }
-
-            let group = Report {
-                header: "Plugin".to_string(),
-                footer: vec![format!("{} tests", tests.len())],
-                items,
-            };
-
-            println!("\n{}", group.print());
-        }
-
-        println!(
-            "{} {} run, {} passed, {} failed, {} skipped, {} warnings",
-            tally.total(),
-            if tally.total() == 1 { "test" } else { "tests" },
-            tally.num_passed,
-            tally.num_failed,
-            tally.num_skipped,
-            tally.num_warnings
-        );
+        pretty_print(&result, &tally);
     }
 
     // If any of the tests failed, this process should exit with a failure code
@@ -176,4 +108,78 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Ex
 pub fn validate_out_of_process(settings: &OutOfProcessSettings) -> Result<ExitCode> {
     validator::validate_out_of_process(settings)?;
     Ok(ExitCode::SUCCESS)
+}
+
+fn pretty_print(result: &ValidationResult, tally: &ValidationTally) {
+    fn report_test(test: &TestResult) -> Report {
+        let status_text = match test.status {
+            TestStatus::Success { .. } => "PASSED".green(),
+            TestStatus::Skipped { .. } => "SKIPPED".dim(),
+            TestStatus::Warning { .. } => "WARNING".yellow(),
+            TestStatus::Failed { .. } => "FAILED".red(),
+            TestStatus::Crashed { .. } => "CRASHED".red().bold(),
+        };
+
+        let mut items = vec![ReportItem::Text(test.description.clone())];
+
+        if let Some(details) = test.status.details() {
+            items.push(ReportItem::Child(Report {
+                header: "".to_string(),
+                footer: vec![],
+                items: vec![ReportItem::Text(details.to_string())],
+            }));
+        }
+
+        Report {
+            items,
+            header: test.name.clone(),
+            footer: vec![
+                status_text.to_string(),
+                format!("{}ms", test.duration.as_millis()).dim().to_string(),
+            ],
+        }
+    }
+
+    for (library_path, tests) in result.plugin_library_tests.iter() {
+        let mut items = vec![ReportItem::Text(library_path.to_string_lossy().to_string())];
+
+        for test in tests {
+            items.push(ReportItem::Child(report_test(test)));
+        }
+
+        println!(
+            "\n{}",
+            Report {
+                header: "Plugin Library".to_string(),
+                footer: vec![pluralize(tests.len(), "test")],
+                items,
+            }
+        );
+    }
+
+    for (plugin_id, tests) in result.plugin_tests.iter() {
+        let mut items = vec![ReportItem::Text(plugin_id.clone())];
+
+        for test in tests {
+            items.push(ReportItem::Child(report_test(test)));
+        }
+
+        println!(
+            "\n{}",
+            Report {
+                header: "Plugin".to_string(),
+                footer: vec![pluralize(tests.len(), "test")],
+                items,
+            }
+        );
+    }
+
+    println!(
+        "{} run, {} passed, {} failed, {} skipped, {} warnings",
+        pluralize(tally.total(), "test"),
+        tally.num_passed,
+        tally.num_failed,
+        tally.num_skipped,
+        tally.num_warnings
+    );
 }

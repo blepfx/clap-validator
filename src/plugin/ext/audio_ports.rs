@@ -5,6 +5,7 @@ use crate::plugin::ext::ambisonic::Ambisonic;
 use crate::plugin::ext::surround::Surround;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::clap_call;
+use crate::util::spanned;
 use anyhow::{Context, Result};
 use clap_sys::ext::ambisonic::CLAP_PORT_AMBISONIC;
 use clap_sys::ext::audio_ports::*;
@@ -158,9 +159,11 @@ impl AudioPorts<'_> {
         let audio_ports = self.audio_ports.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        unsafe {
-            clap_call! { audio_ports=>count(plugin, is_input) }
-        }
+        spanned!("clap_plugin_audio_ports::count", is_input: is_input, {
+            unsafe {
+                clap_call! { audio_ports=>count(plugin, is_input) }
+            }
+        })
     }
 
     #[tracing::instrument(name = "clap_plugin_audio_ports::get", level = 1, skip(self))]
@@ -168,14 +171,16 @@ impl AudioPorts<'_> {
         let audio_ports = self.audio_ports.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        unsafe {
-            let mut info = clap_audio_port_info { ..zeroed() };
-            if !clap_call! { audio_ports=>get(plugin, port_index, is_input, &mut info) } {
-                return None;
+        spanned!("clap_plugin_audio_ports::get", is_input: is_input, port_index: port_index, {
+            unsafe {
+                let mut info = clap_audio_port_info { ..zeroed() };
+                if clap_call! { audio_ports=>get(plugin, port_index, is_input, &mut info) } {
+                    Some(info)
+                } else {
+                    None
+                }
             }
-
-            Some(info)
-        }
+        })
     }
 }
 

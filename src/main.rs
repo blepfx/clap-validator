@@ -4,11 +4,11 @@ use std::sync::Arc;
 use tracing::level_filters::LevelFilter;
 use yansi::Paint;
 
+mod cli;
 mod commands;
 mod config;
 mod debug;
 mod plugin;
-mod term;
 mod tests;
 mod util;
 mod validator;

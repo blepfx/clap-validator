@@ -1,11 +1,11 @@
 //! Abstractions for interacting with the `audio-ports` extension.
 
 use super::Extension;
+use crate::debug::{Recordable, Recorder, Span, record};
 use crate::plugin::ext::ambisonic::Ambisonic;
 use crate::plugin::ext::surround::Surround;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::clap_call;
-use crate::util::spanned;
 use anyhow::{Context, Result};
 use clap_sys::ext::ambisonic::CLAP_PORT_AMBISONIC;
 use clap_sys::ext::audio_ports::*;
@@ -154,33 +154,47 @@ impl AudioPorts<'_> {
         Ok(config)
     }
 
-    #[tracing::instrument(name = "clap_plugin_audio_ports::count", level = 1, skip(self))]
     fn get_raw_port_count(&self, is_input: bool) -> u32 {
         let audio_ports = self.audio_ports.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        spanned!("clap_plugin_audio_ports::count", is_input: is_input, {
-            unsafe {
-                clap_call! { audio_ports=>count(plugin, is_input) }
-            }
-        })
+        let span = Span::begin(
+            "clap_plugin_audio_ports::count",
+            record! {
+                is_input: is_input
+            },
+        );
+
+        let result = unsafe {
+            clap_call! { audio_ports=>count(plugin, is_input) }
+        };
+
+        span.finish(record!(result: result));
+        result
     }
 
-    #[tracing::instrument(name = "clap_plugin_audio_ports::get", level = 1, skip(self))]
     fn get_raw_port_info(&self, is_input: bool, port_index: u32) -> Option<clap_audio_port_info> {
         let audio_ports = self.audio_ports.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        spanned!("clap_plugin_audio_ports::get", is_input: is_input, port_index: port_index, {
-            unsafe {
-                let mut info = clap_audio_port_info { ..zeroed() };
-                if clap_call! { audio_ports=>get(plugin, port_index, is_input, &mut info) } {
-                    Some(info)
-                } else {
-                    None
-                }
+        let span = Span::begin(
+            "clap_plugin_audio_ports::get",
+            record! {
+                is_input: is_input,
+                port_index: port_index
+            },
+        );
+
+        unsafe {
+            let mut info = clap_audio_port_info { ..zeroed() };
+            if clap_call! { audio_ports=>get(plugin, port_index, is_input, &mut info) } {
+                span.finish(record!(result: info));
+                Some(info)
+            } else {
+                span.finish(record!(result: false));
+                None
             }
-        })
+        }
     }
 }
 
@@ -328,7 +342,40 @@ pub fn check_audio_port_type_consistent(
 
         Ok(())
     } else {
-        tracing::warn!("Unknown audio port type '{port_type:?}'");
+        log::warn!("Unknown audio port type '{port_type:?}'");
         Ok(())
+    }
+}
+
+impl Recordable for clap_audio_port_info {
+    fn record(&self, record: &mut dyn Recorder) {
+        record.record("id", self.id);
+        record.record("channel_count", self.channel_count);
+
+        record.record("flags.is_main", self.flags & CLAP_AUDIO_PORT_IS_MAIN != 0);
+        record.record(
+            "flags.supports_double_sample_size",
+            self.flags & CLAP_AUDIO_PORT_SUPPORTS_64BITS != 0,
+        );
+        record.record(
+            "flags.prefers_double_sample_size",
+            self.flags & CLAP_AUDIO_PORT_PREFERS_64BITS != 0,
+        );
+        record.record(
+            "flags.requires_common_sample_size",
+            self.flags & CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE != 0,
+        );
+
+        if self.port_type.is_null() {
+            record.record("port_type", "<null>");
+        } else {
+            record.record("port_type", unsafe { CStr::from_ptr(self.port_type) });
+        }
+
+        if self.in_place_pair == CLAP_INVALID_ID {
+            record.record("in_place_pair", "<invalid>");
+        } else {
+            record.record("in_place_pair", self.in_place_pair);
+        }
     }
 }

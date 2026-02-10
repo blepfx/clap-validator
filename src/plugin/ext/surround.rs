@@ -1,3 +1,4 @@
+use crate::debug::{Span, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::clap_call;
@@ -25,25 +26,33 @@ impl<'a> Extension for Surround<'a> {
 }
 
 impl<'a> Surround<'a> {
-    #[tracing::instrument(name = "clap_plugin_surround::is_channel_mask_supported", level = 1, skip(self))]
     pub fn is_channel_mask_supported(&self, channel_mask: u64) -> bool {
         let surround = self.surround.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        unsafe {
+        let span = Span::begin(
+            "clap_plugin_surround::is_channel_mask_supported",
+            record! { channel_mask: channel_mask },
+        );
+
+        let result = unsafe {
             clap_call! {
                 surround=>is_channel_mask_supported(
                     plugin,
                     channel_mask
                 )
             }
-        }
+        };
+
+        span.finish(record!(result: result));
+        result
     }
 
-    #[tracing::instrument(name = "clap_plugin_surround::get_channel_map", level = 1, skip(self))]
     pub fn get_channel_map(&self, is_input: bool, port_index: u32, channel_count: u32) -> Vec<u8> {
         let surround = self.surround.as_ptr();
         let plugin = self.plugin.as_ptr();
+
+        // TODO: add span stuff
 
         unsafe {
             let mut channel_map = vec![0u8; channel_count as usize];

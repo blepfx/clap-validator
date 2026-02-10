@@ -18,7 +18,7 @@ pub fn install_panic_hook() {
 
         match info.location() {
             Some(location) => {
-                tracing::error!(
+                log::error!(
                     target: "panic", "thread '{}' panicked at '{}': {}:{}{}",
                     thread,
                     message,
@@ -27,7 +27,7 @@ pub fn install_panic_hook() {
                     backtrace
                 );
             }
-            None => tracing::error!(
+            None => log::error!(
                 target: "panic",
                 "thread '{}' panicked at '{}'{:?}",
                 thread,

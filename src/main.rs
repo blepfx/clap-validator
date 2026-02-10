@@ -1,7 +1,5 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::process::ExitCode;
-use std::sync::Arc;
-use tracing::level_filters::LevelFilter;
 use yansi::Paint;
 
 mod cli;
@@ -72,25 +70,23 @@ fn main() -> ExitCode {
     let _ = std::fs::create_dir_all(util::validator_temp_dir());
 
     let trace_path = util::validator_temp_dir().join("trace.json");
-    let trace_writer = if matches!(&cli.command, Command::Validate(settings) if settings.trace) {
-        Some(Arc::new(debug::ChromeJsonSubscriber::new(&trace_path)))
-    } else {
-        None
-    };
+    let trace_enabled = matches!(&cli.command, Command::Validate(settings) if settings.trace);
 
-    if let Some(trace) = trace_writer.clone() {
-        tracing::subscriber::set_global_default(trace).unwrap();
-    } else {
-        tracing::subscriber::set_global_default(debug::LogStderrSubscriber::new(match cli.verbosity {
-            Verbosity::Quiet => LevelFilter::OFF,
-            Verbosity::Error => LevelFilter::ERROR,
-            Verbosity::Warn => LevelFilter::WARN,
-            Verbosity::Info => LevelFilter::INFO,
-            Verbosity::Debug => LevelFilter::DEBUG,
-            Verbosity::Trace => LevelFilter::TRACE,
-        }))
-        .unwrap();
+    // Begin instrumentation if enabled
+    if trace_enabled {
+        debug::begin_instrumentation(trace_path.to_str().unwrap());
     }
+
+    // Setup logging
+    log::set_logger(Box::leak(Box::new(debug::CustomLogger::new()))).unwrap();
+    log::set_max_level(match cli.verbosity {
+        Verbosity::Quiet => log::LevelFilter::Off,
+        Verbosity::Error => log::LevelFilter::Error,
+        Verbosity::Warn => log::LevelFilter::Warn,
+        Verbosity::Info => log::LevelFilter::Info,
+        Verbosity::Debug => log::LevelFilter::Debug,
+        Verbosity::Trace => log::LevelFilter::Trace,
+    });
 
     // Install the panic hook to log panics instead of printing them to stderr.
     debug::install_panic_hook();
@@ -116,8 +112,9 @@ fn main() -> ExitCode {
         }
     };
 
-    if let Some(trace) = trace_writer {
-        match trace.check_error() {
+    if trace_enabled {
+        match debug::check_instrumentation() {
+            Err(e) => eprintln!("{}: {}", "Failed to write trace".red().italic(), e),
             Ok(()) => eprintln!(
                 "{}",
                 format!(
@@ -127,7 +124,6 @@ fn main() -> ExitCode {
                 .dim()
                 .italic()
             ),
-            Err(e) => eprintln!("{}: {}", "Failed to write trace".red().italic(), e),
         }
     }
 

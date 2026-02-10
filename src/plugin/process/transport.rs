@@ -1,6 +1,8 @@
 use clap_sys::events::*;
 use clap_sys::fixedpoint::*;
 
+use crate::debug::{Recordable, Recorder};
+
 /// The current transport state. This can be modified between process calls to simulate
 /// transport changes.
 #[derive(Debug, Clone, Default)]
@@ -137,5 +139,78 @@ impl ConstantMask {
 impl std::fmt::Debug for ConstantMask {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ConstantMask(0b{:064b})", self.0)
+    }
+}
+
+impl Recordable for ConstantMask {
+    fn record(&self, record: &mut dyn Recorder) {
+        record.value("", &format!("0b{:064b}", self.0));
+    }
+}
+
+impl Recordable for clap_event_transport {
+    fn record(&self, record: &mut dyn Recorder) {
+        record.record("flags", format_args!("0b{:b}", self.flags));
+
+        record.record("is_playing", self.flags & CLAP_TRANSPORT_IS_PLAYING != 0);
+        record.record("is_recording", self.flags & CLAP_TRANSPORT_IS_RECORDING != 0);
+        record.record("is_within_preroll", self.flags & CLAP_TRANSPORT_IS_WITHIN_PRE_ROLL != 0);
+        record.record("is_loop_active", self.flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE != 0);
+
+        if self.flags & CLAP_TRANSPORT_HAS_TEMPO != 0 {
+            record.record("tempo", self.tempo);
+            record.record("tempo_inc", self.tempo_inc);
+        } else {
+            record.record("tempo", false);
+        }
+
+        if self.flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE != 0 {
+            record.record("time_signature", format_args!("{}/{}", self.tsig_num, self.tsig_denom));
+        } else {
+            record.record("time_signature", false);
+        }
+
+        if self.flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE != 0 {
+            record.record("bar_start", self.bar_start);
+            record.record("bar_number", self.bar_number);
+
+            record.record(
+                "song_pos_beats",
+                self.song_pos_beats as f64 / CLAP_BEATTIME_FACTOR as f64,
+            );
+
+            if self.flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE != 0 {
+                record.record(
+                    "loop_start_beats",
+                    self.loop_start_beats as f64 / CLAP_BEATTIME_FACTOR as f64,
+                );
+                record.record(
+                    "loop_end_beats",
+                    self.loop_end_beats as f64 / CLAP_BEATTIME_FACTOR as f64,
+                );
+            }
+        } else {
+            record.record("song_pos_beats", false);
+        }
+
+        if self.flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE != 0 {
+            record.record(
+                "song_pos_seconds",
+                self.song_pos_seconds as f64 / CLAP_SECTIME_FACTOR as f64,
+            );
+
+            if self.flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE != 0 {
+                record.record(
+                    "loop_start_seconds",
+                    self.loop_start_seconds as f64 / CLAP_SECTIME_FACTOR as f64,
+                );
+                record.record(
+                    "loop_end_seconds",
+                    self.loop_end_seconds as f64 / CLAP_SECTIME_FACTOR as f64,
+                );
+            }
+        } else {
+            record.record("song_pos_seconds", false);
+        }
     }
 }

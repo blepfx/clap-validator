@@ -1,7 +1,7 @@
+use crate::debug::{Recordable, Recorder, Span, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::clap_call;
-use crate::util::spanned;
 use clap_sys::ext::ambisonic::*;
 use std::ffi::CStr;
 use std::mem::zeroed;
@@ -31,23 +31,63 @@ impl<'a> Ambisonic<'a> {
         let ambisonic = self.ambisonic.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        spanned!("clap_plugin_ambisonic::is_config_supported", config: config, {
-            unsafe {
-                clap_call! { ambisonic=>is_config_supported(plugin, config) }
-            }
-        })
+        let span = Span::begin("clap_plugin_ambisonic::is_config_supported", config);
+        let result = unsafe {
+            clap_call! { ambisonic=>is_config_supported(plugin, config) }
+        };
+
+        span.finish(record!(result: result));
+        result
     }
 
     pub fn get_config(&self, is_input: bool, port_index: u32) -> Option<clap_ambisonic_config> {
         let ambisonic = self.ambisonic.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        spanned!("clap_plugin_ambisonic::get_config", is_input: is_input, port_index: port_index, {
-            unsafe {
-                let mut config = clap_ambisonic_config { ..zeroed() };
-                let result = clap_call! { ambisonic=>get_config(plugin, is_input, port_index, &mut config) };
-                if result { Some(config) } else { None }
+        let span = Span::begin(
+            "clap_plugin_ambisonic::get_config",
+            record! {
+                is_input: is_input,
+                port_index: port_index
+            },
+        );
+
+        unsafe {
+            let mut config = clap_ambisonic_config { ..zeroed() };
+            let result = clap_call! { ambisonic=>get_config(plugin, is_input, port_index, &mut config) };
+
+            if result {
+                span.finish(record!(result: config));
+                Some(config)
+            } else {
+                span.finish(record!(result: false));
+                None
             }
-        })
+        }
+    }
+}
+
+impl Recordable for clap_ambisonic_config {
+    fn record(&self, record: &mut dyn Recorder) {
+        record.record(
+            "ordering",
+            match self.ordering {
+                CLAP_AMBISONIC_ORDERING_ACN => "CLAP_AMBISONIC_ORDERING_ACN",
+                CLAP_AMBISONIC_ORDERING_FUMA => "CLAP_AMBISONIC_ORDERING_FUMA",
+                _ => "?",
+            },
+        );
+
+        record.record(
+            "normalization",
+            match self.normalization {
+                CLAP_AMBISONIC_NORMALIZATION_MAXN => "CLAP_AMBISONIC_NORMALIZATION_MAXN",
+                CLAP_AMBISONIC_NORMALIZATION_SN3D => "CLAP_AMBISONIC_NORMALIZATION_SN3D",
+                CLAP_AMBISONIC_NORMALIZATION_N3D => "CLAP_AMBISONIC_NORMALIZATION_N3D",
+                CLAP_AMBISONIC_NORMALIZATION_SN2D => "CLAP_AMBISONIC_NORMALIZATION_SN2D",
+                CLAP_AMBISONIC_NORMALIZATION_N2D => "CLAP_AMBISONIC_NORMALIZATION_N2D",
+                _ => "?",
+            },
+        );
     }
 }

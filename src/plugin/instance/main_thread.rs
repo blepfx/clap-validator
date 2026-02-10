@@ -1,3 +1,4 @@
+use crate::debug::{Span, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::{CallbackEvent, PluginAudioThread, PluginShared, PluginStatus};
 use crate::plugin::library::PluginMetadata;
@@ -42,15 +43,12 @@ pub struct Plugin<'lib> {
     /// [`on_audio_thread()`][Self::on_audio_thread()] method spawns an audio thread that is able to call
     /// the plugin's audio thread functions.
     pub(super) _thread: PhantomData<*const ()>,
-
-    /// Tracing span entered when this plugin instance was created
-    pub(super) _span: tracing::span::EnteredSpan,
 }
 
 impl Drop for Plugin<'_> {
     fn drop(&mut self) {
         if let Some(error) = self.shared.callback_error.lock().unwrap().take() {
-            tracing::warn!(
+            log::warn!(
                 "The validator's host has detected a callback error but this error has not been used as part of the \
                  test result. This could be a clap-validator bug. The error message is: {error}"
             )
@@ -67,7 +65,7 @@ impl Drop for Plugin<'_> {
 
         let plugin = self.as_ptr();
         unsafe {
-            let _span = tracing::trace_span!("clap_plugin::destroy").entered();
+            let _span = Span::begin("clap_plugin::destroy", ());
             clap_call! { plugin=>destroy(plugin) }
         }
     }
@@ -125,7 +123,6 @@ impl<'lib> Plugin<'lib> {
     ///
     /// If whatever happens on the audio thread caused main-thread callback requests to be emited,
     /// then those will be handled concurrently.
-    #[tracing::instrument(name = "Plugin::on_audio_thread", level = 1, skip(self, f))]
     pub fn on_audio_thread<T: Send, F: FnOnce(PluginAudioThread) -> T + Send>(&self, f: F) -> T {
         let result = crossbeam::scope(|s| {
             if self.shared.audio_thread_id.load().is_some() {
@@ -136,7 +133,10 @@ impl<'lib> Plugin<'lib> {
             let thread = s
                 .builder()
                 .name("audio".into())
-                .spawn(move |_| f(PluginAudioThread::new(shared)))
+                .spawn(move |_| {
+                    let _span = Span::begin("AudioThread", ());
+                    f(PluginAudioThread::new(shared))
+                })
                 .unwrap();
 
             // Handle callbacks requests on the main thread while the audio thread is running
@@ -157,10 +157,10 @@ impl<'lib> Plugin<'lib> {
     }
 
     /// Initialize the plugin. This needs to be called before doing anything else.
-    #[tracing::instrument(name = "clap_plugin::init", level = 1, skip(self))]
     pub fn init(&self) -> Result<()> {
         self.status().assert_is(PluginStatus::Uninitialized);
 
+        let _span = Span::begin("clap_plugin::init", ());
         let result = unsafe {
             clap_call! { self.as_ptr()=>init(self.as_ptr()) }
         };
@@ -182,7 +182,6 @@ impl<'lib> Plugin<'lib> {
     /// Activate the plugin. Returns an error if the plugin returned `false`. See
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
-    #[tracing::instrument(name = "clap_plugin::activate", level = 1, skip(self))]
     pub fn activate(&self, sample_rate: f64, min_buffer_size: u32, max_buffer_size: u32) -> Result<()> {
         self.status().assert_is(PluginStatus::Deactivated);
 
@@ -193,9 +192,20 @@ impl<'lib> Plugin<'lib> {
         // we need to track the `Activating` state to validate that we call clap_host_latency::changed only within the activation call.
         self.shared.set_status(PluginStatus::Activating);
 
+        let span = Span::begin(
+            "clap_plugin::activate",
+            record! {
+                sample_rate: sample_rate,
+                min_buffer_size: min_buffer_size,
+                max_buffer_size: max_buffer_size
+            },
+        );
+
         let result = unsafe {
             clap_call! { self.as_ptr()=>activate(self.as_ptr(), sample_rate, min_buffer_size, max_buffer_size) }
         };
+
+        span.finish(record!(result: result));
 
         if result {
             self.shared.set_status(PluginStatus::Activated);
@@ -209,11 +219,11 @@ impl<'lib> Plugin<'lib> {
     /// Deactivate the plugin. See
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
-    #[tracing::instrument(name = "Plugin::deactivate", level = 1, skip(self))]
     pub fn deactivate(&self) {
         self.status().assert_is(PluginStatus::Activated);
 
         unsafe {
+            let _span = Span::begin("clap_plugin::deactivate", ());
             clap_call! { self.as_ptr()=>deactivate(self.as_ptr()) }
         }
 
@@ -223,7 +233,7 @@ impl<'lib> Plugin<'lib> {
     fn poll_callback_unchecked(&self) {
         if self.shared.requested_callback.swap(false) {
             unsafe {
-                let _span = tracing::trace_span!("clap_plugin::on_main_thread").entered();
+                let _span = Span::begin("clap_plugin::on_main_thread", ());
                 clap_call! { self.as_ptr()=>on_main_thread(self.as_ptr()) }
             };
         }

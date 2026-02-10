@@ -1,3 +1,4 @@
+use crate::debug::{Span, record};
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::library::PluginLibrary;
@@ -122,7 +123,7 @@ pub fn test_transport_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &
     };
 
     for &interval in INTERVALS {
-        let _span = tracing::trace_span!("WithInterval", interval).entered();
+        let _span = Span::begin("Interval", record! { interval: interval });
 
         plugin
             .on_audio_thread(|plugin| -> Result<()> {

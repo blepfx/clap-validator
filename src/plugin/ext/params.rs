@@ -1,6 +1,7 @@
 //! Abstractions for interacting with the `params` extension.
 
 use super::Extension;
+use crate::debug::{Recordable, Recorder, Span, record};
 use crate::plugin::instance::Plugin;
 use crate::plugin::process::{InputEventQueue, OutputEventQueue};
 use crate::plugin::util::{self, Proxy, c_char_slice_to_string, clap_call};
@@ -55,18 +56,21 @@ unsafe impl Sync for Param {}
 
 impl Params<'_> {
     /// Get a parameter's value.
-    #[tracing::instrument(name = "clap_plugin_params::get_value", level = 1, skip(self))]
     pub fn get(&self, param_id: clap_id) -> Result<f64> {
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();
         let mut value = 0.0f64;
+
+        let span = Span::begin("clap_plugin_params::get_value", record! { param_id: param_id });
         let result = unsafe {
             clap_call! { params=>get_value(plugin, param_id, &mut value) }
         };
 
         if result {
+            span.finish(record!(result: value));
             Ok(value)
         } else {
+            span.finish(record!(result: false));
             anyhow::bail!("'clap_plugin_params::get_value()' returned false for parameter ID {param_id}.");
         }
     }
@@ -74,13 +78,18 @@ impl Params<'_> {
     /// Convert a parameter value's to a string. Returns `Ok(None)` if the plugin doesn't support
     /// this, or an error if the returned string did not contain any null bytes or if it isn't
     /// invalid UTF-8.
-    #[tracing::instrument(name = "clap_plugin_params::value_to_text", level = 1, skip(self))]
     pub fn value_to_text(&self, param_id: clap_id, value: f64) -> Result<Option<String>> {
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();
-        let mut string_buffer = [0; CLAP_NAME_SIZE];
-        let result = unsafe {
-            clap_call! {
+
+        let span = Span::begin(
+            "clap_plugin_params::value_to_text",
+            record! { param_id: param_id, value: value },
+        );
+
+        unsafe {
+            let mut string_buffer = [0; CLAP_NAME_SIZE];
+            let result = clap_call! {
                 params=>value_to_text(
                     plugin,
                     param_id,
@@ -88,41 +97,60 @@ impl Params<'_> {
                     string_buffer.as_mut_ptr(),
                     string_buffer.len() as u32,
                 )
-            }
-        };
+            };
 
-        if result {
-            c_char_slice_to_string(&string_buffer).map(Some).with_context(|| {
-                format!(
-                    "Could not convert the string representation of {value} for parameter {param_id} to a UTF-8 string"
-                )
-            })
-        } else {
-            Ok(None)
+            if result {
+                match c_char_slice_to_string(&string_buffer) {
+                    Ok(s) => {
+                        span.finish(record!(result: &s));
+                        Ok(Some(s))
+                    }
+                    Err(_) => {
+                        span.finish(record!(result: "<invalid utf-8>"));
+                        anyhow::bail!(
+                            "The string representation of {value} for parameter {param_id} contains invalid UTF-8."
+                        )
+                    }
+                }
+            } else {
+                span.finish(record!(result: false));
+                Ok(None)
+            }
         }
     }
 
     /// Convert a string representation for a parameter to a value. Returns an `Ok(None)` if the
     /// plugin doesn't support this, or an error if the string contained internal null bytes.
-    #[tracing::instrument(name = "clap_plugin_params::text_to_value", level = 1, skip(self))]
     pub fn text_to_value(&self, param_id: clap_id, text: &str) -> Result<Option<f64>> {
         let text_cstring = CString::new(text)?;
 
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();
-        let mut value = 0.0f64;
-        let result = unsafe {
-            clap_call! {
+
+        let span = Span::begin(
+            "clap_plugin_params::text_to_value",
+            record! { param_id: param_id, text: text },
+        );
+
+        unsafe {
+            let mut value = 0.0f64;
+            let result = clap_call! {
                 params=>text_to_value(
                     plugin,
                     param_id,
                     text_cstring.as_ptr(),
                     &mut value,
                 )
-            }
-        };
+            };
 
-        if result { Ok(Some(value)) } else { Ok(None) }
+            if result {
+                span.finish(record!(result: value));
+                Ok(Some(value))
+            } else {
+                span.finish(record!(result: false));
+                Ok(None)
+            }
+        }
     }
 
     /// Get information about all of the plugin's parameters. Returns an error if the plugin's
@@ -307,7 +335,6 @@ impl Params<'_> {
     }
 
     /// Perform a parameter flush.
-    #[tracing::instrument(name = "clap_plugin_params::flush", level = 1, skip_all)]
     pub fn flush(&self, input_events: &Proxy<InputEventQueue>, output_events: &Proxy<OutputEventQueue>) {
         // This may only be called on the audio thread when the plugin is active. This object is the
         // main thread interface for the parameters extension.
@@ -315,7 +342,9 @@ impl Params<'_> {
 
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();
+
         unsafe {
+            let _span = Span::begin("clap_plugin_params::flush", ());
             clap_call! {
                 params=>flush(
                     plugin,
@@ -326,16 +355,19 @@ impl Params<'_> {
         }
     }
 
-    #[tracing::instrument(name = "clap_plugin_params::count", level = 1, skip(self))]
     fn get_raw_param_count(&self) -> u32 {
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();
-        unsafe {
+
+        let span = Span::begin("clap_plugin_params::count", ());
+        let result = unsafe {
             clap_call! { params=>count(plugin) }
-        }
+        };
+
+        span.finish(record!(result: result));
+        result
     }
 
-    #[tracing::instrument(name = "clap_plugin_params::get_info", level = 1, skip(self))]
     fn get_raw_param_info(&self, index: u32) -> Result<clap_param_info> {
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();
@@ -396,5 +428,70 @@ impl Param {
                 | CLAP_PARAM_IS_MODULATABLE_PER_CHANNEL
                 | CLAP_PARAM_IS_MODULATABLE_PER_PORT))
             != 0
+    }
+}
+
+impl Recordable for clap_param_info {
+    fn record(&self, record: &mut dyn Recorder) {
+        record.record("id", self.id);
+
+        record.record(
+            "name",
+            c_char_slice_to_string(&self.name).unwrap_or_else(|_| "<invalid utf-8>".to_string()),
+        );
+
+        record.record(
+            "module",
+            c_char_slice_to_string(&self.module).unwrap_or_else(|_| "<invalid utf-8>".to_string()),
+        );
+
+        record.record("cookie", format_args!("{:p}", self.cookie));
+        record.record("min_value", self.min_value);
+        record.record("max_value", self.max_value);
+        record.record("default_value", self.default_value);
+
+        record.record("flags.is_hidden", self.flags & CLAP_PARAM_IS_HIDDEN != 0);
+        record.record("flags.is_readonly", self.flags & CLAP_PARAM_IS_READONLY != 0);
+        record.record("flags.is_stepped", self.flags & CLAP_PARAM_IS_STEPPED != 0);
+        record.record("flags.is_automatable", self.flags & CLAP_PARAM_IS_AUTOMATABLE != 0);
+        record.record("flags.is_periodic", self.flags & CLAP_PARAM_IS_PERIODIC != 0);
+        record.record("flags.is_bypass", self.flags & CLAP_PARAM_IS_BYPASS != 0);
+        record.record("flags.is_enum", self.flags & CLAP_PARAM_IS_ENUM != 0);
+
+        record.record(
+            "flags.is_automatable.per_note_id",
+            self.flags & CLAP_PARAM_IS_AUTOMATABLE_PER_NOTE_ID != 0,
+        );
+        record.record(
+            "flags.is_automatable.per_key",
+            self.flags & CLAP_PARAM_IS_AUTOMATABLE_PER_KEY != 0,
+        );
+        record.record(
+            "flags.is_automatable.per_channel",
+            self.flags & CLAP_PARAM_IS_AUTOMATABLE_PER_CHANNEL != 0,
+        );
+        record.record(
+            "flags.is_automatable.per_port",
+            self.flags & CLAP_PARAM_IS_AUTOMATABLE_PER_PORT != 0,
+        );
+        record.record("flags.is_modulatable", self.flags & CLAP_PARAM_IS_MODULATABLE != 0);
+        record.record(
+            "flags.is_modulatable.per_note_id",
+            self.flags & CLAP_PARAM_IS_MODULATABLE_PER_NOTE_ID != 0,
+        );
+        record.record(
+            "flags.is_modulatable.per_key",
+            self.flags & CLAP_PARAM_IS_MODULATABLE_PER_KEY != 0,
+        );
+        record.record(
+            "flags.is_modulatable.per_channel",
+            self.flags & CLAP_PARAM_IS_MODULATABLE_PER_CHANNEL != 0,
+        );
+        record.record(
+            "flags.is_modulatable.per_port",
+            self.flags & CLAP_PARAM_IS_MODULATABLE_PER_PORT != 0,
+        );
+
+        record.record("flags.requires_process", self.flags & CLAP_PARAM_REQUIRES_PROCESS != 0);
     }
 }

@@ -1,3 +1,4 @@
+use crate::debug::{Span, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::{Plugin, PluginStatus};
 use crate::plugin::util::clap_call;
@@ -27,14 +28,18 @@ impl<'a> Extension for Latency<'a> {
 
 impl<'a> Latency<'a> {
     #[allow(unused)]
-    #[tracing::instrument(name = "clap_plugin_latency::get", level = 1, skip(self))]
     pub fn get(&self) -> u32 {
         self.plugin.status().assert_is_not(PluginStatus::Deactivated);
 
         let latency = self.latency.as_ptr();
         let plugin = self.plugin.as_ptr();
-        unsafe {
+
+        let span = Span::begin("clap_plugin_latency::get", ());
+        let result = unsafe {
             clap_call! { latency=>get(plugin) }
-        }
+        };
+
+        span.finish(record!(result: result));
+        result
     }
 }

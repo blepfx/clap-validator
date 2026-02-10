@@ -1,5 +1,6 @@
 //! Contains most of the boilerplate around testing audio processing.
 
+use crate::debug::{Span, record};
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::ext::tail::Tail;
@@ -10,7 +11,7 @@ use crate::tests::TestStatus;
 use crate::tests::rng::{NoteGenerator, new_prng};
 use anyhow::{Context, Result};
 use either::Either;
-use rand::Rng;
+use rand::RngExt;
 
 const BUFFER_SIZE: u32 = 512;
 
@@ -225,7 +226,7 @@ pub fn test_process_varying_sample_rates(library: &PluginLibrary, plugin_id: &st
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
 
     for &sample_rate in SAMPLE_RATES {
-        let _span = tracing::trace_span!("WithSampleRate", sample_rate).entered();
+        let _span = Span::begin("SampleRate", record! { sample_rate: sample_rate });
 
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
@@ -274,7 +275,7 @@ pub fn test_process_varying_block_sizes(library: &PluginLibrary, plugin_id: &str
         .unwrap_or_default();
 
     for &buffer_size in BLOCK_SIZES {
-        let _span = tracing::trace_span!("WithBlockSize", buffer_size).entered();
+        let _span = Span::begin("BlockSize", record! { buffer_size: buffer_size });
 
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
@@ -380,11 +381,11 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         // first run, the "control"
-        tracing::trace_span!("RunControl").in_scope(|| {
-            process.audio_buffers().fill_white_noise(&mut new_prng());
-            process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
-            process.run()
-        })?;
+        let span = Span::begin("RunControl", ());
+        process.audio_buffers().fill_white_noise(&mut new_prng());
+        process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
+        process.run()?;
+        span.finish(());
 
         let output_control = process
             .audio_buffers()
@@ -397,13 +398,11 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
         note_rng.reset();
 
         // second run, deactivate and reactivate the plugin, see if the output changes
-        tracing::trace_span!("RunReactivate", comment = "Check if output changes after reactivation").in_scope(
-            || {
-                process.audio_buffers().fill_white_noise(&mut new_prng());
-                process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
-                process.run()
-            },
-        )?;
+        let span = Span::begin("RunReactivate", ());
+        process.audio_buffers().fill_white_noise(&mut new_prng());
+        process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
+        process.run()?;
+        span.finish(());
 
         let output_reactivated = process
             .audio_buffers()
@@ -416,13 +415,11 @@ pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: 
         note_rng.reset();
 
         // third run, reset the plugin, see if the output matches the control run
-        tracing::trace_span!("RunReset", comment = "Check if output changes after clap_plugin::reset").in_scope(
-            || {
-                process.audio_buffers().fill_white_noise(&mut new_prng());
-                process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
-                process.run()
-            },
-        )?;
+        let span = Span::begin("RunReset", ());
+        process.audio_buffers().fill_white_noise(&mut new_prng());
+        process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
+        process.run()?;
+        span.finish(());
 
         let output_reset = process
             .audio_buffers()
@@ -521,41 +518,31 @@ pub fn test_process_sleep_constant_mask(library: &PluginLibrary, plugin_id: &str
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         // block 1: silent inputs, see what the plugin does
-        tracing::trace_span!(
-            "BlockPrerollSilent",
-            comment = "A block of silence before the initial sound, to check if the plugin marks output as constant \
-                       with no tail"
-        )
-        .in_scope(|| {
-            process.run()?;
-            check_buffers(process.audio_buffers()).context("Block preroll silent")
-        })?;
+        let span = Span::begin("BlockPrerollSilent", ());
+        process.run()?;
+        check_buffers(process.audio_buffers()).context("Block preroll silent")?;
+        span.finish(());
 
         // block 2: randomize inputs, see if the plugin tracks constant channels
-        tracing::trace_span!(
-            "BlockRandomInput",
-            comment = "A block filled with white noise, to check if the plugin correctly handles non-constant input \
-                       (and does not mark output as constant)"
-        )
-        .in_scope(|| {
-            process.audio_buffers().fill_white_noise(&mut prng);
-            process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
-            process.run()?;
-            check_buffers(process.audio_buffers()).context("Block random input")
-        })?;
+        let span = Span::begin("BlockActiveInput", ());
+        process.audio_buffers().fill_white_noise(&mut prng);
+        process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+        process.run()?;
+        check_buffers(process.audio_buffers()).context("Block random input")?;
+        span.finish(());
 
         // block 3-40: silent inputs again, see if the plugin updates the constant mask accordingly
         // 40 blocks to give the output tail to fully decay to silence if there is any reverb/delay
-        tracing::trace_span!("BlockTailSilent", comment = "A tail of silent blocks").in_scope(|| {
-            process.audio_buffers().fill_silence();
-            process.add_events(note_rng.stop_all_voices(0));
-            for _ in 3..=40 {
-                process.run()?;
-                check_buffers(process.audio_buffers())?;
-            }
+        let span = Span::begin("BlockTailSilent", ());
+        process.audio_buffers().fill_silence();
+        process.add_events(note_rng.stop_all_voices(0));
+        for _ in 3..=40 {
+            process.run()?;
+            check_buffers(process.audio_buffers())?;
+        }
+        span.finish(());
 
-            Ok(())
-        })
+        Ok(())
     })?;
 
     plugin.poll_callback(|_| Ok(()))?;
@@ -608,7 +595,11 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
         let mut quiet_time = 0;
 
         for is_quiet in [true, false, true, false, true, true] {
-            let _span = tracing::trace_span!("WithQuiet", is_quiet).entered();
+            let _span = if is_quiet {
+                Span::begin("BlockQuiet", ())
+            } else {
+                Span::begin("BlockActive", ())
+            };
 
             for _ in 0..10 {
                 if is_quiet {

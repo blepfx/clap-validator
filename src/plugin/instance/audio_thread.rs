@@ -1,7 +1,7 @@
 //! Abstractions for single CLAP plugin instances for audio thread interactions.
 
 use super::{Plugin, PluginStatus};
-use crate::debug::record;
+use crate::debug::{Span, from_fn, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::{CallbackEvent, MainThreadTask, PluginShared};
 use crate::plugin::process::{InputEventQueue, OutputEventQueue};
@@ -30,8 +30,6 @@ pub struct PluginAudioThread<'a> {
     /// To honor CLAP's thread safety guidelines, the thread this object was created from is
     /// designated the 'audio thread', and this object cannot be shared with other threads.
     _send_sync_marker: PhantomData<*const ()>,
-
-    _span: tracing::span::EnteredSpan,
 }
 
 /// The equivalent of `clap_process_status`, minus the `CLAP_PROCESS_ERROR` value as this is already
@@ -75,19 +73,12 @@ impl Drop for PluginAudioThread<'_> {
 
 impl<'a> PluginAudioThread<'a> {
     pub(super) fn new(shared: Proxy<PluginShared>) -> PluginAudioThread<'a> {
-        let span = tracing::info_span!(
-            "AudioThread",
-            plugin_id = %shared.plugin_id.to_string_lossy()
-        )
-        .entered();
-
         shared.audio_thread_id.store(Some(std::thread::current().id()));
 
         PluginAudioThread {
             shared,
             _plugin_marker: PhantomData,
             _send_sync_marker: PhantomData,
-            _span: span,
         }
     }
 
@@ -116,7 +107,6 @@ impl<'a> PluginAudioThread<'a> {
     /// for the task to complete and return its result.
     ///
     /// TODO: this could be optimized and the 'static requirement dropped.
-    #[tracing::instrument(name = "PluginAudioThread::on_main_thread", level = 1, skip(self, callback))]
     pub fn on_main_thread<F: FnOnce(&Plugin) -> T + Send, T: Send + 'static>(&self, callback: F) -> T {
         struct Context<F, T> {
             sender: SyncSender<Result<T, Box<dyn Any + Send>>>,
@@ -152,13 +142,15 @@ impl<'a> PluginAudioThread<'a> {
     /// Prepare for audio processing. Returns an error if the plugin returned `false`. See
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
-    #[tracing::instrument(name = "clap_plugin::start_processing", level = 1, skip(self))]
     pub fn start_processing(&self) -> Result<()> {
         self.status().assert_is(PluginStatus::Activated);
 
+        let span = Span::begin("clap_plugin::start_processing", ());
         let result = unsafe {
             clap_call! { self.as_ptr()=>start_processing(self.as_ptr()) }
         };
+
+        span.finish(record!(result: result));
 
         if result {
             self.shared.set_status(PluginStatus::Processing);
@@ -172,21 +164,57 @@ impl<'a> PluginAudioThread<'a> {
     /// status code, then this will return an error. See
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
-    #[tracing::instrument(
-        name = "clap_plugin::process", 
-        level = 1,
-        skip_all,
-        fields(
-            frames_count = process.frames_count,
-            steady_time = process.steady_time.map(|t| t as i64).unwrap_or(-1),
-            transport = ?process.transport,
-            status = tracing::field::Empty,
-        )
-    )]
     pub fn process(&self, process: ProcessInfo) -> Result<ProcessStatus> {
         self.status().assert_is(PluginStatus::Processing);
 
         self.shared.is_currently_in_process_call.store(true);
+
+        let span = Span::begin(
+            "clap_plugin::process",
+            from_fn(|record| {
+                record.record("frames_count", process.frames_count);
+                record.record("steady_time", process.steady_time.map(|t| t as i64).unwrap_or(-1));
+
+                if let Some(transport) = process.transport {
+                    record.record("transport", transport);
+                }
+
+                for i in 0..process.audio_inputs.len() {
+                    record.record(
+                        &format!("audio_input.{i}.channel_count"),
+                        process.audio_inputs[i].channel_count,
+                    );
+                    record.record(
+                        &format!("audio_input.{i}.data32"),
+                        format_args!("{:p}", process.audio_inputs[i].data32),
+                    );
+                    record.record(
+                        &format!("audio_input.{i}.data64"),
+                        format_args!("{:p}", process.audio_inputs[i].data64),
+                    );
+                    record.record(
+                        &format!("audio_input.{i}.constant_mask"),
+                        format_args!("0b{:b}", process.audio_inputs[i].constant_mask),
+                    );
+                    record.record(&format!("audio_input.{i}.latency"), process.audio_inputs[i].latency);
+                }
+
+                for i in 0..process.audio_outputs.len() {
+                    record.record(
+                        &format!("audio_output.{i}.channel_count"),
+                        process.audio_outputs[i].channel_count,
+                    );
+                    record.record(
+                        &format!("audio_output.{i}.data32"),
+                        format_args!("{:p}", process.audio_outputs[i].data32),
+                    );
+                    record.record(
+                        &format!("audio_output.{i}.data64"),
+                        format_args!("{:p}", process.audio_outputs[i].data64),
+                    );
+                }
+            }),
+        );
 
         let result = unsafe {
             clap_call! { self.as_ptr()=>process(self.as_ptr(), &clap_process {
@@ -202,30 +230,39 @@ impl<'a> PluginAudioThread<'a> {
             }) }
         };
 
+        span.finish(record!(
+            result: match result {
+                CLAP_PROCESS_ERROR => "CLAP_PROCESS_ERROR",
+                CLAP_PROCESS_CONTINUE => "CLAP_PROCESS_CONTINUE",
+                CLAP_PROCESS_CONTINUE_IF_NOT_QUIET => "CLAP_PROCESS_CONTINUE_IF_NOT_QUIET",
+                CLAP_PROCESS_TAIL => "CLAP_PROCESS_TAIL",
+                CLAP_PROCESS_SLEEP => "CLAP_PROCESS_SLEEP",
+                _ => "UNKNOWN",
+            }
+        ));
+
         self.shared.is_currently_in_process_call.store(false);
 
-        let result = match result {
-            CLAP_PROCESS_ERROR => {
-                anyhow::bail!("The plugin returned 'CLAP_PROCESS_ERROR' from 'clap_plugin::process()'.")
-            }
+        Ok(match result {
             CLAP_PROCESS_CONTINUE => ProcessStatus::Continue,
             CLAP_PROCESS_CONTINUE_IF_NOT_QUIET => ProcessStatus::ContinueIfNotQuiet,
             CLAP_PROCESS_TAIL => ProcessStatus::Tail,
             CLAP_PROCESS_SLEEP => ProcessStatus::Sleep,
+            CLAP_PROCESS_ERROR => {
+                anyhow::bail!("The plugin returned 'CLAP_PROCESS_ERROR' from 'clap_plugin::process()'.")
+            }
             result => anyhow::bail!(
                 "The plugin returned an unknown 'clap_process_status' value {result} from 'clap_plugin::process()'."
             ),
-        };
-
-        Ok(record("status", result))
+        })
     }
 
     /// Reset the internal state of the plugin.
-    #[tracing::instrument(name = "clap_plugin::reset", level = 1, skip(self))]
     pub fn reset(&self) {
         self.status().assert_active();
 
         unsafe {
+            let _span = Span::begin("clap_plugin::reset", ());
             clap_call! { self.as_ptr()=>reset(self.as_ptr()) }
         };
     }
@@ -233,11 +270,11 @@ impl<'a> PluginAudioThread<'a> {
     /// Stop processing audio. See
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
-    #[tracing::instrument(name = "clap_plugin::stop_processing", level = 1, skip(self))]
     pub fn stop_processing(&self) {
         self.status().assert_is(PluginStatus::Processing);
 
         unsafe {
+            let _span = Span::begin("clap_plugin::stop_processing", ());
             clap_call! { self.as_ptr()=>stop_processing(self.as_ptr()) }
         };
 

@@ -1,6 +1,7 @@
 //! Abstractions for interacting with the `note-ports` extension.
 
 use super::Extension;
+use crate::debug::{Recordable, Span, record};
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::clap_call;
 use anyhow::{Context, Result};
@@ -93,35 +94,53 @@ impl NotePorts<'_> {
         Ok(config)
     }
 
-    #[tracing::instrument(name = "clap_plugin_note_ports::count", level = 1, skip(self))]
     fn get_raw_port_count(&self, is_input: bool) -> u32 {
         let note_ports = self.note_ports.as_ptr();
         let plugin = self.plugin.as_ptr();
-        unsafe {
+
+        let span = Span::begin(
+            "clap_plugin_note_ports::count",
+            record! {
+                is_input: is_input
+            },
+        );
+
+        let result = unsafe {
             clap_call! { note_ports=>count(plugin, is_input) }
-        }
+        };
+
+        span.finish(record!(result: result));
+        result
     }
 
-    #[tracing::instrument(name = "clap_plugin_note_ports::get", level = 1, skip(self))]
     fn get_raw_port_info(&self, is_input: bool, port_index: u32) -> Result<clap_note_port_info> {
         let note_ports = self.note_ports.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        let mut info: clap_note_port_info = unsafe { std::mem::zeroed() };
-        let success = unsafe {
-            clap_call! { note_ports=>get(plugin, port_index, is_input, &mut info) }
-        };
+        let span = Span::begin(
+            "clap_plugin_note_ports::get",
+            record! {
+                is_input: is_input,
+                port_index: port_index
+            },
+        );
 
-        if !success {
-            anyhow::bail!(
-                "Plugin returned false when querying {} note port {port_index} ({} total {} ports).",
-                if is_input { "input" } else { "output" },
-                self.get_raw_port_count(is_input),
-                if is_input { "input" } else { "output" }
-            );
+        unsafe {
+            let mut info = clap_note_port_info { ..std::mem::zeroed() };
+            let result = clap_call! { note_ports=>get(plugin, port_index, is_input, &mut info) };
+            if result {
+                span.finish(record!(result: info));
+                Ok(info)
+            } else {
+                span.finish(record!(result: false));
+                anyhow::bail!(
+                    "Plugin returned false when querying {} note port {port_index} ({} total {} ports).",
+                    if is_input { "input" } else { "output" },
+                    self.get_raw_port_count(is_input),
+                    if is_input { "input" } else { "output" }
+                );
+            }
         }
-
-        Ok(info)
     }
 }
 
@@ -162,4 +181,44 @@ fn check_note_port_valid(info: &clap_note_port_info) -> Result<NotePort> {
             .filter(|flag| (info.supported_dialects & flag) != 0)
             .collect(),
     })
+}
+
+impl Recordable for clap_note_port_info {
+    fn record(&self, record: &mut dyn crate::debug::Recorder) {
+        record.record("id", self.id);
+
+        record.record(
+            "supported_dialects.clap",
+            self.supported_dialects & CLAP_NOTE_DIALECT_CLAP != 0,
+        );
+        record.record(
+            "supported_dialects.midi",
+            self.supported_dialects & CLAP_NOTE_DIALECT_MIDI != 0,
+        );
+        record.record(
+            "supported_dialects.midi_mpe",
+            self.supported_dialects & CLAP_NOTE_DIALECT_MIDI_MPE != 0,
+        );
+        record.record(
+            "supported_dialects.midi2",
+            self.supported_dialects & CLAP_NOTE_DIALECT_MIDI2 != 0,
+        );
+
+        record.record(
+            "preferred_dialect.clap",
+            self.preferred_dialect & CLAP_NOTE_DIALECT_CLAP != 0,
+        );
+        record.record(
+            "preferred_dialect.midi",
+            self.preferred_dialect & CLAP_NOTE_DIALECT_MIDI != 0,
+        );
+        record.record(
+            "preferred_dialect.midi_mpe",
+            self.preferred_dialect & CLAP_NOTE_DIALECT_MIDI_MPE != 0,
+        );
+        record.record(
+            "preferred_dialect.midi2",
+            self.preferred_dialect & CLAP_NOTE_DIALECT_MIDI2 != 0,
+        );
+    }
 }

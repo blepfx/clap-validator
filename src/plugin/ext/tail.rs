@@ -1,3 +1,4 @@
+use crate::debug::{Span, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::PluginAudioThread;
 use crate::plugin::util::clap_call;
@@ -25,13 +26,16 @@ impl<'a> Extension for Tail<'a> {
 }
 
 impl<'a> Tail<'a> {
-    #[tracing::instrument(name = "clap_plugin_tail::get", level = 1, skip(self))]
     pub fn get(&self) -> u32 {
         let tail = self.tail.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        unsafe {
+        let span = Span::begin("clap_plugin_tail::get", ());
+        let result = unsafe {
             clap_call! { tail=>get(plugin) }
-        }
+        };
+
+        span.finish(record!(result: result));
+        result
     }
 }

@@ -37,14 +37,3 @@ pub trait IteratorExt: Iterator {
         .into_iter()
     }
 }
-
-macro_rules! spanned {
-    ($name:literal, $($key:ident: $value:expr,)* $body:block) => {{
-        let span = tracing::trace_span!($name, $($key = ?$value,)* result = tracing::field::Empty).entered();
-        let result = $body;
-        span.record("result", &tracing::field::debug(&result));
-        result
-    }};
-}
-
-pub(crate) use spanned;

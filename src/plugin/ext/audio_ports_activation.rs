@@ -1,7 +1,7 @@
+use crate::debug::{Span, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::clap_call;
-use crate::util::spanned;
 use anyhow::Result;
 use clap_sys::ext::audio_ports_activation::*;
 use std::ffi::CStr;
@@ -34,11 +34,13 @@ impl<'a> AudioPortsActivation<'a> {
         let audio_ports_activation = self.audio_ports_activation.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        spanned!("clap_plugin_audio_ports_activation::can_activate_while_processing", {
-            unsafe {
-                clap_call! { audio_ports_activation=>can_activate_while_processing(plugin) }
-            }
-        })
+        let span = Span::begin("clap_plugin_audio_ports_activation::can_activate_while_processing", ());
+        let result = unsafe {
+            clap_call! { audio_ports_activation=>can_activate_while_processing(plugin) }
+        };
+
+        span.finish(record!(result: result));
+        result
     }
 
     /// Activates or deactivates audio ports while inactive.
@@ -48,18 +50,21 @@ impl<'a> AudioPortsActivation<'a> {
         let audio_ports_activation = self.audio_ports_activation.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        let result = spanned!(
+        let span = Span::begin(
             "clap_plugin_audio_ports_activation::set_active",
-            is_input: is_input,
-            port_index: port_index,
-            is_active: is_active,
-            sample_size: sample_size,
-            {
-                unsafe {
-                    clap_call! { audio_ports_activation=>set_active(plugin, is_input, port_index, is_active, sample_size) }
-                }
-            }
+            record! {
+                is_input: is_input,
+                port_index: port_index,
+                is_active: is_active,
+                sample_size: sample_size
+            },
         );
+
+        let result = unsafe {
+            clap_call! { audio_ports_activation=>set_active(plugin, is_input, port_index, is_active, sample_size) }
+        };
+
+        span.finish(record!(result: result));
 
         if result {
             Ok(())

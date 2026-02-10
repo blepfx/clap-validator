@@ -1,6 +1,7 @@
 //! Tests for individual plugin instances.
 
 use super::TestCase;
+use crate::debug::{Span, record};
 use crate::plugin::library::PluginLibrary;
 use crate::tests::TestStatus;
 use anyhow::{Context, Result};
@@ -263,12 +264,16 @@ impl<'a> TestCase<'a> for PluginTestCase {
         }
     }
 
-    #[tracing::instrument(name = "PluginTestCase::run", level = "debug", skip_all, fields(
-        test_case = %self,
-        plugin_id = %plugin_id,
-        library_path = %library_path.display()
-    ))]
     fn run(&self, (library_path, plugin_id): Self::TestArgs) -> Result<TestStatus> {
+        let name = self.to_string();
+        let _span = Span::begin(
+            &name,
+            record! {
+                library_path: library_path.display().to_string(),
+                plugin_id: plugin_id
+            },
+        );
+
         // SAFETY: This is called on the main thread.
         let library = &PluginLibrary::load(library_path)
             .with_context(|| format!("Could not load '{}'", library_path.display()))?;

@@ -1,3 +1,4 @@
+use crate::debug::{Recordable, Recorder, Span, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::clap_call;
@@ -28,18 +29,32 @@ impl<'a> Extension for VoiceInfo<'a> {
 
 impl<'a> VoiceInfo<'a> {
     #[allow(unused)]
-    #[tracing::instrument(name = "clap_plugin_voice_info::get", level = 1, skip(self))]
     pub fn get(&self) -> Option<clap_voice_info> {
         let voice_info = self.voice_info.as_ptr();
         let plugin = self.plugin.as_ptr();
 
+        let span = Span::begin("clap_plugin_voice_info::get", ());
+
         unsafe {
             let mut result = clap_voice_info { ..zeroed() };
             if clap_call! { voice_info=>get(plugin, &mut result) } {
+                span.finish(record!(result: result));
                 Some(result)
             } else {
+                span.finish(record!(result: false));
                 None
             }
         }
+    }
+}
+
+impl Recordable for clap_voice_info {
+    fn record(&self, record: &mut dyn Recorder) {
+        record.record("voice_count", self.voice_count);
+        record.record("voice_capacity", self.voice_capacity);
+        record.record(
+            "supports_overlapping_notes",
+            self.flags & CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES != 0,
+        );
     }
 }

@@ -43,7 +43,7 @@ pub struct TestResult {
 
 /// The result of running a test. Skipped and failed test may optionally include an explanation for
 /// why this happened.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(tag = "code")]
 pub enum TestStatus {

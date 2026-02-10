@@ -1,6 +1,7 @@
 //! Tests for entire plugin libraries. These are mostly used to test plugin scanning behavior.
 
 use super::TestCase;
+use crate::debug::{Span, record};
 use crate::tests::TestStatus;
 use anyhow::Result;
 use std::path::Path;
@@ -69,11 +70,15 @@ impl<'a> TestCase<'a> for PluginLibraryTestCase {
         }
     }
 
-    #[tracing::instrument(name = "PluginLibraryTestCase::run", level = "debug", skip_all, fields(
-        test_case = %self,
-        library_path = %library_path.display()
-    ))]
     fn run(&self, library_path: Self::TestArgs) -> Result<TestStatus> {
+        let name = self.to_string();
+        let _span = Span::begin(
+            &name,
+            record! {
+                library_path: library_path.display().to_string()
+            },
+        );
+
         match self {
             PluginLibraryTestCase::PresetDiscoveryCrawl => preset_discovery::test_crawl(library_path, false),
             PluginLibraryTestCase::PresetDiscoveryDescriptorConsistency => {

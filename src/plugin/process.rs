@@ -84,7 +84,7 @@ impl<'a> ProcessScope<'a> {
 
         // check for requested restart
         if self.plugin.shared().requested_restart.load() {
-            tracing::debug!("Plugin has requested a restart");
+            log::debug!("Plugin has requested a restart");
             self.restart();
         }
 

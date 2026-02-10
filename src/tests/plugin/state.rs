@@ -1,11 +1,5 @@
 //! Tests surrounding state handling.
 
-use anyhow::{Context, Result};
-use clap_sys::id::clap_id;
-use rand::Rng;
-use std::collections::BTreeMap;
-use std::io::Write;
-
 use super::PluginTestCase;
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::params::Params;
@@ -15,6 +9,11 @@ use crate::plugin::process::{AudioBuffers, Event, InputEventQueue, OutputEventQu
 use crate::tests::plugin::params::param_compare_approx;
 use crate::tests::rng::{ParamFuzzer, new_prng};
 use crate::tests::{TestCase, TestStatus};
+use anyhow::{Context, Result};
+use clap_sys::id::clap_id;
+use rand::RngExt;
+use std::collections::BTreeMap;
+use std::io::Write;
 
 /// The file name we'll use to dump the expected state when a test fails.
 const EXPECTED_STATE_FILE_NAME: &str = "state-expected";

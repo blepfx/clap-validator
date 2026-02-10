@@ -290,8 +290,6 @@ impl MetadataReceiver {
         function_name: &str,
         f: impl FnOnce(&Self) -> Result<R>,
     ) -> Option<R> {
-        tracing::trace!(target: "callback", "{}", function_name);
-
         let state = unsafe {
             Proxy::<Self>::from_vtable(receiver).unwrap_or_else(|e| {
                 fail_test!("{}: {}", function_name, e);

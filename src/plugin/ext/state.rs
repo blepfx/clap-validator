@@ -1,7 +1,7 @@
 //! Abstractions for interacting with the `state` extension.
 
 use super::Extension;
-use crate::debug::fail_test;
+use crate::debug::{Span, fail_test, record};
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::{CHECK_POINTER, Proxy, Proxyable, clap_call};
 use anyhow::Result;
@@ -72,16 +72,17 @@ impl<'a> Extension for State<'a> {
 
 impl State<'_> {
     /// Retrieve the plugin's state. Returns an error if the plugin returned `false`.
-    #[tracing::instrument(name = "clap_plugin_state::save", level = 1, skip(self))]
     pub fn save(&self) -> Result<Vec<u8>> {
         let stream = OutputStream::new(None);
-
         let state = self.state.as_ptr();
         let plugin = self.plugin.as_ptr();
+
+        let span = Span::begin("clap_plugin_state::save", ());
         let result = unsafe {
-            let _span = tracing::trace_span!("clap_plugin_state::save").entered();
             clap_call! { state=>save(plugin, Proxy::vtable(&stream)) }
         };
+
+        span.finish(record!(result: result));
 
         if result {
             Ok(stream.take())
@@ -92,15 +93,17 @@ impl State<'_> {
 
     /// Retrieve the plugin's state while limiting the number of bytes the plugin can write at a
     /// time. Returns an error if the plugin returned `false`.
-    #[tracing::instrument(name = "clap_plugin_state::save", level = 1, skip(self))]
     pub fn save_buffered(&self, max_bytes: usize) -> Result<Vec<u8>> {
         let stream = OutputStream::new(Some(max_bytes));
-
         let state = self.state.as_ptr();
         let plugin = self.plugin.as_ptr();
+
+        let span = Span::begin("clap_plugin_state::save", record! { max_bytes: max_bytes });
         let result = unsafe {
             clap_call! { state=>save(plugin, Proxy::vtable(&stream)) }
         };
+
+        span.finish(record!(result: result));
 
         if result {
             Ok(stream.take())
@@ -113,15 +116,17 @@ impl State<'_> {
     }
 
     /// Restore previously stored state. Returns an error if the plugin returned `false`.
-    #[tracing::instrument(name = "clap_plugin_state::load", level = 1, skip_all)]
     pub fn load(&self, state: &[u8]) -> Result<()> {
         let stream = InputStream::new(state, None);
-
         let state = self.state.as_ptr();
         let plugin = self.plugin.as_ptr();
+
+        let span = Span::begin("clap_plugin_state::load", ());
         let result = unsafe {
             clap_call! { state=>load(plugin, Proxy::vtable(&stream)) }
         };
+
+        span.finish(record!(result: result));
 
         if result {
             Ok(())
@@ -132,16 +137,18 @@ impl State<'_> {
 
     /// Restore previously stored state while limiting the number of bytes the plugin can read at a
     /// time. Returns an error if the plugin returned `false`.
-    #[tracing::instrument(name = "clap_plugin_state::load", level = 1, skip_all)]
     pub fn load_buffered(&self, state: &[u8], max_bytes: usize) -> Result<()> {
         let stream = InputStream::new(state, Some(max_bytes));
 
         let state = self.state.as_ptr();
         let plugin = self.plugin.as_ptr();
+
+        let span = Span::begin("clap_plugin_state::load", record! { max_bytes: max_bytes });
         let result = unsafe {
-            let _span = tracing::trace_span!("clap_plugin_state::load").entered();
             clap_call! { state=>load(plugin, Proxy::vtable(&stream)) }
         };
+
+        span.finish(record!(result: result));
 
         if result {
             Ok(())
@@ -187,8 +194,12 @@ impl<'a> InputStream<'a> {
         })
     }
 
-    #[tracing::instrument(name = "clap_istream::read", level = 1, skip(stream))]
     unsafe extern "C" fn read(stream: *const clap_istream, buffer: *mut c_void, size: u64) -> i64 {
+        let span = Span::begin(
+            "clap_istream::read",
+            record! { buffer: format_args!("{:p}", buffer), size: size },
+        );
+
         unsafe {
             let state = Proxy::<Self>::from_vtable(stream).unwrap_or_else(|e| {
                 fail_test!("clap_istream::read: {}", e);
@@ -215,6 +226,7 @@ impl<'a> InputStream<'a> {
             std::slice::from_raw_parts_mut(buffer as *mut u8, bytes_to_read)
                 .copy_from_slice(&state.read_buffer[current_pos..current_pos + bytes_to_read]);
 
+            span.finish(record! { bytes_read: bytes_to_read });
             bytes_to_read as i64
         }
     }
@@ -235,8 +247,12 @@ impl OutputStream {
         std::mem::take(&mut *self.write_buffer.lock().unwrap())
     }
 
-    #[tracing::instrument(name = "clap_ostream::write", level = 1, skip(stream))]
     unsafe extern "C" fn write(stream: *const clap_ostream, buffer: *const c_void, size: u64) -> i64 {
+        let span = Span::begin(
+            "clap_ostream::write",
+            record! { buffer: format_args!("{:p}", buffer), size: size },
+        );
+
         unsafe {
             let state = Proxy::<Self>::from_vtable(stream).unwrap_or_else(|e| {
                 fail_test!("clap_ostream::write: {}", e);
@@ -266,6 +282,7 @@ impl OutputStream {
                 .unwrap()
                 .extend_from_slice(std::slice::from_raw_parts(buffer as *const u8, size as usize));
 
+            span.finish(record! { bytes_written: size });
             size as i64
         }
     }

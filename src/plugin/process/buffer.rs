@@ -3,7 +3,7 @@ use crate::plugin::process::ConstantMask;
 use anyhow::Result;
 use clap_sys::audio_buffer::*;
 use either::Either;
-use rand::Rng;
+use rand::RngExt;
 use rand_pcg::Pcg32;
 use std::collections::HashMap;
 use std::fmt::Debug;

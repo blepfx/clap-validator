@@ -1,4 +1,4 @@
-use crate::debug::{fail_test, record};
+use crate::debug::{Recordable, Recorder, Span, fail_test, record};
 use crate::plugin::util::{CHECK_POINTER, Proxy, Proxyable};
 use clap_sys::events::*;
 use std::fmt::Debug;
@@ -12,7 +12,7 @@ pub struct OutputEventQueue(Mutex<Vec<Event>>);
 
 /// An event sent to or from the plugin. This uses an enum to make the implementation simple and
 /// correct at the cost of more wasteful memory usage.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 #[repr(C, align(8))]
 pub enum Event {
     /// `CLAP_EVENT_NOTE_ON`, `CLAP_EVENT_NOTE_OFF`, `CLAP_EVENT_NOTE_CHOKE`, or `CLAP_EVENT_NOTE_END`.
@@ -79,8 +79,9 @@ impl InputEventQueue {
         }
     }
 
-    #[tracing::instrument(name = "clap_input_events::size", level = 1, skip(list))]
     unsafe extern "C" fn size(list: *const clap_input_events) -> u32 {
+        let span = Span::begin("clap_input_events::size", ());
+
         let state = unsafe {
             Proxy::<Self>::from_vtable(list).unwrap_or_else(|e| {
                 fail_test!("clap_input_events::size: {}", e);
@@ -92,11 +93,18 @@ impl InputEventQueue {
         }
 
         let events = state.0.lock().unwrap();
+        span.finish(record!(result: events.len() as u32));
         events.len() as u32
     }
 
-    #[tracing::instrument(name = "clap_input_events::get", level = 1, skip(list), fields(event = tracing::field::Empty))]
     unsafe extern "C" fn get(list: *const clap_input_events, index: u32) -> *const clap_event_header {
+        let span = Span::begin(
+            "clap_input_events::get",
+            record! {
+                index: index
+            },
+        );
+
         let state = unsafe {
             Proxy::<Self>::from_vtable(list).unwrap_or_else(|e| {
                 fail_test!("clap_input_events::size: {}", e);
@@ -110,11 +118,11 @@ impl InputEventQueue {
         let events = state.0.lock().unwrap();
         match events.get(index as usize) {
             Some(event) => {
-                record("event", &event);
+                span.finish(record!(event: event));
                 event.header()
             }
             None => {
-                tracing::warn!(
+                log::warn!(
                     "The plugin tried to get an out of bounds event with index {index} ({} total events)",
                     events.len()
                 );
@@ -137,8 +145,8 @@ impl OutputEventQueue {
         self.0.lock().unwrap().clone()
     }
 
-    #[tracing::instrument(name = "clap_output_events::try_push", level = 1, skip_all, fields(event = tracing::field::Empty))]
     unsafe extern "C" fn try_push(list: *const clap_output_events, event: *const clap_event_header) -> bool {
+        let span = Span::begin("clap_output_events::try_push", ());
         let state = unsafe {
             Proxy::<Self>::from_vtable(list).unwrap_or_else(|e| {
                 fail_test!("clap_output_events::try_push: {}", e);
@@ -153,11 +161,11 @@ impl OutputEventQueue {
             fail_test!("clap_output_events::try_push: 'event' pointer is null");
         }
 
-        let event = unsafe { Event::from_raw(event) };
-
         // The monotonicity of the plugin's event insertion order is checked as part of the output
         // consistency checks
-        record("event", &event);
+
+        let event = unsafe { Event::from_raw(event) };
+        span.finish(record!(event: event));
         state.0.lock().unwrap().push(event);
         true
     }
@@ -206,16 +214,92 @@ impl Event {
     }
 }
 
-impl Debug for Event {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Recordable for Event {
+    fn record(&self, record: &mut dyn Recorder) {
+        record.record(
+            "type",
+            match (self.header().space_id, self.header().type_) {
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_ON) => "CLAP_EVENT_NOTE_ON",
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_OFF) => "CLAP_EVENT_NOTE_OFF",
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_CHOKE) => "CLAP_EVENT_NOTE_CHOKE",
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_END) => "CLAP_EVENT_NOTE_END",
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_EXPRESSION) => "CLAP_EVENT_NOTE_EXPRESSION",
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_GESTURE_BEGIN) => "CLAP_EVENT_PARAM_GESTURE_BEGIN",
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_GESTURE_END) => "CLAP_EVENT_PARAM_GESTURE_END",
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE) => "CLAP_EVENT_PARAM_VALUE",
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_MOD) => "CLAP_EVENT_PARAM_MOD",
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI) => "CLAP_EVENT_MIDI",
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI2) => "CLAP_EVENT_MIDI2",
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI_SYSEX) => "CLAP_EVENT_MIDI_SYSEX",
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_TRANSPORT) => "CLAP_EVENT_TRANSPORT",
+                (_, _) => "?",
+            },
+        );
+
+        record.record("space_id", self.header().space_id);
+        record.record("type_id", self.header().type_);
+        record.record("time", self.header().time);
+        record.record("flags.is_live", self.header().flags & CLAP_EVENT_IS_LIVE != 0);
+        record.record("flags.dont_record", self.header().flags & CLAP_EVENT_DONT_RECORD != 0);
+
         match self {
-            Event::Note(event) => event.fmt(f),
-            Event::NoteExpression(event) => event.fmt(f),
-            Event::ParamValue(event) => event.fmt(f),
-            Event::ParamMod(event) => event.fmt(f),
-            Event::Midi(event) => event.fmt(f),
-            Event::Transport(event) => event.fmt(f),
-            Event::Unknown(header) => header.fmt(f),
+            Event::Note(event) => {
+                record.record("id", event.note_id);
+                record.record("key", event.key);
+                record.record("port", event.port_index);
+                record.record("channel", event.channel);
+                record.record("velocity", event.velocity);
+            }
+            Event::NoteExpression(event) => {
+                record.record("note_id", event.note_id);
+                record.record("port_index", event.port_index);
+                record.record("key", event.key);
+                record.record("channel", event.channel);
+
+                record.record(
+                    "expression",
+                    match event.expression_id {
+                        CLAP_NOTE_EXPRESSION_VOLUME => "CLAP_NOTE_EXPRESSION_VOLUME",
+                        CLAP_NOTE_EXPRESSION_PAN => "CLAP_NOTE_EXPRESSION_PAN",
+                        CLAP_NOTE_EXPRESSION_TUNING => "CLAP_NOTE_EXPRESSION_TUNING",
+                        CLAP_NOTE_EXPRESSION_VIBRATO => "CLAP_NOTE_EXPRESSION_VIBRATO",
+                        CLAP_NOTE_EXPRESSION_BRIGHTNESS => "CLAP_NOTE_EXPRESSION_BRIGHTNESS",
+                        CLAP_NOTE_EXPRESSION_PRESSURE => "CLAP_NOTE_EXPRESSION_PRESSURE",
+                        CLAP_NOTE_EXPRESSION_EXPRESSION => "CLAP_NOTE_EXPRESSION_EXPRESSION",
+                        _ => "?",
+                    },
+                );
+
+                record.record("expression_id", event.expression_id);
+                record.record("value", event.value);
+            }
+            Event::ParamValue(event) => {
+                record.record("note_id", event.note_id);
+                record.record("port_index", event.port_index);
+                record.record("key", event.key);
+                record.record("channel", event.channel);
+                record.record("param_id", event.param_id);
+                record.record("value", event.value);
+            }
+            Event::ParamMod(event) => {
+                record.record("note_id", event.note_id);
+                record.record("port_index", event.port_index);
+                record.record("key", event.key);
+                record.record("channel", event.channel);
+                record.record("param_id", event.param_id);
+                record.record("amount", event.amount);
+            }
+            Event::Midi(event) => {
+                record.record("port_index", event.port_index);
+                record.record(
+                    "raw",
+                    format_args!("{:02X} {:02X} {:02X}", event.data[0], event.data[1], event.data[2]),
+                );
+            }
+            Event::Transport(event) => {
+                record.record("transport", event);
+            }
+            Event::Unknown(..) => {}
         }
     }
 }

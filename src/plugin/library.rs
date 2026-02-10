@@ -3,6 +3,7 @@
 use super::instance::Plugin;
 use super::preset_discovery::PresetDiscoveryFactory;
 use super::util::{self, clap_call};
+use crate::debug::{Span, record};
 use crate::plugin::instance::PluginShared;
 use anyhow::{Context, Result};
 use clap_sys::entry::clap_plugin_entry;
@@ -33,9 +34,6 @@ pub struct PluginLibrary {
     /// To honor CLAP's thread safety guidelines, the thread this object was created from is
     /// designated the 'main thread', and this object cannot be shared with other threads.
     _thread: PhantomData<*const ()>,
-
-    /// The tracing span for this plugin library.
-    _span: tracing::span::EnteredSpan,
 }
 
 /// Metadata for a CLAP plugin library, which may contain multiple plugins.
@@ -130,8 +128,6 @@ impl PluginLibrary {
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(path);
 
-        let span = tracing::trace_span!("PluginLibrary", library_path = %path.display()).entered();
-
         // This is the path passed to `clap_entry::init()`. On macOS this should point to the
         // bundle, not the DSO.
         let path_cstring = CString::new(path.as_os_str().to_str().context("Path contains invalid UTF-8")?)
@@ -173,7 +169,6 @@ impl PluginLibrary {
             plugin_path: path,
             library,
             _thread: PhantomData,
-            _span: span,
         })
     }
 
@@ -245,6 +240,7 @@ impl PluginLibrary {
 
         let entry_point =
             get_clap_entry_point(&self.library).expect("A Plugin was constructed for a plugin with no entry point");
+
         let factory_pointer = unsafe {
             clap_call! { entry_point=>get_factory(factory_id_cstring.as_ptr()) }
         };
@@ -264,9 +260,18 @@ impl PluginLibrary {
         let entry_point =
             get_clap_entry_point(&self.library).expect("A Plugin was constructed for a plugin with no entry point");
 
+        let span = Span::begin(
+            "clap_plugin_factory::get_factory",
+            record!(
+                factory_id: CLAP_PLUGIN_FACTORY_ID.to_string_lossy()
+            ),
+        );
+
         let plugin_factory = unsafe {
             clap_call! { entry_point=>get_factory(CLAP_PLUGIN_FACTORY_ID.as_ptr()) }
         } as *const clap_plugin_factory;
+
+        span.finish(record!(result: format_args!("{:p}", plugin_factory)));
 
         if plugin_factory.is_null() {
             anyhow::bail!(

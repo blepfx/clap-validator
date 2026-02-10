@@ -112,7 +112,7 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings, config: &Con
                 .with_context(|| format!("Could not fetch plugin metadata for '{}'", library_path.display()))?;
 
             if !clap_version_is_compatible(plugin_metadata.clap_version()) {
-                tracing::debug!(
+                log::debug!(
                     "'{}' uses an unsupported CLAP version ({}.{}.{}), skipping...",
                     library_path.display(),
                     plugin_metadata.version.0,
@@ -222,17 +222,26 @@ fn run_test<'a, T: TestCase<'a>>(
     };
 
     match &status {
-        TestStatus::Success { details } => {
-            tracing::info!(test = %test, details=details, "Test completed")
+        TestStatus::Success { details: None } => {
+            log::info!("Test {} completed", test)
         }
-        TestStatus::Warning { details } => {
-            tracing::warn!(test = %test, details=details, "Test completed with a warning")
+        TestStatus::Success { details: Some(details) } => {
+            log::info!("Test {} completed: {}", test, details)
         }
-        TestStatus::Failed { details } => {
-            tracing::error!(test = %test, details=details, "Test failed")
+        TestStatus::Warning { details: None } => {
+            log::warn!("Test {} completed with a warning", test)
+        }
+        TestStatus::Warning { details: Some(details) } => {
+            log::warn!("Test {} completed with a warning: {}", test, details)
+        }
+        TestStatus::Failed { details: None } => {
+            log::error!("Test {} failed", test)
+        }
+        TestStatus::Failed { details: Some(details) } => {
+            log::error!("Test {} failed: {}", test, details)
         }
         TestStatus::Crashed { details } => {
-            tracing::error!(test = %test, details=details, "Test crashed")
+            log::error!("Test {} crashed: {}", test, details)
         }
         _ => {}
     }

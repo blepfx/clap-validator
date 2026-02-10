@@ -8,7 +8,7 @@ use crate::plugin::process::{Event, TransportState};
 use clap_sys::events::*;
 use clap_sys::ext::ambisonic::*;
 use midi_consts::channel_event as midi;
-use rand::Rng;
+use rand::RngExt;
 use rand::seq::{IndexedRandom, IteratorRandom};
 use rand_pcg::Pcg32;
 use std::ops::RangeInclusive;

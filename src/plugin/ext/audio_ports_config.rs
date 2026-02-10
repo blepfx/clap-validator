@@ -1,10 +1,10 @@
+use crate::debug::{Recordable, Recorder, Span, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::ext::ambisonic::Ambisonic;
 use crate::plugin::ext::audio_ports::{AudioPort, check_audio_port_info_valid, check_audio_port_type_consistent};
 use crate::plugin::ext::surround::Surround;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::{c_char_slice_to_string, clap_call};
-use crate::util::spanned;
 use anyhow::{Context, Result};
 use clap_sys::ext::audio_ports::clap_audio_port_info;
 use clap_sys::ext::audio_ports_config::*;
@@ -124,20 +124,22 @@ impl AudioPortsConfig<'_> {
             .collect()
     }
 
-    #[tracing::instrument(name = "clap_plugin_audio_ports_config::select", level = 1, skip(self))]
     pub fn select(&self, config_id: clap_id) -> Result<()> {
         let audio_ports_config = self.audio_ports_config.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        let result = spanned!(
+        let span = Span::begin(
             "clap_plugin_audio_ports_config::select",
-            config_id: config_id,
-            {
-                unsafe {
-                    clap_call! { audio_ports_config=>select(plugin, config_id) }
-                }
-            }
+            record! {
+                config_id: config_id
+            },
         );
+
+        let result = unsafe {
+            clap_call! { audio_ports_config=>select(plugin, config_id) }
+        };
+
+        span.finish(record!(result: result));
 
         if !result {
             anyhow::bail!("audio_ports_config::select() returned false");
@@ -146,68 +148,133 @@ impl AudioPortsConfig<'_> {
         Ok(())
     }
 
-    #[tracing::instrument(name = "clap_plugin_audio_ports_config::count", level = 1, skip(self))]
     fn get_raw_config_count(&self) -> u32 {
         let audio_ports_config = self.audio_ports_config.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        spanned!("clap_plugin_audio_ports_config::count", {
-            unsafe {
-                clap_call! { audio_ports_config=>count(plugin) }
-            }
-        })
+        let span = Span::begin("clap_plugin_audio_ports_config::count", ());
+        let result = unsafe {
+            clap_call! { audio_ports_config=>count(plugin) }
+        };
+
+        span.finish(record!(result: result));
+        result
     }
 
-    #[tracing::instrument(name = "clap_plugin_audio_ports_config::get", level = 1, skip(self))]
     fn get_raw_config_info(&self, index: u32) -> Result<clap_audio_ports_config> {
         let audio_ports_config = self.audio_ports_config.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        spanned!("clap_plugin_audio_ports_config::get", {
-            unsafe {
-                let mut info = clap_audio_ports_config { ..zeroed() };
+        let span = Span::begin(
+            "clap_plugin_audio_ports_config::get_raw_config_info",
+            record! {
+                index: index
+            },
+        );
 
-                if !clap_call! { audio_ports_config=>get(plugin, index, &mut info) } {
-                    anyhow::bail!(
-                        "audio_ports_config::get({}) returned false ({} total configs)",
-                        index,
-                        self.get_raw_config_count()
-                    );
-                }
-
+        unsafe {
+            let mut info = clap_audio_ports_config { ..zeroed() };
+            if clap_call! { audio_ports_config=>get(plugin, index, &mut info) } {
+                span.finish(record!(result: info));
                 Ok(info)
+            } else {
+                span.finish(record!(result: false));
+                anyhow::bail!(
+                    "audio_ports_config::get({}) returned false ({} total configs)",
+                    index,
+                    self.get_raw_config_count()
+                );
             }
-        })
+        }
     }
 }
 
 impl AudioPortsConfigInfo<'_> {
     /// Get the current selected audio ports configuration ID.
-    #[tracing::instrument(name = "clap_plugin_audio_ports_config_info::current_config", level = 1, skip(self))]
     pub fn current(&self) -> clap_id {
         let audio_ports_config_info = self.audio_ports_config_info.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        unsafe {
+        let span = Span::begin("clap_plugin_audio_ports_config_info::current_config", ());
+        let result = unsafe {
             clap_call! { audio_ports_config_info=>current_config(plugin) }
-        }
+        };
+
+        span.finish(record!(result: result));
+        result
     }
 
     /// Get information about an audio port for a configuration.
-    #[tracing::instrument(name = "clap_plugin_audio_ports_config_info::get", level = 1, skip(self))]
     pub fn get(&self, config_id: clap_id, is_input: bool, port_index: u32) -> Result<AudioPort> {
-        let info = unsafe {
-            let audio_ports_config_info = self.audio_ports_config_info.as_ptr();
-            let plugin = self.plugin.as_ptr();
+        let info = self.get_raw_port_info(config_id, is_input, port_index)?;
+        check_audio_port_info_valid(self.plugin, is_input, port_index, &info)
+    }
 
+    fn get_raw_port_info(&self, config_id: clap_id, is_input: bool, port_index: u32) -> Result<clap_audio_port_info> {
+        let audio_ports_config_info = self.audio_ports_config_info.as_ptr();
+        let plugin = self.plugin.as_ptr();
+
+        let span = Span::begin(
+            "clap_plugin_audio_ports_config_info::get_raw_port_info",
+            record! {
+                config_id: config_id,
+                is_input: is_input,
+                port_index: port_index
+            },
+        );
+
+        unsafe {
             let mut info = clap_audio_port_info { ..zeroed() };
-            if !clap_call! { audio_ports_config_info=>get(plugin, config_id, port_index, is_input, &mut info) } {
+            if clap_call! { audio_ports_config_info=>get(plugin, config_id, port_index, is_input, &mut info) } {
+                span.finish(record!(result: info));
+                Ok(info)
+            } else {
+                span.finish(record!(result: false));
                 anyhow::bail!("audio_ports_config_info::get() returned false");
             }
+        }
+    }
+}
 
-            info
-        };
+impl Recordable for clap_audio_ports_config {
+    fn record(&self, record: &mut dyn Recorder) {
+        record.record("id", self.id);
+        record.record(
+            "name",
+            c_char_slice_to_string(&self.name).unwrap_or_else(|_| "<invalid utf-8>".to_string()),
+        );
 
-        check_audio_port_info_valid(self.plugin, is_input, port_index, &info)
+        record.record("input_port_count", self.input_port_count);
+        record.record("output_port_count", self.output_port_count);
+
+        if self.has_main_input {
+            record.record("has_main_input", true);
+            record.record("main_input_channel_count", self.main_input_channel_count);
+
+            if self.main_input_port_type.is_null() {
+                record.record("main_input_port_type", "null");
+            } else {
+                record.record("main_input_port_type", unsafe {
+                    CStr::from_ptr(self.main_input_port_type)
+                });
+            }
+        } else {
+            record.record("has_main_input", false);
+        }
+
+        if self.has_main_output {
+            record.record("has_main_output", true);
+            record.record("main_output_channel_count", self.main_output_channel_count);
+
+            if self.main_output_port_type.is_null() {
+                record.record("main_output_port_type", "null");
+            } else {
+                record.record("main_output_port_type", unsafe {
+                    CStr::from_ptr(self.main_output_port_type)
+                });
+            }
+        } else {
+            record.record("has_main_output", false);
+        }
     }
 }

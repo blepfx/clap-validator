@@ -1,3 +1,4 @@
+use crate::debug::{Span, record};
 use crate::plugin::ext::audio_ports::AudioPorts;
 use crate::plugin::ext::audio_ports_activation::AudioPortsActivation;
 use crate::plugin::ext::audio_ports_config::{AudioPortsConfig, AudioPortsConfigInfo};
@@ -8,7 +9,7 @@ use crate::plugin::process::{AudioBuffers, ProcessScope};
 use crate::tests::TestStatus;
 use crate::tests::rng::{NoteGenerator, new_prng, random_layout_requests};
 use anyhow::{Context, Result};
-use rand::Rng;
+use rand::RngExt;
 
 const BUFFER_SIZE: u32 = 512;
 
@@ -63,6 +64,8 @@ pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) 
                     config_audio_ports_config.name, config_audio_ports_config.id,
                 )
             })?;
+
+        plugin.poll_callback(|_| Ok(()))?;
 
         let config_audio_ports = audio_ports
             .config()
@@ -401,12 +404,13 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
         next_input_mask &= full_input_mask;
         next_output_mask &= full_output_mask;
 
-        let _span = tracing::trace_span!(
-            "WithAudioPortsActivation",
-            input_mask = format_args!("0b{:b}", next_input_mask),
-            output_mask = format_args!("0b{:b}", next_output_mask),
-        )
-        .entered();
+        let _span = Span::begin(
+            "AudioPortActivationMask",
+            record! {
+                input_mask: format_args!("0b{:b}", next_input_mask),
+                output_mask: format_args!("0b{:b}", next_output_mask)
+            },
+        );
 
         for input in 0..audio_ports_config.inputs.len() {
             let currently_active = (prev_input_mask & (1 << input)) != 0;

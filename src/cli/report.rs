@@ -17,16 +17,16 @@ pub enum ReportItem {
 }
 
 impl Report {
-    fn print_with(&self, charset: &Charset, width: usize) -> String {
+    fn print_width(&self, width: usize) -> String {
         let mut result = String::new();
 
-        let pipe = charset.pipe.dim();
-        let bar = charset.bar.dim();
-        let rtl = charset.rtl.dim();
-        let rbl = charset.rbl.dim();
+        let pipe = "│".dim();
+        let bar = "─".dim();
+        let ctl = "┌".dim();
+        let cbl = "└".dim();
 
         // Print the header text
-        writeln!(result, "{}{} {}", rtl, bar, self.header.bold()).ok();
+        writeln!(result, "{}{} {}", ctl, bar, self.header.bold()).ok();
 
         // Print the body
         for item in &self.items {
@@ -40,7 +40,7 @@ impl Report {
                 ReportItem::Child(child) => {
                     writeln!(result, "{} ", pipe).ok();
 
-                    let child = child.print_with(charset, width.saturating_sub(2));
+                    let child = child.print_width(width.saturating_sub(2));
                     for line in child.lines() {
                         writeln!(result, "{} {}", pipe, line).ok();
                     }
@@ -68,7 +68,7 @@ impl Report {
         }
 
         // Print the footer line
-        write!(result, "{}{}{} ", rbl, bar, bar).ok();
+        write!(result, "{}{}{} ", cbl, bar, bar).ok();
 
         // Print footer text
         for (i, footer) in self.footer.iter().enumerate() {
@@ -88,40 +88,10 @@ impl Display for Report {
         write!(
             f,
             "{}",
-            self.print_with(
-                if supports_unicode::supports_unicode() {
-                    &Charset::UNICODE
-                } else {
-                    &Charset::ASCII
-                },
-                match textwrap::termwidth() {
-                    w if w > 40 => w - 10,
-                    w => w,
-                },
-            )
+            self.print_width(match textwrap::termwidth() {
+                w if w > 40 => w - 10,
+                w => w,
+            },)
         )
     }
-}
-
-struct Charset {
-    pipe: &'static str,
-    bar: &'static str,
-    rtl: &'static str,
-    rbl: &'static str,
-}
-
-impl Charset {
-    pub const UNICODE: Self = Self {
-        pipe: "│",
-        bar: "─",
-        rtl: "╭",
-        rbl: "╰",
-    };
-
-    pub const ASCII: Self = Self {
-        pipe: "|",
-        bar: "",
-        rtl: "|",
-        rbl: "|",
-    };
 }

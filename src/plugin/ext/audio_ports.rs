@@ -5,7 +5,7 @@ use crate::debug::{Recordable, Recorder, Span, record};
 use crate::plugin::ext::ambisonic::Ambisonic;
 use crate::plugin::ext::surround::Surround;
 use crate::plugin::instance::Plugin;
-use crate::plugin::util::clap_call;
+use crate::plugin::util::{clap_call, cstr_ptr_to_string};
 use anyhow::{Context, Result};
 use clap_sys::ext::ambisonic::CLAP_PORT_AMBISONIC;
 use clap_sys::ext::audio_ports::*;
@@ -366,10 +366,10 @@ impl Recordable for clap_audio_port_info {
             self.flags & CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE != 0,
         );
 
-        if self.port_type.is_null() {
-            record.record("port_type", "<null>");
-        } else {
-            record.record("port_type", unsafe { CStr::from_ptr(self.port_type) });
+        match unsafe { cstr_ptr_to_string(self.port_type) } {
+            Ok(Some(port_type)) => record.record("port_type", port_type),
+            Ok(None) => record.record("port_type", "null"),
+            Err(_) => record.record("port_type", "<invalid utf-8>"),
         }
 
         if self.in_place_pair == CLAP_INVALID_ID {

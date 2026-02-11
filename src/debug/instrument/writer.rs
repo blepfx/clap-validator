@@ -23,18 +23,18 @@ impl TraceWriter {
         self.file.as_ref().map(|_| ())
     }
 
-    pub fn write<T: Recordable>(&mut self, name: &str, cat: &str, tag: &str, args: &T) {
+    pub fn write<A: Recordable>(&mut self, name: std::fmt::Arguments<'_>, cat: &str, tag: &str, args: &A) {
         if let Ok(file) = &mut self.file {
             let result = serde_json::to_writer(
                 &mut *file,
                 &TraceEvent {
                     name,
-                    cat,
+                    args: RecordableAsSerde(args),
                     ts: self.start.elapsed().as_micros(),
+                    ph: tag,
+                    cat,
                     id: 1,
                     pid: 1,
-                    ph: tag,
-                    args: &RecordableAsSerde(args),
                 },
             )
             .map_err(Error::other)
@@ -50,17 +50,16 @@ impl TraceWriter {
 
 /// An event that is written to the file
 #[derive(serde::Serialize)]
-struct TraceEvent<'a, S: serde::Serialize> {
-    name: &'a str,
+struct TraceEvent<'a, N: serde::Serialize, A: serde::Serialize> {
+    name: N,
     cat: &'a str,
     ts: u128,
     id: u64,
     pid: u64,
     ph: &'a str,
-    args: &'a S,
+    args: A,
 }
 
-struct DisplayAsSerde<'a>(&'a dyn std::fmt::Display);
 struct RecordableAsSerde<T: Recordable>(T);
 
 impl<T: Recordable> serde::Serialize for RecordableAsSerde<T> {
@@ -73,12 +72,16 @@ impl<T: Recordable> serde::Serialize for RecordableAsSerde<T> {
         }
 
         impl<S: serde::ser::SerializeMap> Recorder for SerdeRecorder<S> {
-            fn value(&mut self, name: &str, value: &dyn std::fmt::Display) {
-                self.state = self.serializer.serialize_entry(name, &DisplayAsSerde(value));
+            fn record_value(&mut self, value: std::fmt::Arguments<'_>) {
+                self.state = self.serializer.serialize_entry("", &value);
             }
 
-            fn group(&mut self, name: &str, record: &dyn Recordable) {
-                self.state = self.serializer.serialize_entry(name, &RecordableAsSerde(record));
+            fn record_entry(&mut self, name: &str, record: &dyn Recordable) {
+                if name.is_empty() {
+                    record.record(self);
+                } else {
+                    self.state = self.serializer.serialize_entry(name, &RecordableAsSerde(record));
+                }
             }
         }
 
@@ -91,11 +94,5 @@ impl<T: Recordable> serde::Serialize for RecordableAsSerde<T> {
 
         recorder.state?;
         recorder.serializer.end()
-    }
-}
-
-impl serde::Serialize for DisplayAsSerde<'_> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(self.0)
     }
 }

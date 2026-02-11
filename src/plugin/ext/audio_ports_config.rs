@@ -4,7 +4,7 @@ use crate::plugin::ext::ambisonic::Ambisonic;
 use crate::plugin::ext::audio_ports::{AudioPort, check_audio_port_info_valid, check_audio_port_type_consistent};
 use crate::plugin::ext::surround::Surround;
 use crate::plugin::instance::Plugin;
-use crate::plugin::util::{c_char_slice_to_string, clap_call};
+use crate::plugin::util::{c_char_slice_to_string, clap_call, cstr_ptr_to_string};
 use anyhow::{Context, Result};
 use clap_sys::ext::audio_ports::clap_audio_port_info;
 use clap_sys::ext::audio_ports_config::*;
@@ -251,12 +251,10 @@ impl Recordable for clap_audio_ports_config {
             record.record("has_main_input", true);
             record.record("main_input_channel_count", self.main_input_channel_count);
 
-            if self.main_input_port_type.is_null() {
-                record.record("main_input_port_type", "null");
-            } else {
-                record.record("main_input_port_type", unsafe {
-                    CStr::from_ptr(self.main_input_port_type)
-                });
+            match unsafe { cstr_ptr_to_string(self.main_input_port_type) } {
+                Ok(Some(port_type)) => record.record("main_input_port_type", port_type),
+                Ok(None) => record.record("main_input_port_type", "null"),
+                Err(_) => record.record("main_input_port_type", "<invalid utf-8>"),
             }
         } else {
             record.record("has_main_input", false);
@@ -266,12 +264,10 @@ impl Recordable for clap_audio_ports_config {
             record.record("has_main_output", true);
             record.record("main_output_channel_count", self.main_output_channel_count);
 
-            if self.main_output_port_type.is_null() {
-                record.record("main_output_port_type", "null");
-            } else {
-                record.record("main_output_port_type", unsafe {
-                    CStr::from_ptr(self.main_output_port_type)
-                });
+            match unsafe { cstr_ptr_to_string(self.main_output_port_type) } {
+                Ok(Some(port_type)) => record.record("main_output_port_type", port_type),
+                Ok(None) => record.record("main_output_port_type", "null"),
+                Err(_) => record.record("main_output_port_type", "<invalid utf-8>"),
             }
         } else {
             record.record("has_main_output", false);

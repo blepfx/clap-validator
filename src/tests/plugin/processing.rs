@@ -230,7 +230,7 @@ pub fn test_process_varying_sample_rates(library: &PluginLibrary, plugin_id: &st
 
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
-                let mut note_rng = NoteGenerator::new(&note_ports_config);
+                let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-4..=64);
                 let mut process = ProcessScope::with_sample_rate(&plugin, &mut audio_buffers, sample_rate)?;
 
                 for _ in 0..5 {
@@ -280,7 +280,7 @@ pub fn test_process_varying_block_sizes(library: &PluginLibrary, plugin_id: &str
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
                 let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, buffer_size);
-                let mut note_rng = NoteGenerator::new(&note_ports_config);
+                let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-4..=64);
                 let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
                 let num_iters = (16384 / buffer_size).min(5);
 
@@ -327,7 +327,7 @@ pub fn test_process_random_block_sizes(library: &PluginLibrary, plugin_id: &str)
 
     plugin.on_audio_thread(|plugin| -> Result<()> {
         let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, MAX_BUFFER_SIZE);
-        let mut note_rng = NoteGenerator::new(&note_ports_config);
+        let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-4..=64);
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         for _ in 0..20 {
@@ -582,7 +582,6 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
     };
 
     let mut has_ever_slept = false;
-    let mut has_ever_returned_continue_if_not_quiet = false;
 
     plugin.on_audio_thread(|plugin| -> Result<()> {
         let tail = plugin.get_extension::<Tail>();
@@ -652,7 +651,6 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
                             .all(|b| b.get_output_constant_mask().are_all_channels_constant(b.channels()));
 
                         is_sleeping = is_output_quiet;
-                        has_ever_returned_continue_if_not_quiet = true;
                     }
 
                     ProcessStatus::Tail => {
@@ -683,15 +681,6 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
     plugin.poll_callback(|_| Ok(()))?;
 
     if !has_ever_slept {
-        if has_ever_returned_continue_if_not_quiet {
-            return Ok(TestStatus::Warning {
-                details: Some(String::from(
-                    "The plugin never went to sleep during the test. Make sure to set the output constant mask \
-                     correctly when returning `CLAP_PROCESS_CONTINUE_IF_NOT_QUIET`.",
-                )),
-            });
-        }
-
         return Ok(TestStatus::Warning {
             details: Some(String::from("The plugin never went to sleep during the test.")),
         });

@@ -1,16 +1,16 @@
 //! The indexer abstraction for a CLAP plugin's preset discovery factory. During initialization the
 //! plugin fills this object with its supported locations, file types, and sound packs.
 
-use crate::debug::{Span, fail_test};
+use crate::debug::{Recordable, Recorder, fail_test};
 use crate::plugin::preset_discovery::parse_timestamp;
-use crate::plugin::util::{self, CHECK_POINTER, Proxy, Proxyable, validator_version};
+use crate::plugin::util::{self, CHECK_POINTER, Proxy, Proxyable, cstr_ptr_to_string, validator_version};
 use anyhow::{Context, Result};
 use clap_sys::factory::preset_discovery::*;
 use clap_sys::version::CLAP_VERSION;
 use serde::{Deserialize, Serialize};
-use std::ffi::{CStr, CString, c_char, c_void};
+use std::ffi::{CString, c_char, c_void};
 use std::fmt::Display;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::thread::ThreadId;
 use time::OffsetDateTime;
@@ -94,6 +94,15 @@ pub struct Flags {
     pub is_favorite: bool,
 }
 
+impl Recordable for Flags {
+    fn record(&self, record: &mut dyn Recorder) {
+        record.record("is_factory_content", self.is_factory_content);
+        record.record("is_user_content", self.is_user_content);
+        record.record("is_demo_content", self.is_demo_content);
+        record.record("is_favorite", self.is_favorite);
+    }
+}
+
 impl Location {
     /// Parse a `clap_preset_discovery_location`, returning an error if the data is not valid.
     pub unsafe fn from_descriptor(descriptor: *const clap_preset_discovery_location) -> Result<Self> {
@@ -136,7 +145,16 @@ impl Display for LocationValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LocationValue::File(path) => write!(f, "{}", path.to_string_lossy()),
-            LocationValue::Internal => write!(f, "<internal>"),
+            LocationValue::Internal => write!(f, "<plugin>"),
+        }
+    }
+}
+
+impl Recordable for LocationValue {
+    fn record(&self, record: &mut dyn Recorder) {
+        match self {
+            LocationValue::File(path) => path.to_string_lossy().record(record),
+            LocationValue::Internal => "<plugin>".record(record),
         }
     }
 }
@@ -152,13 +170,15 @@ impl LocationValue {
                     anyhow::bail!("The location may not be a null pointer with CLAP_PRESET_DISCOVERY_LOCATION_FILE.")
                 }
 
-                let path = unsafe { CStr::from_ptr(location) };
-                let path_str = path.to_str().context("Invalid UTF-8 in preset discovery location")?;
+                let path_str = unsafe { cstr_ptr_to_string(location) }
+                    .context("Error parsing the location string for a file location")?
+                    .unwrap_or_default();
+
                 if !path_str.starts_with('/') {
                     anyhow::bail!("'{path_str}' should be an absolute path, i.e. '/{path_str}'.");
                 }
 
-                Ok(LocationValue::File(path.to_owned()))
+                Ok(LocationValue::File(CString::new(path_str).unwrap()))
             }
             CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN => {
                 if !location.is_null() {
@@ -178,26 +198,28 @@ impl LocationValue {
     /// The returned pointer is valid for the lifetime of this struct.
     pub fn to_raw(&self) -> (clap_preset_discovery_location_kind, *const c_char) {
         match self {
-            LocationValue::File(path) => (CLAP_PRESET_DISCOVERY_LOCATION_FILE, path.as_ptr()),
+            LocationValue::File(path) => (CLAP_PRESET_DISCOVERY_LOCATION_FILE, path.as_ptr() as *const c_char),
             LocationValue::Internal => (CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN, std::ptr::null()),
+        }
+    }
+
+    pub fn file_path(&self) -> Option<PathBuf> {
+        match self {
+            LocationValue::File(path) => Some(PathBuf::from(path.to_string_lossy().to_string())),
+            LocationValue::Internal => None,
         }
     }
 
     /// Get a file name (only the base name) for this location. For internal presets this returns
     /// `<plugin>`.
     pub fn file_name(&self) -> Result<String> {
-        match self {
-            LocationValue::File(path) => {
-                let path = Path::new(path.to_str().context("Invalid UTF-8 in file path")?);
-
-                Ok(path
-                    .file_name()
-                    .with_context(|| format!("{path:?} is not a valid preset path"))?
-                    .to_str()
-                    .unwrap()
-                    .to_owned())
-            }
-            LocationValue::Internal => Ok(String::from("<plugin>")),
+        match self.file_path() {
+            None => Ok(String::from("<plugin>")),
+            Some(path) => Ok(path
+                .file_name()
+                .with_context(|| format!("{path:?} does not have a valid file name"))?
+                .to_string_lossy()
+                .to_string()),
         }
     }
 }

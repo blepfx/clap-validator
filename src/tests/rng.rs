@@ -847,8 +847,8 @@ impl TransportFuzzer {
             && prng.random_bool(self.probability_change)
         {
             // safeguard to prevent extremely low tempos
-            if *tempo < 40.0 {
-                *tempo = 40.0;
+            if *tempo < 20.0 {
+                *tempo = 20.0;
                 *ramp = prng.random_range(0.0..=0.01);
             }
 
@@ -879,6 +879,12 @@ impl TransportFuzzer {
 
         if transport.tempo.is_none() {
             transport.position_beats = None;
+        }
+
+        if !transport.is_playing
+            && let Some((_, ramp)) = &mut transport.tempo
+        {
+            *ramp = 0.0;
         }
     }
 }

@@ -19,6 +19,9 @@ pub struct TransportState {
     /// Whether recording is active. Sets `CLAP_TRANSPORT_IS_RECORDING` flag.
     pub is_recording: bool,
 
+    /// Whether the transport is currently within the preroll section. Sets `CLAP_TRANSPORT_IS_WITHIN_PRE_ROLL` flag.
+    pub is_within_preroll: bool,
+
     /// Current tempo in BPM and its increment per sample. Sets `CLAP_TRANSPORT_HAS_TEMPO` flag.
     pub tempo: Option<(f64, f64)>,
 
@@ -43,6 +46,7 @@ impl TransportState {
             is_freerun: false,
             is_playing: false,
             is_recording: false,
+            is_within_preroll: false,
             tempo: Some((120.0, 0.0)),
             time_signature: Some((4, 4)),
             position_beats: Some(0.0),
@@ -56,7 +60,9 @@ impl TransportState {
             *sample_pos = sample_pos.saturating_add_signed(samples);
         }
 
-        if let Some(position_seconds) = &mut self.position_seconds {
+        if self.is_playing
+            && let Some(position_seconds) = &mut self.position_seconds
+        {
             *position_seconds += samples as f64 / sample_rate;
         }
 
@@ -65,7 +71,9 @@ impl TransportState {
             let tempo_end = tempo_start + (*tempo_inc * samples as f64);
             *tempo = tempo_end;
 
-            if let Some(position_beats) = &mut self.position_beats {
+            if self.is_playing
+                && let Some(position_beats) = &mut self.position_beats
+            {
                 // Integrate tempo over the sample block using the trapezoidal rule
                 *position_beats += (samples as f64 * (tempo_end + tempo_start) / 60.0 * 0.5) / sample_rate;
             }
@@ -77,6 +85,7 @@ impl TransportState {
         let mut flags = 0;
         flags |= self.is_playing as u32 * CLAP_TRANSPORT_IS_PLAYING;
         flags |= self.is_recording as u32 * CLAP_TRANSPORT_IS_RECORDING;
+        flags |= self.is_within_preroll as u32 * CLAP_TRANSPORT_IS_WITHIN_PRE_ROLL;
         flags |= self.position_beats.is_some() as u32 * CLAP_TRANSPORT_HAS_BEATS_TIMELINE;
         flags |= self.position_seconds.is_some() as u32 * CLAP_TRANSPORT_HAS_SECONDS_TIMELINE;
         flags |= self.tempo.is_some() as u32 * CLAP_TRANSPORT_HAS_TEMPO;
@@ -139,12 +148,6 @@ impl ConstantMask {
 impl std::fmt::Debug for ConstantMask {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ConstantMask(0b{:064b})", self.0)
-    }
-}
-
-impl Recordable for ConstantMask {
-    fn record(&self, record: &mut dyn Recorder) {
-        record.value("", &format!("0b{:064b}", self.0));
     }
 }
 

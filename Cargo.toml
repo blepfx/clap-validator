@@ -17,31 +17,32 @@ repository = "https://github.com/free-audio/clap-validator"
 
 [dependencies]
 anyhow = "1.0.58"
+basic-toml = "0.1.10"
 either = "1.9.0"
 # All the claps!
-clap = { version = "4.1.8", features = ["derive", "wrap_help"] }
+clap = { version = "4.5.58", features = ["derive", "wrap_help"] }
 # For CLAP 1.2.2 support
 clap-sys = { git = "https://github.com/micahrj/clap-sys.git", rev = "25d7f53fdb6363ad63fbd80049cb7a42a97ac156" }
 crossbeam = "0.8.4"
 libloading = "0.9.0"
+log = "0.4"
 midi-consts = "0.1.0"
 rand = "0.10.0"
 rand_pcg = "0.10.1"
 rayon = "1.6.1"
 regex-lite = "0.1.8"
+rustc-hash = "2.1.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 strum = "0.27.2"
 strum_macros = "0.27.2"
+supports-unicode = "3.0.0"
 tempfile = "3.3"
 textwrap = { version = "0.16.2", features = ["terminal_size"] }
 time = { version = "0.3", features = ["serde"]}
 walkdir = "2.3"
 wait-timeout = "0.2.1"
-rustc-hash = "2.1.1"
-yansi = "1.0.1"
-basic-toml = "0.1.10"
-log = "0.4"
+yansi = { version = "1.0.1", features = ["detect-tty", "detect-env"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10.1"

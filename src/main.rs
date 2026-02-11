@@ -4,7 +4,6 @@ use yansi::Paint;
 
 mod cli;
 mod commands;
-mod config;
 mod debug;
 mod plugin;
 mod tests;
@@ -69,15 +68,18 @@ fn main() -> ExitCode {
     let _ = std::fs::remove_dir_all(util::validator_temp_dir());
     let _ = std::fs::create_dir_all(util::validator_temp_dir());
 
+    // disable colors if not supported
+    yansi::whenever(yansi::Condition::TTY_AND_COLOR);
+
+    // begin instrumentation if enabled
     let trace_path = util::validator_temp_dir().join("trace.json");
     let trace_enabled = matches!(&cli.command, Command::Validate(settings) if settings.trace);
 
-    // Begin instrumentation if enabled
     if trace_enabled {
         debug::begin_instrumentation(trace_path.to_str().unwrap());
     }
 
-    // Setup logging
+    // setup logging
     log::set_logger(Box::leak(Box::new(debug::CustomLogger::new()))).unwrap();
     log::set_max_level(match cli.verbosity {
         Verbosity::Quiet => log::LevelFilter::Off,
@@ -88,10 +90,10 @@ fn main() -> ExitCode {
         Verbosity::Trace => log::LevelFilter::Trace,
     });
 
-    // Install the panic hook to log panics instead of printing them to stderr.
+    // install the panic hook to log panics instead of printing them to stderr.
     debug::install_panic_hook();
 
-    // Mark the main thread as such for plugin instance creation checks.
+    // mark the main thread as such for plugin instance creation checks.
     unsafe {
         plugin::library::mark_current_thread_as_os_main_thread();
     }

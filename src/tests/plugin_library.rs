@@ -13,7 +13,7 @@ mod scanning;
 /// Tests for entire CLAP libraries. These are mostly to ensure good plugin scanning practices. See
 /// the module's heading for more information, and the `description` function below for a
 /// description of each test case.
-#[derive(strum_macros::Display, strum_macros::EnumString, strum_macros::EnumIter)]
+#[derive(strum_macros::Display, strum_macros::EnumString, strum_macros::EnumIter, strum_macros::IntoStaticStr)]
 pub enum PluginLibraryTestCase {
     #[strum(serialize = "preset-discovery-crawl")]
     PresetDiscoveryCrawl,
@@ -71,9 +71,8 @@ impl<'a> TestCase<'a> for PluginLibraryTestCase {
     }
 
     fn run(&self, library_path: Self::TestArgs) -> Result<TestStatus> {
-        let name = self.to_string();
         let _span = Span::begin(
-            &name,
+            self.into(),
             record! {
                 library_path: library_path.display().to_string()
             },

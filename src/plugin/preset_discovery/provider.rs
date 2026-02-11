@@ -3,6 +3,7 @@
 use super::indexer::{Indexer, IndexerResults};
 use super::metadata_receiver::{MetadataReceiver, PresetFile};
 use super::{Location, LocationValue, PresetDiscoveryFactory, ProviderMetadata};
+use crate::debug::{Span, record};
 use crate::plugin::util::{Proxy, clap_call};
 use anyhow::{Context, Result};
 use clap_sys::factory::preset_discovery::clap_preset_discovery_provider;
@@ -46,6 +47,13 @@ impl<'a> Provider<'a> {
 
         let provider_id_cstring = CString::new(provider_id).expect("The provider ID contained internal null bytes");
         let provider = {
+            let span = Span::begin(
+                "clap_preset_discovery_factory::create",
+                record! {
+                    provider_id: provider_id
+                },
+            );
+
             let factory = factory.as_ptr();
             let provider = unsafe {
                 clap_call! {
@@ -56,6 +64,8 @@ impl<'a> Provider<'a> {
                     )
                 }
             };
+
+            span.finish(record!(result: format_args!("{:p}", provider)));
 
             match NonNull::new(provider as *mut clap_preset_discovery_provider) {
                 Some(provider) => provider,
@@ -68,13 +78,17 @@ impl<'a> Provider<'a> {
 
         let declared_data = {
             let provider = provider.as_ptr();
+
+            let span = Span::begin("clap_preset_discovery_provider::init", ());
             let result = unsafe {
                 clap_call! { provider=>init(provider) }
             };
 
+            span.finish(record!(result: result));
+
             if !result {
                 anyhow::bail!(
-                    "'clap_preset_discovery_factory::init()' returned false for the provider with ID '{provider_id}'."
+                    "'clap_preset_discovery_provider::init()' returned false for the provider with ID '{provider_id}'."
                 );
             }
 
@@ -135,7 +149,16 @@ impl<'a> Provider<'a> {
 
             let metadata_receiver = MetadataReceiver::new(location.clone(), location_flags);
             let provider = self.as_ptr();
-            let success = unsafe {
+
+            let span = Span::begin(
+                "clap_preset_discovery_provider::get_metadata",
+                record! {
+                    location: location,
+                    location_flags: location_flags
+                },
+            );
+
+            let result = unsafe {
                 clap_call! {
                     provider=>get_metadata(
                         provider,
@@ -146,7 +169,9 @@ impl<'a> Provider<'a> {
                 }
             };
 
-            if !success {
+            span.finish(record!(result: result));
+
+            if !result {
                 anyhow::bail!("The preset provider returned false when fetching metadata for {location}.",);
             }
 
@@ -161,13 +186,12 @@ impl<'a> Provider<'a> {
             Ok(())
         };
 
-        match &location.value {
-            LocationValue::File(file_path) => {
+        match location.value.file_path() {
+            Some(file_path) => {
                 // Single files are queried as is, directories are crawled. If the declared location
                 // does not exist, then that results in a hard error.
-                let file_path_str = file_path.to_str().context("Invalid UTF-8 in location path")?;
-                let metadata = std::fs::metadata(file_path_str)
-                    .with_context(|| "Could not query metadata for the declared file location '{file_path_str}'")?;
+                let metadata = std::fs::metadata(&file_path)
+                    .with_context(|| "Could not query metadata for the declared file location '{file_path}'")?;
                 if metadata.is_dir() {
                     // If the plugin declared valid file extensions, then we'll filter by those file
                     // extensions
@@ -178,7 +202,7 @@ impl<'a> Provider<'a> {
                         .map(|file_type| file_type.extension.as_str())
                         .collect();
 
-                    let walker = WalkDir::new(file_path_str)
+                    let walker = WalkDir::new(file_path)
                         .min_depth(1)
                         .follow_links(true)
                         .same_file_system(false)
@@ -198,15 +222,15 @@ impl<'a> Provider<'a> {
                         //       directories. If the plugin doesn't return an error but also doesn't
                         //       declare any presets then that gets handled gracefully
                         crawl(LocationValue::File(
-                            CString::new(candidate.path().to_str().context("Invalid UTF-8 in file path")?)
-                                .expect("File path contained null bytes"),
+                            CString::new(candidate.path().to_string_lossy().to_string())
+                                .context("File path contains nul byte")?,
                         ))?;
                     }
                 } else {
                     crawl(location.value.clone())?;
                 }
             }
-            LocationValue::Internal => {
+            None => {
                 crawl(LocationValue::Internal)?;
             }
         }

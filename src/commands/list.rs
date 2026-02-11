@@ -124,7 +124,7 @@ fn list_plugins(json: bool, in_process: bool, verbosity: Verbosity, paths: Optio
 /// Lists all available test cases.
 fn list_tests(json: bool) -> Result<ExitCode> {
     let list = crate::tests::TestList::default();
-    let config = crate::config::Config::from_current()?;
+    let config = crate::cli::Config::from_current()?;
 
     if json {
         println!(
@@ -155,8 +155,7 @@ fn scan_single(
 
 mod pretty {
     use super::scan_out_of_process::ScanStatus;
-    use crate::cli::{Report, ReportItem, pluralize};
-    use crate::config::Config;
+    use crate::cli::{Config, Report, ReportItem, pluralize};
     use crate::plugin::preset_discovery::*;
     use crate::tests::TestList;
     use std::path::PathBuf;

@@ -52,7 +52,14 @@ impl<'a> Surround<'a> {
         let surround = self.surround.as_ptr();
         let plugin = self.plugin.as_ptr();
 
-        // TODO: add span stuff
+        let span = Span::begin(
+            "clap_plugin_surround::get_channel_map",
+            record! {
+                is_input: is_input,
+                port_index: port_index,
+                channel_count: channel_count
+            },
+        );
 
         unsafe {
             let mut channel_map = vec![0u8; channel_count as usize];
@@ -67,6 +74,7 @@ impl<'a> Surround<'a> {
             };
 
             channel_map.truncate(channels_real as usize);
+            span.finish(record! { channel_map: format_args!("{:?}", channel_map) });
             channel_map
         }
     }

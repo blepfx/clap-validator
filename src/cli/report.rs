@@ -89,7 +89,11 @@ impl Display for Report {
             f,
             "{}",
             self.print_with(
-                &Charset::UNICODE,
+                if supports_unicode::supports_unicode() {
+                    &Charset::UNICODE
+                } else {
+                    &Charset::ASCII
+                },
                 match textwrap::termwidth() {
                     w if w > 40 => w - 10,
                     w => w,

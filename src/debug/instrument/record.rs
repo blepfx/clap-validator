@@ -1,11 +1,10 @@
 use super::WRITER;
-use std::ffi::CStr;
 use std::fmt::Display;
 
 pub fn event(message: impl Display, context: impl Recordable) {
     if let Some(writer) = WRITER.get() {
         writer.lock().unwrap().write(
-            &message.to_string(),
+            format_args!("{}", message),
             std::thread::current().name().unwrap_or("?"),
             "n",
             &context,
@@ -13,23 +12,25 @@ pub fn event(message: impl Display, context: impl Recordable) {
     }
 }
 
-pub struct Span<'a> {
-    name: &'a str,
+pub struct Span {
+    name: &'static str,
 }
 
-impl Drop for Span<'_> {
+impl Drop for Span {
     fn drop(&mut self) {
         Span { name: self.name }.finish(())
     }
 }
 
-impl<'a> Span<'a> {
-    pub fn begin(name: &'a str, context: impl Recordable) -> Self {
+impl Span {
+    pub fn begin(name: &'static str, context: impl Recordable) -> Self {
         if let Some(writer) = WRITER.get() {
-            writer
-                .lock()
-                .unwrap()
-                .write(name, std::thread::current().name().unwrap_or("?"), "b", &context);
+            writer.lock().unwrap().write(
+                format_args!("{}", name),
+                std::thread::current().name().unwrap_or("?"),
+                "b",
+                &context,
+            );
         }
 
         Self { name }
@@ -37,46 +38,39 @@ impl<'a> Span<'a> {
 
     pub fn finish<T: Recordable>(self, context: T) {
         if let Some(writer) = WRITER.get() {
-            writer
-                .lock()
-                .unwrap()
-                .write(self.name, std::thread::current().name().unwrap_or("?"), "e", &context);
+            writer.lock().unwrap().write(
+                format_args!("{}", self.name),
+                std::thread::current().name().unwrap_or("?"),
+                "e",
+                &context,
+            );
         }
 
         std::mem::forget(self);
     }
 
-    pub fn name(&self) -> &'a str {
+    pub fn name(&self) -> &'static str {
         self.name
     }
 }
 
 pub trait Recorder {
-    fn value(&mut self, name: &str, value: &dyn Display);
-    fn group(&mut self, name: &str, record: &dyn Recordable);
-}
-
-impl dyn Recorder + '_ {
-    pub fn record<T: Recordable>(&mut self, name: &str, value: T) {
-        self.group(name, &value);
-    }
+    fn record_value(&mut self, value: std::fmt::Arguments<'_>);
+    fn record_entry(&mut self, name: &str, record: &dyn Recordable);
 }
 
 pub trait Recordable {
     fn record(&self, record: &mut dyn Recorder);
 }
 
-impl Recordable for () {
-    fn record(&self, _: &mut dyn Recorder) {}
+impl dyn Recorder + '_ {
+    pub fn record<T: Recordable>(&mut self, name: &str, value: T) {
+        self.record_entry(name, &value);
+    }
 }
 
-impl Recordable for CStr {
-    fn record(&self, record: &mut dyn Recorder) {
-        match self.to_str() {
-            Ok(s) => record.value("", &s),
-            Err(_) => record.value("", &"<invalid utf-8>"),
-        }
-    }
+impl Recordable for () {
+    fn record(&self, _: &mut dyn Recorder) {}
 }
 
 impl<T: Recordable + ?Sized> Recordable for &T {
@@ -85,11 +79,19 @@ impl<T: Recordable + ?Sized> Recordable for &T {
     }
 }
 
+impl<T: Recordable> Recordable for Option<T> {
+    fn record(&self, record: &mut dyn Recorder) {
+        if let Some(value) = self {
+            value.record(record);
+        }
+    }
+}
+
 macro_rules! impl_display {
     ($($ty:ty),*) => {
         $(impl Recordable for $ty {
             fn record(&self, record: &mut dyn Recorder) {
-                record.value("", &self);
+                record.record_value(format_args!("{}", self));
             }
         })*
     };
@@ -130,7 +132,7 @@ pub fn from_fn(f: impl Fn(&mut dyn Recorder)) -> impl Recordable {
 macro_rules! record {
     ($($name:ident: $value:expr),*) => {
         $crate::debug::from_fn(|record| {
-            $(record.group(stringify!($name), &$value);)*
+            $(record.record_entry(stringify!($name), &$value);)*
         })
     };
 }

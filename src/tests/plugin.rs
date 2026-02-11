@@ -16,7 +16,7 @@ mod transport;
 
 /// The tests for individual CLAP plugins. See the module's heading for more information, and the
 /// `description` function below for a description of each test case.
-#[derive(strum_macros::Display, strum_macros::EnumString, strum_macros::EnumIter)]
+#[derive(strum_macros::Display, strum_macros::EnumString, strum_macros::EnumIter, strum_macros::IntoStaticStr)]
 pub enum PluginTestCase {
     #[strum(serialize = "descriptor-consistency")]
     DescriptorConsistency,
@@ -265,9 +265,8 @@ impl<'a> TestCase<'a> for PluginTestCase {
     }
 
     fn run(&self, (library_path, plugin_id): Self::TestArgs) -> Result<TestStatus> {
-        let name = self.to_string();
         let _span = Span::begin(
-            &name,
+            self.into(),
             record! {
                 library_path: library_path.display().to_string(),
                 plugin_id: plugin_id

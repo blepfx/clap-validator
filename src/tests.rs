@@ -81,7 +81,7 @@ pub struct TestListItem {
 
 /// An abstraction for a test case. This mostly exists because we need two separate kinds of tests
 /// (per library and per plugin), and it's good to keep the interface uniform.
-pub trait TestCase<'a>: Display + FromStr + Sized + 'static {
+pub trait TestCase<'a>: Into<&'static str> + Display + FromStr + Sized + 'static {
     /// The type of the arguments the test cases are parameterized over. This can be an instance of
     /// the plugin library and a plugin ID, or just the file path to the plugin library.
     type TestArgs: Serialize + Deserialize<'a>;

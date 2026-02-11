@@ -12,7 +12,7 @@ use crate::plugin::ext::thread_pool::ThreadPool;
 use crate::plugin::ext::voice_info::VoiceInfo;
 use crate::plugin::instance::{CallbackEvent, MainThreadTask, Plugin, PluginStatus};
 use crate::plugin::preset_discovery::LocationValue;
-use crate::plugin::util::{self, CHECK_POINTER, Proxy, Proxyable, clap_call, validator_version};
+use crate::plugin::util::{self, CHECK_POINTER, Proxy, Proxyable, clap_call, cstr_ptr_to_string, validator_version};
 use anyhow::{Context, Result};
 use clap_sys::ext::audio_ports::*;
 use clap_sys::ext::audio_ports_config::{CLAP_EXT_AUDIO_PORTS_CONFIG, clap_host_audio_ports_config};
@@ -161,7 +161,7 @@ impl PluginShared {
             let span = Span::begin(
                 "clap_plugin::get_extension",
                 record! {
-                    extension_id: id
+                    extension_id: id.to_string_lossy()
                 },
             );
 
@@ -344,14 +344,29 @@ impl PluginShared {
     };
 
     unsafe extern "C" fn clap_get_extension(host: *const clap_host, extension_id: *const c_char) -> *const c_void {
+        let extension_id_cstr = if extension_id.is_null() {
+            None
+        } else {
+            Some(unsafe { CStr::from_ptr(extension_id) })
+        };
+
+        let span = Span::begin(
+            "clap_host::get_extension",
+            record! {
+                extension_id: match extension_id_cstr {
+                    Some(id) => id.to_string_lossy(),
+                    None => "<null>".into()
+                }
+            },
+        );
+
         // Right now there's no way to have the host only expose certain extensions. We can always
         // add that when test cases need it.
-        Self::wrap(host, "clap_host::get_extension", |_| {
-            if extension_id.is_null() {
+        Self::wrap(host, span.name(), |_| {
+            let Some(extension_id_cstr) = extension_id_cstr else {
                 anyhow::bail!("Null extension ID");
-            }
+            };
 
-            let extension_id_cstr = unsafe { CStr::from_ptr(extension_id) };
             let extension_ptr = if extension_id_cstr == CLAP_EXT_AUDIO_PORTS {
                 &Self::EXT_AUDIO_PORTS as *const _ as *const c_void
             } else if extension_id_cstr == CLAP_EXT_NOTE_PORTS {
@@ -380,8 +395,7 @@ impl PluginShared {
                 std::ptr::null()
             };
 
-            // record("extension_id", extension_id_cstr.to_string_lossy());
-            // record("found", !extension_ptr.is_null());
+            span.finish(record!(result: format_args!("{:p}", extension_ptr)));
 
             Ok(extension_ptr)
         })
@@ -665,25 +679,21 @@ impl PluginShared {
     }
 
     unsafe extern "C" fn ext_log_log(_host: *const clap_host, level: i32, msg: *const c_char) {
-        let msg = if msg.is_null() {
-            c"<null>"
-        } else {
-            unsafe { CStr::from_ptr(msg) }
+        let msg = match unsafe { cstr_ptr_to_string(msg) } {
+            Ok(Some(msg)) => msg,
+            Ok(None) => "<null>".into(),
+            Err(_) => "<invalid utf-8>".into(),
         };
 
         match level {
-            CLAP_LOG_ERROR => log::error!(target: "plugin-error", "{}", msg.to_string_lossy()),
-            CLAP_LOG_FATAL => log::error!(target: "plugin-fatal", "{}", msg.to_string_lossy()),
-            CLAP_LOG_WARNING => log::warn!(target: "plugin-warning", "{}", msg.to_string_lossy()),
-            CLAP_LOG_INFO => log::info!(target: "plugin-info", "{}", msg.to_string_lossy()),
-            CLAP_LOG_DEBUG => log::debug!(target: "plugin-debug", "{}", msg.to_string_lossy()),
-            CLAP_LOG_HOST_MISBEHAVING => {
-                log::error!(target: "plugin-host-misbehaving", "{}", msg.to_string_lossy())
-            }
-            CLAP_LOG_PLUGIN_MISBEHAVING => {
-                log::error!(target: "plugin-plugin-misbehaving", "{}", msg.to_string_lossy())
-            }
-            _ => log::debug!(target: "plugin-unknown", "{}", msg.to_string_lossy()),
+            CLAP_LOG_ERROR => log::error!(target: "plugin::error", "{}", msg),
+            CLAP_LOG_FATAL => log::error!(target: "plugin::fatal", "{}", msg),
+            CLAP_LOG_WARNING => log::warn!(target: "plugin::warning", "{}", msg),
+            CLAP_LOG_INFO => log::info!(target: "plugin::info", "{}", msg),
+            CLAP_LOG_DEBUG => log::debug!(target: "plugin::debug", "{}", msg),
+            CLAP_LOG_HOST_MISBEHAVING => log::error!(target: "plugin::host-misbehaving", "{}", msg),
+            CLAP_LOG_PLUGIN_MISBEHAVING => log::error!(target: "plugin::plugin-misbehaving", "{}", msg),
+            _ => log::debug!(target: "plugin", "{}", msg),
         }
     }
 

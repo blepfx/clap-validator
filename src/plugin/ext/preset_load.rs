@@ -6,6 +6,7 @@ use std::ffi::{CStr, CString};
 use std::ptr::NonNull;
 
 use super::Extension;
+use crate::debug::{Span, record};
 use crate::plugin::instance::Plugin;
 use crate::plugin::preset_discovery::LocationValue;
 use crate::plugin::util::clap_call;
@@ -44,7 +45,16 @@ impl PresetLoad<'_> {
 
         let preset_load = self.preset_load.as_ptr();
         let plugin = self.plugin.as_ptr();
-        let success = unsafe {
+
+        let span = Span::begin(
+            "clap_plugin_preset_load::from_location",
+            record! {
+                location: location,
+                load_key: load_key
+            },
+        );
+
+        let result = unsafe {
             clap_call! {
                 preset_load=>from_location(
                     plugin,
@@ -58,7 +68,9 @@ impl PresetLoad<'_> {
             }
         };
 
-        if success {
+        span.finish(record!(result: result));
+
+        if result {
             Ok(())
         } else {
             anyhow::bail!(

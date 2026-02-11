@@ -1,4 +1,7 @@
-pub mod report;
+mod config;
+mod report;
+
+pub use config::*;
 pub use report::*;
 
 pub fn pluralize(count: usize, singular: &str) -> String {

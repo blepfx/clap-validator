@@ -21,6 +21,10 @@ pub enum Event {
     NoteExpression(clap_event_note_expression),
     /// `CLAP_EVENT_MIDI`.
     Midi(clap_event_midi),
+    /// `CLAP_EVENT_MIDI2`.
+    Midi2(clap_event_midi2),
+    /// `CLAP_EVENT_MIDI_SYSEX`.
+    Sysex(clap_event_midi_sysex),
     /// `CLAP_EVENT_PARAM_VALUE`.
     ParamValue(clap_event_param_value),
     /// `CLAP_EVENT_PARAM_MOD`.
@@ -192,6 +196,10 @@ impl Event {
                     Event::ParamMod(*(ptr as *const clap_event_param_mod))
                 }
                 (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI) => Event::Midi(*(ptr as *const clap_event_midi)),
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI2) => Event::Midi2(*(ptr as *const clap_event_midi2)),
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI_SYSEX) => {
+                    Event::Sysex(*(ptr as *const clap_event_midi_sysex))
+                }
                 (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_TRANSPORT) => {
                     Event::Transport(*(ptr as *const clap_event_transport))
                 }
@@ -208,6 +216,8 @@ impl Event {
             Event::ParamValue(event) => &event.header,
             Event::ParamMod(event) => &event.header,
             Event::Midi(event) => &event.header,
+            Event::Midi2(event) => &event.header,
+            Event::Sysex(event) => &event.header,
             Event::Transport(event) => &event.header,
             Event::Unknown(header) => header,
         }
@@ -244,7 +254,7 @@ impl Recordable for Event {
 
         match self {
             Event::Note(event) => {
-                record.record("id", event.note_id);
+                record.record("note_id", event.note_id);
                 record.record("key", event.key);
                 record.record("port", event.port_index);
                 record.record("channel", event.channel);
@@ -274,28 +284,44 @@ impl Recordable for Event {
                 record.record("value", event.value);
             }
             Event::ParamValue(event) => {
-                record.record("note_id", event.note_id);
-                record.record("port_index", event.port_index);
-                record.record("key", event.key);
-                record.record("channel", event.channel);
                 record.record("param_id", event.param_id);
                 record.record("value", event.value);
-            }
-            Event::ParamMod(event) => {
                 record.record("note_id", event.note_id);
                 record.record("port_index", event.port_index);
                 record.record("key", event.key);
                 record.record("channel", event.channel);
+            }
+            Event::ParamMod(event) => {
                 record.record("param_id", event.param_id);
                 record.record("amount", event.amount);
+                record.record("note_id", event.note_id);
+                record.record("port_index", event.port_index);
+                record.record("key", event.key);
+                record.record("channel", event.channel);
             }
             Event::Midi(event) => {
                 record.record("port_index", event.port_index);
-                record.record(
-                    "raw",
-                    format_args!("{:02X} {:02X} {:02X}", event.data[0], event.data[1], event.data[2]),
-                );
+                record.record("raw", format_args!("{:X?}", event.data));
             }
+            Event::Midi2(event) => {
+                record.record("port_index", event.port_index);
+                record.record("raw", format_args!("{:X?}", event.data));
+            }
+            Event::Sysex(event) => {
+                record.record("port_index", event.port_index);
+
+                if event.buffer.is_null() {
+                    record.record("data", "<null>");
+                } else {
+                    record.record(
+                        "data",
+                        format_args!("{:X?}", unsafe {
+                            std::slice::from_raw_parts(event.buffer, event.size as usize)
+                        }),
+                    );
+                }
+            }
+
             Event::Transport(event) => {
                 record.record("transport", event);
             }

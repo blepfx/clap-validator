@@ -49,6 +49,7 @@ impl log::Log for CustomLogger {
             write!(buffer, "{:>5}{}", elapsed.as_millis().dim(), "ms".dim()).ok();
             write!(buffer, " {}: ", prefix).ok();
             write!(buffer, "{}", log.args()).ok();
+            write!(buffer, " {}", log.target().dim().italic()).ok();
             writeln!(buffer).ok();
             eprint!("{}", buffer);
         });

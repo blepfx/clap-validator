@@ -1,7 +1,6 @@
 //! Commands for validating plugins.
 
-use crate::cli::{Report, ReportItem, pluralize};
-use crate::config::Config;
+use crate::cli::{Config, Report, ReportItem, pluralize};
 use crate::tests::{TestResult, TestStatus};
 use crate::validator::{ValidationResult, ValidationTally};
 use crate::{Verbosity, validator};

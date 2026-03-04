@@ -245,13 +245,8 @@ impl Recordable for Event {
         record.record("type_id", self.header().type_);
         record.record("time", self.header().time);
 
-        if self.header().flags & CLAP_EVENT_IS_LIVE != 0 {
-            record.record("flags.is_live", true);
-        }
-
-        if self.header().flags & CLAP_EVENT_DONT_RECORD != 0 {
-            record.record("flags.dont_record", true);
-        }
+        record.record("flags.is_live", self.header().flags & CLAP_EVENT_IS_LIVE != 0);
+        record.record("flags.dont_record", self.header().flags & CLAP_EVENT_DONT_RECORD != 0);
 
         match self {
             Event::Note(event) => {

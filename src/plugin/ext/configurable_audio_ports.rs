@@ -1,3 +1,4 @@
+use crate::debug::{Recordable, Recorder, Span, from_fn, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::clap_call;
@@ -61,35 +62,59 @@ impl<'a> Extension for ConfigurableAudioPorts<'a> {
 }
 
 impl<'a> ConfigurableAudioPorts<'a> {
-    pub fn can_apply_configuration<'b>(&self, requests: impl IntoIterator<Item = AudioPortsRequest<'b>>) -> bool {
+    pub fn can_apply_configuration(&self, requests: &[AudioPortsRequest]) -> bool {
         self.plugin.status().assert_inactive();
 
-        let requests = convert_requests(requests);
+        let span = Span::begin(
+            "clap_plugin_configurable_audio_ports::can_apply_configuration",
+            from_fn(|record| {
+                for (i, request) in requests.iter().enumerate() {
+                    record.record(&format!("requests.{}", i), *request);
+                }
+            }),
+        );
+
+        let requests = convert_requests(requests.iter().copied());
         let plugin = self.plugin.as_ptr();
         let ext = self.configurable_audio_ports.as_ptr();
 
         unsafe {
-            clap_call! { ext=>can_apply_configuration(
+            let result = clap_call! { ext=>can_apply_configuration(
                 plugin,
                 requests.as_ptr(),
                 requests.len() as u32
-            )}
+            )};
+
+            span.finish(record!(result: result));
+            result
         }
     }
 
-    pub fn apply_configuration<'b>(&self, requests: impl IntoIterator<Item = AudioPortsRequest<'b>>) -> bool {
+    pub fn apply_configuration(&self, requests: &[AudioPortsRequest]) -> bool {
         self.plugin.status().assert_inactive();
 
-        let requests = convert_requests(requests);
+        let span = Span::begin(
+            "clap_plugin_configurable_audio_ports::apply_configuration",
+            from_fn(|record| {
+                for (i, request) in requests.iter().enumerate() {
+                    record.record(&format!("requests.{}", i), *request);
+                }
+            }),
+        );
+
+        let requests = convert_requests(requests.iter().copied());
         let plugin = self.plugin.as_ptr();
         let ext = self.configurable_audio_ports.as_ptr();
 
         unsafe {
-            clap_call! { ext=>apply_configuration(
+            let result = clap_call! { ext=>apply_configuration(
                 plugin,
                 requests.as_ptr(),
                 requests.len() as u32
-            )}
+            )};
+
+            span.finish(record!(result: result));
+            result
         }
     }
 }
@@ -123,6 +148,43 @@ fn convert_requests<'a>(
             },
         })
         .collect::<Vec<_>>()
+}
+
+impl Recordable for AudioPortsRequest<'_> {
+    fn record(&self, record: &mut dyn Recorder) {
+        record.record("is_input", self.is_input);
+        record.record("port_index", self.port_index);
+        record.record("details", self.request_info);
+    }
+}
+
+impl Recordable for AudioPortsRequestInfo<'_> {
+    fn record(&self, record: &mut dyn Recorder) {
+        match self {
+            AudioPortsRequestInfo::Mono => {
+                record.record("type", "mono");
+                record.record("channel_count", 1);
+            }
+            AudioPortsRequestInfo::Stereo => {
+                record.record("type", "stereo");
+                record.record("channel_count", 2);
+            }
+            AudioPortsRequestInfo::Untyped { channel_count } => {
+                record.record("type", "null");
+                record.record("channel_count", *channel_count);
+            }
+            AudioPortsRequestInfo::Ambisonic { channel_count, config } => {
+                record.record("type", "ambisonic");
+                record.record("channel_count", *channel_count);
+                record.record("config", config);
+            }
+            AudioPortsRequestInfo::Surround { channel_map } => {
+                record.record("type", "surround");
+                record.record("channel_count", channel_map.len() as u32);
+                record.record("channel_map", format!("{:?}", channel_map));
+            }
+        }
+    }
 }
 
 impl Display for AudioPortsRequest<'_> {

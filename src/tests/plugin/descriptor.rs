@@ -120,7 +120,7 @@ pub fn test_features_standard(library: &PluginLibrary, plugin_id: &str) -> Resul
 
     let invalid_features: Vec<String> = features
         .iter()
-        .filter(|feature| !feature.contains(':')) // We can only compare ASCII features, so we'll ignore non-ASCII ones
+        .filter(|feature| !feature.contains(':'))
         .filter(|feature| {
             STANDARD_FEATURES
                 .iter()
@@ -133,8 +133,8 @@ pub fn test_features_standard(library: &PluginLibrary, plugin_id: &str) -> Resul
         Ok(TestStatus::Success { details: None })
     } else {
         anyhow::bail!(
-            "The plugin has the following non-standard features: {invalid_features:?}. Please make sure that all \
-             features used by the plugin are listed in 'clap_sys::plugin_features'."
+            "The plugin has the following non-standard features: {invalid_features:?}.
+            Any non-standard feature must be in the format 'namespace:feature'"
         );
     }
 }

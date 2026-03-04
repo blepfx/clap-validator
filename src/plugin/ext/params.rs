@@ -372,14 +372,16 @@ impl Params<'_> {
         let params = self.params.as_ptr();
         let plugin = self.plugin.as_ptr();
 
+        let span = Span::begin("clap_plugin_params::get_info", record! { index: index });
         unsafe {
-            let mut info = clap_param_info { ..std::mem::zeroed() };
-            if !clap_call! { params=>get_info(plugin, index, &mut info) } {
+            let mut result = clap_param_info { ..std::mem::zeroed() };
+            if !clap_call! { params=>get_info(plugin, index, &mut result) } {
                 let num_params = self.get_raw_param_count();
                 anyhow::bail!("Plugin returned false when querying parameter {index} ({num_params} total parameters).");
             }
 
-            Ok(info)
+            span.finish(record!(result: result));
+            Ok(result)
         }
     }
 }
@@ -453,11 +455,14 @@ impl Recordable for clap_param_info {
         record.record("flags.is_hidden", self.flags & CLAP_PARAM_IS_HIDDEN != 0);
         record.record("flags.is_readonly", self.flags & CLAP_PARAM_IS_READONLY != 0);
         record.record("flags.is_stepped", self.flags & CLAP_PARAM_IS_STEPPED != 0);
-        record.record("flags.is_automatable", self.flags & CLAP_PARAM_IS_AUTOMATABLE != 0);
         record.record("flags.is_periodic", self.flags & CLAP_PARAM_IS_PERIODIC != 0);
         record.record("flags.is_bypass", self.flags & CLAP_PARAM_IS_BYPASS != 0);
         record.record("flags.is_enum", self.flags & CLAP_PARAM_IS_ENUM != 0);
 
+        record.record(
+            "flags.is_automatable.global",
+            self.flags & CLAP_PARAM_IS_AUTOMATABLE != 0,
+        );
         record.record(
             "flags.is_automatable.per_note_id",
             self.flags & CLAP_PARAM_IS_AUTOMATABLE_PER_NOTE_ID != 0,
@@ -474,7 +479,10 @@ impl Recordable for clap_param_info {
             "flags.is_automatable.per_port",
             self.flags & CLAP_PARAM_IS_AUTOMATABLE_PER_PORT != 0,
         );
-        record.record("flags.is_modulatable", self.flags & CLAP_PARAM_IS_MODULATABLE != 0);
+        record.record(
+            "flags.is_modulatable.global",
+            self.flags & CLAP_PARAM_IS_MODULATABLE != 0,
+        );
         record.record(
             "flags.is_modulatable.per_note_id",
             self.flags & CLAP_PARAM_IS_MODULATABLE_PER_NOTE_ID != 0,

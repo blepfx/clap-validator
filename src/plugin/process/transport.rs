@@ -153,24 +153,34 @@ impl std::fmt::Debug for ConstantMask {
 
 impl Recordable for clap_event_transport {
     fn record(&self, record: &mut dyn Recorder) {
-        record.record("flags", format_args!("0b{:b}", self.flags));
-
-        record.record("is_playing", self.flags & CLAP_TRANSPORT_IS_PLAYING != 0);
-        record.record("is_recording", self.flags & CLAP_TRANSPORT_IS_RECORDING != 0);
-        record.record("is_within_preroll", self.flags & CLAP_TRANSPORT_IS_WITHIN_PRE_ROLL != 0);
-        record.record("is_loop_active", self.flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE != 0);
+        record.record("flags.is_playing", self.flags & CLAP_TRANSPORT_IS_PLAYING != 0);
+        record.record("flags.is_recording", self.flags & CLAP_TRANSPORT_IS_RECORDING != 0);
+        record.record(
+            "flags.is_within_preroll",
+            self.flags & CLAP_TRANSPORT_IS_WITHIN_PRE_ROLL != 0,
+        );
+        record.record("flags.is_loop_active", self.flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE != 0);
+        record.record(
+            "flags.has_beats_timeline",
+            self.flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE != 0,
+        );
+        record.record(
+            "flags.has_seconds_timeline",
+            self.flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE != 0,
+        );
+        record.record(
+            "flags.has_time_signature",
+            self.flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE != 0,
+        );
+        record.record("flags.has_tempo", self.flags & CLAP_TRANSPORT_HAS_TEMPO != 0);
 
         if self.flags & CLAP_TRANSPORT_HAS_TEMPO != 0 {
             record.record("tempo", self.tempo);
             record.record("tempo_inc", self.tempo_inc);
-        } else {
-            record.record("tempo", false);
         }
 
         if self.flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE != 0 {
             record.record("time_signature", format_args!("{}/{}", self.tsig_num, self.tsig_denom));
-        } else {
-            record.record("time_signature", false);
         }
 
         if self.flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE != 0 {
@@ -192,8 +202,6 @@ impl Recordable for clap_event_transport {
                     self.loop_end_beats as f64 / CLAP_BEATTIME_FACTOR as f64,
                 );
             }
-        } else {
-            record.record("song_pos_beats", false);
         }
 
         if self.flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE != 0 {
@@ -212,8 +220,6 @@ impl Recordable for clap_event_transport {
                     self.loop_end_seconds as f64 / CLAP_SECTIME_FACTOR as f64,
                 );
             }
-        } else {
-            record.record("song_pos_seconds", false);
         }
     }
 }

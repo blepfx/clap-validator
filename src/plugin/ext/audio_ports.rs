@@ -191,7 +191,6 @@ impl AudioPorts<'_> {
                 span.finish(record!(result: info));
                 Some(info)
             } else {
-                span.finish(record!(result: false));
                 None
             }
         }

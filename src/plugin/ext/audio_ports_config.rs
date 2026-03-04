@@ -215,7 +215,7 @@ impl AudioPortsConfigInfo<'_> {
         let plugin = self.plugin.as_ptr();
 
         let span = Span::begin(
-            "clap_plugin_audio_ports_config_info::get_raw_port_info",
+            "clap_plugin_audio_ports_config_info::get",
             record! {
                 config_id: config_id,
                 is_input: is_input,

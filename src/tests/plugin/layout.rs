@@ -1,4 +1,4 @@
-use crate::debug::{Span, record};
+use crate::debug::{Span, from_fn, record};
 use crate::plugin::ext::audio_ports::AudioPorts;
 use crate::plugin::ext::audio_ports_activation::AudioPortsActivation;
 use crate::plugin::ext::audio_ports_config::{AudioPortsConfig, AudioPortsConfigInfo};
@@ -56,6 +56,11 @@ pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) 
         .enumerate()
         .context("Could not enumerate audio port configurations")?
     {
+        let _span = Span::begin(
+            "Config",
+            record! { id: config_audio_ports_config.id, name: &config_audio_ports_config.name },
+        );
+
         audio_ports_config
             .select(config_audio_ports_config.id)
             .with_context(|| {
@@ -283,8 +288,17 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
     while checks_total < MAX_TOTAL_CHECKS && checks_passed < MAX_PASSED_CHECKS {
         let requests = random_layout_requests(&config_audio_ports, &mut prng);
 
-        let can_apply = configurable_audio_ports.can_apply_configuration(requests.iter().copied());
-        let has_applied = configurable_audio_ports.apply_configuration(requests.iter().copied());
+        let _span = Span::begin(
+            "Config",
+            from_fn(|record| {
+                for (i, request) in requests.iter().enumerate() {
+                    record.record(&format!("requests.{}", i), *request);
+                }
+            }),
+        );
+
+        let can_apply = configurable_audio_ports.can_apply_configuration(&requests);
+        let has_applied = configurable_audio_ports.apply_configuration(&requests);
 
         if can_apply != has_applied {
             anyhow::bail!(
@@ -461,8 +475,6 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
                                 buffer.fill_white_noise(&mut prng);
                             }
                         }
-
-                        // TODO: output ports deactivated false positive
                     }
 
                     process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));

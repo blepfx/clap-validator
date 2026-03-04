@@ -1,7 +1,7 @@
 //! Abstractions for single CLAP plugin instances for audio thread interactions.
 
 use super::{Plugin, PluginStatus};
-use crate::debug::{Span, from_fn, record};
+use crate::debug::{Recordable, Recorder, Span, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::{CallbackEvent, MainThreadTask, PluginShared};
 use crate::plugin::process::{InputEventQueue, OutputEventQueue};
@@ -51,17 +51,6 @@ pub struct ProcessInfo<'a> {
     pub audio_outputs: &'a mut [clap_audio_buffer],
     pub input_events: &'a Proxy<InputEventQueue>,
     pub output_events: &'a Proxy<OutputEventQueue>,
-}
-
-impl Debug for ProcessStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProcessStatus::Continue => write!(f, "CLAP_PROCESS_CONTINUE"),
-            ProcessStatus::ContinueIfNotQuiet => write!(f, "CLAP_PROCESS_CONTINUE_IF_NOT_QUIET"),
-            ProcessStatus::Tail => write!(f, "CLAP_PROCESS_TAIL"),
-            ProcessStatus::Sleep => write!(f, "CLAP_PROCESS_SLEEP"),
-        }
-    }
 }
 
 impl Drop for PluginAudioThread<'_> {
@@ -169,53 +158,7 @@ impl<'a> PluginAudioThread<'a> {
 
         self.shared.is_currently_in_process_call.store(true);
 
-        let span = Span::begin(
-            "clap_plugin::process",
-            from_fn(|record| {
-                record.record("frames_count", process.frames_count);
-                record.record("steady_time", process.steady_time.map(|t| t as i64).unwrap_or(-1));
-
-                if let Some(transport) = process.transport {
-                    record.record("transport", transport);
-                }
-
-                for i in 0..process.audio_inputs.len() {
-                    record.record(
-                        &format!("audio_input.{i}.channel_count"),
-                        process.audio_inputs[i].channel_count,
-                    );
-                    record.record(
-                        &format!("audio_input.{i}.data32"),
-                        format_args!("{:p}", process.audio_inputs[i].data32),
-                    );
-                    record.record(
-                        &format!("audio_input.{i}.data64"),
-                        format_args!("{:p}", process.audio_inputs[i].data64),
-                    );
-                    record.record(
-                        &format!("audio_input.{i}.constant_mask"),
-                        format_args!("0b{:b}", process.audio_inputs[i].constant_mask),
-                    );
-                    record.record(&format!("audio_input.{i}.latency"), process.audio_inputs[i].latency);
-                }
-
-                for i in 0..process.audio_outputs.len() {
-                    record.record(
-                        &format!("audio_output.{i}.channel_count"),
-                        process.audio_outputs[i].channel_count,
-                    );
-                    record.record(
-                        &format!("audio_output.{i}.data32"),
-                        format_args!("{:p}", process.audio_outputs[i].data32),
-                    );
-                    record.record(
-                        &format!("audio_output.{i}.data64"),
-                        format_args!("{:p}", process.audio_outputs[i].data64),
-                    );
-                    record.record(&format!("audio_output.{i}.latency"), process.audio_outputs[i].latency);
-                }
-            }),
-        );
+        let span = Span::begin("clap_plugin::process", &process);
 
         let result = unsafe {
             clap_call! { self.as_ptr()=>process(self.as_ptr(), &clap_process {
@@ -280,5 +223,63 @@ impl<'a> PluginAudioThread<'a> {
         };
 
         self.shared.set_status(PluginStatus::Activated);
+    }
+}
+
+impl Recordable for ProcessInfo<'_> {
+    fn record(&self, record: &mut dyn Recorder) {
+        record.record("frames_count", self.frames_count);
+        record.record("steady_time", self.steady_time.map(|t| t as i64).unwrap_or(-1));
+
+        if let Some(transport) = self.transport {
+            record.record("transport", transport);
+        }
+
+        for i in 0..self.audio_inputs.len() {
+            record.record(
+                &format!("audio_input.{i}.channel_count"),
+                self.audio_inputs[i].channel_count,
+            );
+            record.record(
+                &format!("audio_input.{i}.data32"),
+                format_args!("{:p}", self.audio_inputs[i].data32),
+            );
+            record.record(
+                &format!("audio_input.{i}.data64"),
+                format_args!("{:p}", self.audio_inputs[i].data64),
+            );
+            record.record(
+                &format!("audio_input.{i}.constant_mask"),
+                format_args!("0b{:b}", self.audio_inputs[i].constant_mask),
+            );
+            record.record(&format!("audio_input.{i}.latency"), self.audio_inputs[i].latency);
+        }
+
+        for i in 0..self.audio_outputs.len() {
+            record.record(
+                &format!("audio_output.{i}.channel_count"),
+                self.audio_outputs[i].channel_count,
+            );
+            record.record(
+                &format!("audio_output.{i}.data32"),
+                format_args!("{:p}", self.audio_outputs[i].data32),
+            );
+            record.record(
+                &format!("audio_output.{i}.data64"),
+                format_args!("{:p}", self.audio_outputs[i].data64),
+            );
+            record.record(&format!("audio_output.{i}.latency"), self.audio_outputs[i].latency);
+        }
+    }
+}
+
+impl Debug for ProcessStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProcessStatus::Continue => write!(f, "CLAP_PROCESS_CONTINUE"),
+            ProcessStatus::ContinueIfNotQuiet => write!(f, "CLAP_PROCESS_CONTINUE_IF_NOT_QUIET"),
+            ProcessStatus::Tail => write!(f, "CLAP_PROCESS_TAIL"),
+            ProcessStatus::Sleep => write!(f, "CLAP_PROCESS_SLEEP"),
+        }
     }
 }

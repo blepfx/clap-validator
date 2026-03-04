@@ -55,19 +55,28 @@ pub struct ValidationTally {
 /// could not loaded, or if the plugin ID filter did not match any plugins.
 pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings, config: &Config) -> Result<ValidationResult> {
     let filter_test = {
-        let test_filter_regex = settings
-            .filter
-            .as_ref()
+        let test_filter_regexes = settings
+            .include
+            .iter()
             .map(|x| {
                 Regex::new(x).with_context(|| format!("Could not parse the test filter regular expression '{}'", x))
             })
-            .transpose()?;
+            .collect::<Result<Vec<_>>>()?;
+
+        let test_exclude_regexes = settings
+            .exclude
+            .iter()
+            .map(|x| {
+                Regex::new(x).with_context(|| format!("Could not parse the test exclude regular expression '{}'", x))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         move |id: &str| {
             let config_enabled = config.is_test_enabled(id);
-            let filter_enabled = test_filter_regex.as_ref().is_none_or(|f| f.is_match(id));
+            let filter_matches = test_filter_regexes.is_empty() || test_filter_regexes.iter().any(|f| f.is_match(id));
+            let exclude_matches = test_exclude_regexes.iter().any(|f| f.is_match(id));
 
-            config_enabled && filter_enabled
+            config_enabled && filter_matches && !exclude_matches
         }
     };
 

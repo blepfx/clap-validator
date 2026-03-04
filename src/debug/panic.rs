@@ -58,6 +58,8 @@ pub struct TestFailure(pub String);
 /// Fails the current test with a panic, taking down the whole process.
 /// This is a last-resort mechanism for when a test cannot continue due to an error in the plugin being tested.
 /// Prefer regular error handling where possible.
+///
+/// The difference between this and a regular panic is that regular panics are treated as bugs in the validator itself.
 macro_rules! fail_test {
     ($($arg:tt)*) => {
         std::panic::panic_any($crate::debug::TestFailure(format!($($arg)*)))

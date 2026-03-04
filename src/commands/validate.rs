@@ -21,14 +21,19 @@ pub struct ValidatorSettings {
     /// If the plugin library contains multiple plugins, then you can pass a single plugin's ID
     /// to this option to only validate that plugin. Otherwise all plugins in the library are
     /// validated.
-    #[arg(short = 'i', long)]
+    #[arg(short = 'p', long)]
     pub plugin_id: Option<String>,
     /// Print the test output as JSON instead of human readable text.
     #[arg(long)]
     pub json: bool,
     /// Only run the tests that match this case-insensitive regular expression.
-    #[arg(short = 'f', long)]
-    pub filter: Option<String>,
+    /// Multiple include patterns can be passed, in which case a test only needs to match one of them to be included.
+    #[arg(short = 't', long)]
+    pub include: Vec<String>,
+    /// Don't run the tests that match this case-insensitive regular expression.
+    /// Exclude takes precedence over include, so if a test matches both, it will be excluded.
+    #[arg(short = 'x', long)]
+    pub exclude: Vec<String>,
     /// When running the validation out-of-process, hide the plugin's output.
     ///
     /// This can be useful for validating noisy plugins.

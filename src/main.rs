@@ -69,7 +69,7 @@ fn main() -> ExitCode {
     let _ = std::fs::create_dir_all(util::validator_temp_dir());
 
     // disable colors if not supported
-    yansi::whenever(yansi::Condition::TTY_AND_COLOR);
+    yansi::whenever(yansi::Condition::STDOUTERR_ARE_TTY);
 
     // begin instrumentation if enabled
     let trace_path = util::validator_temp_dir().join("trace.json");
@@ -89,10 +89,10 @@ fn main() -> ExitCode {
         Verbosity::Trace => log::LevelFilter::Trace,
     });
 
-    // install the panic hook to log panics instead of printing them to stderr.
+    // install the panic hook to log panics instead of printing them to stderr directly
     debug::install_panic_hook();
 
-    // mark the main thread as such for plugin instance creation checks.
+    // mark the main thread as such for plugin instance creation checks
     unsafe {
         plugin::library::mark_current_thread_as_os_main_thread();
     }
@@ -100,7 +100,6 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Command::Validate(settings) => commands::validate::validate(cli.verbosity, &settings),
         Command::List(command) => commands::list::list(cli.verbosity, command),
-
         Command::ValidateOutOfProcess(settings) => commands::validate::validate_out_of_process(&settings),
         Command::ScanOutOfProcess(settings) => commands::list::scan_out_of_process::run(&settings),
     };

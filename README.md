@@ -36,7 +36,7 @@ validator to run the that test in the current process. Use `clap-validator list 
 to list all available tests.
 
 ```shell
-clap-validator validate --in-process --filter <test-case-name> /path/to/the/plugin.clap
+clap-validator validate --in-process --include <test-case-name> /path/to/the/plugin.clap
 ```
 
 ### Tracing
@@ -45,7 +45,7 @@ clap-validator can generate traces of plugin/host call execution during the in-p
 
 ### Filtering
 
-By default, all tests are run during validation, including pedantic ones. You can use the `--filter` option to specify a regex of tests to run. Another option is to create a configuration file named `clap-validator.toml` in the current working directory or any of its parent directories. In this file, you can specify which tests to enable or disable. An example configuration file looks like this:
+By default, all tests are run during validation, including pedantic ones. You can use the `--include` option to specify a regex of tests to run, and `--exclude` to specify a regex of tests to skip. Another option is to create a configuration file named `clap-validator.toml` in the current working directory or any of its parent directories. In this file, you can specify which tests to enable or disable. An example configuration file looks like this:
 
 ```toml
 # clap-validator.toml

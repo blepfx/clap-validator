@@ -166,6 +166,10 @@ impl<'a> PluginAudioProcessor<'a, PolySynthPluginShared, PolySynthPluginMainThre
     fn stop_processing(&mut self) {
         self.poly_osc.stop_all();
     }
+
+    fn reset(&mut self) {
+        self.poly_osc.stop_all();
+    }
 }
 
 impl PolySynthAudioProcessor<'_> {

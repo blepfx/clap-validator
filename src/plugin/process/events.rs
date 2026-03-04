@@ -102,12 +102,7 @@ impl InputEventQueue {
     }
 
     unsafe extern "C" fn get(list: *const clap_input_events, index: u32) -> *const clap_event_header {
-        let span = Span::begin(
-            "clap_input_events::get",
-            record! {
-                index: index
-            },
-        );
+        let span = Span::begin("clap_input_events::get", record!(index: index));
 
         let state = unsafe {
             Proxy::<Self>::from_vtable(list).unwrap_or_else(|e| {
@@ -249,22 +244,28 @@ impl Recordable for Event {
         record.record("space_id", self.header().space_id);
         record.record("type_id", self.header().type_);
         record.record("time", self.header().time);
-        record.record("flags.is_live", self.header().flags & CLAP_EVENT_IS_LIVE != 0);
-        record.record("flags.dont_record", self.header().flags & CLAP_EVENT_DONT_RECORD != 0);
+
+        if self.header().flags & CLAP_EVENT_IS_LIVE != 0 {
+            record.record("flags.is_live", true);
+        }
+
+        if self.header().flags & CLAP_EVENT_DONT_RECORD != 0 {
+            record.record("flags.dont_record", true);
+        }
 
         match self {
             Event::Note(event) => {
-                record.record("note_id", event.note_id);
-                record.record("key", event.key);
-                record.record("port", event.port_index);
-                record.record("channel", event.channel);
-                record.record("velocity", event.velocity);
+                record.record("info.note_id", event.note_id);
+                record.record("info.key", event.key);
+                record.record("info.port", event.port_index);
+                record.record("info.channel", event.channel);
+                record.record("info.velocity", event.velocity);
             }
             Event::NoteExpression(event) => {
-                record.record("note_id", event.note_id);
-                record.record("port_index", event.port_index);
-                record.record("key", event.key);
-                record.record("channel", event.channel);
+                record.record("info.note_id", event.note_id);
+                record.record("info.port_index", event.port_index);
+                record.record("info.key", event.key);
+                record.record("info.channel", event.channel);
 
                 record.record(
                     "expression",
@@ -280,41 +281,41 @@ impl Recordable for Event {
                     },
                 );
 
-                record.record("expression_id", event.expression_id);
-                record.record("value", event.value);
+                record.record("info.expression_id", event.expression_id);
+                record.record("info.value", event.value);
             }
             Event::ParamValue(event) => {
-                record.record("param_id", event.param_id);
-                record.record("value", event.value);
-                record.record("note_id", event.note_id);
-                record.record("port_index", event.port_index);
-                record.record("key", event.key);
-                record.record("channel", event.channel);
+                record.record("info.param_id", event.param_id);
+                record.record("info.value", event.value);
+                record.record("info.note_id", event.note_id);
+                record.record("info.port_index", event.port_index);
+                record.record("info.key", event.key);
+                record.record("info.channel", event.channel);
             }
             Event::ParamMod(event) => {
-                record.record("param_id", event.param_id);
-                record.record("amount", event.amount);
-                record.record("note_id", event.note_id);
-                record.record("port_index", event.port_index);
-                record.record("key", event.key);
-                record.record("channel", event.channel);
+                record.record("info.param_id", event.param_id);
+                record.record("info.amount", event.amount);
+                record.record("info.note_id", event.note_id);
+                record.record("info.port_index", event.port_index);
+                record.record("info.key", event.key);
+                record.record("info.channel", event.channel);
             }
             Event::Midi(event) => {
-                record.record("port_index", event.port_index);
-                record.record("raw", format_args!("{:X?}", event.data));
+                record.record("info.port_index", event.port_index);
+                record.record("info.raw", format_args!("{:X?}", event.data));
             }
             Event::Midi2(event) => {
-                record.record("port_index", event.port_index);
-                record.record("raw", format_args!("{:X?}", event.data));
+                record.record("info.port_index", event.port_index);
+                record.record("info.raw", format_args!("{:X?}", event.data));
             }
             Event::Sysex(event) => {
-                record.record("port_index", event.port_index);
+                record.record("info.port_index", event.port_index);
 
                 if event.buffer.is_null() {
-                    record.record("data", "<null>");
+                    record.record("info.data", "<null>");
                 } else {
                     record.record(
-                        "data",
+                        "info.data",
                         format_args!("{:X?}", unsafe {
                             std::slice::from_raw_parts(event.buffer, event.size as usize)
                         }),
@@ -323,7 +324,7 @@ impl Recordable for Event {
             }
 
             Event::Transport(event) => {
-                record.record("transport", event);
+                record.record("info.transport", event);
             }
             Event::Unknown(..) => {}
         }

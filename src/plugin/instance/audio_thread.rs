@@ -212,6 +212,7 @@ impl<'a> PluginAudioThread<'a> {
                         &format!("audio_output.{i}.data64"),
                         format_args!("{:p}", process.audio_outputs[i].data64),
                     );
+                    record.record(&format!("audio_output.{i}.latency"), process.audio_outputs[i].latency);
                 }
             }),
         );
@@ -237,7 +238,7 @@ impl<'a> PluginAudioThread<'a> {
                 CLAP_PROCESS_CONTINUE_IF_NOT_QUIET => "CLAP_PROCESS_CONTINUE_IF_NOT_QUIET",
                 CLAP_PROCESS_TAIL => "CLAP_PROCESS_TAIL",
                 CLAP_PROCESS_SLEEP => "CLAP_PROCESS_SLEEP",
-                _ => "UNKNOWN",
+                _ => "?",
             }
         ));
 

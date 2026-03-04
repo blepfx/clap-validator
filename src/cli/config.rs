@@ -45,15 +45,7 @@ impl Default for Config {
         Self {
             test: {
                 let mut map = HashMap::new();
-                map.insert("metadata".to_string(), true);
-                map.insert("audio-ports".to_string(), true);
-                map.insert("event-ports".to_string(), true);
-                map.insert("param-ports".to_string(), true);
-                map.insert("preset-discovery".to_string(), true);
-                map.insert("state".to_string(), true);
-                map.insert("latency".to_string(), true);
-                map.insert("tail-time".to_string(), true);
-                map.insert("note-ports".to_string(), true);
+                map.insert("".to_string(), true);
                 map
             },
         }

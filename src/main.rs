@@ -74,7 +74,6 @@ fn main() -> ExitCode {
     // begin instrumentation if enabled
     let trace_path = util::validator_temp_dir().join("trace.json");
     let trace_enabled = matches!(&cli.command, Command::Validate(settings) if settings.trace);
-
     if trace_enabled {
         debug::begin_instrumentation(trace_path.to_str().unwrap());
     }

@@ -12,10 +12,20 @@ use rand::RngExt;
 use rand::seq::{IndexedRandom, IteratorRandom};
 use rand_pcg::Pcg32;
 use std::ops::RangeInclusive;
+use std::sync::atomic::AtomicU64;
+
+static PRNG_SEED: AtomicU64 = AtomicU64::new(1337);
+
+/// Set the initial seed for subsequent calls to [`new_prng()`].
+/// Useful for fuzzing with a fixed seed to reproduce specific sequences of events that cause bugs.
+#[allow(unused)]
+pub fn hijack_prng(seed: u64) {
+    PRNG_SEED.store(seed, std::sync::atomic::Ordering::Relaxed);
+}
 
 /// Create a new pseudo-random number generator with a fixed seed.
 pub fn new_prng() -> Pcg32 {
-    Pcg32::new(1337, 420)
+    Pcg32::new(PRNG_SEED.load(std::sync::atomic::Ordering::Relaxed), 420)
 }
 
 /// A random note and MIDI event generator that generates consistent events based on the

@@ -6,7 +6,7 @@ use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::ext::tail::Tail;
 use crate::plugin::instance::{CallbackEvent, ProcessStatus};
 use crate::plugin::library::PluginLibrary;
-use crate::plugin::process::{AudioBuffers, ProcessScope};
+use crate::plugin::process::{AudioBuffers, ProcessRun, ProcessScope};
 use crate::tests::TestStatus;
 use crate::tests::rng::{NoteGenerator, new_prng};
 use anyhow::{Context, Result};
@@ -331,17 +331,20 @@ pub fn test_process_random_block_sizes(library: &PluginLibrary, plugin_id: &str)
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         for _ in 0..20 {
-            let buffer_size = if prng.random_bool(0.8) {
+            let block_size = if prng.random_bool(0.8) {
                 prng.random_range(2..=MAX_BUFFER_SIZE)
             } else {
                 1
             };
 
             process.audio_buffers().fill_white_noise(&mut prng);
-            process.add_events(note_rng.generate_events(&mut prng, buffer_size));
+            process.add_events(note_rng.generate_events(&mut prng, block_size));
             process
-                .run_with_block_size(buffer_size)
-                .with_context(|| format!("Error while processing with buffer size of {}", buffer_size))?;
+                .run_with(ProcessRun {
+                    block_size,
+                    output_ignore_mask: 0,
+                })
+                .with_context(|| format!("Error while processing with buffer size of {}", block_size))?;
         }
 
         Ok(())

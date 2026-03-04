@@ -22,6 +22,15 @@ pub struct ProcessScope<'a> {
     sample_rate: f64,
 }
 
+#[derive(Debug)]
+pub struct ProcessRun {
+    /// The number of samples in the current block. Must be less than or equal to the number of samples in the audio buffers.
+    pub block_size: u32,
+
+    /// A mask of which output ports should be ignored while doing NaN/write checks (i.e. if 1, we do not care about the port's output)
+    pub output_ignore_mask: u64,
+}
+
 impl<'a> ProcessScope<'a> {
     pub fn new(plugin: &'a PluginAudioThread, buffer: &'a mut AudioBuffers) -> Result<Self> {
         Self::with_sample_rate(plugin, buffer, 44100.0)
@@ -76,11 +85,14 @@ impl<'a> ProcessScope<'a> {
     }
 
     pub fn run(&mut self) -> Result<ProcessStatus> {
-        self.run_with_block_size(self.max_block_size())
+        self.run_with(ProcessRun {
+            block_size: self.buffer.samples(),
+            output_ignore_mask: 0,
+        })
     }
 
-    pub fn run_with_block_size(&mut self, samples: u32) -> Result<ProcessStatus> {
-        assert!(samples > 0 && samples <= self.buffer.samples());
+    pub fn run_with(&mut self, run: ProcessRun) -> Result<ProcessStatus> {
+        assert!(run.block_size > 0 && run.block_size <= self.buffer.samples());
 
         // check for requested restart
         if self.plugin.shared().requested_restart.load() {
@@ -106,7 +118,7 @@ impl<'a> ProcessScope<'a> {
 
         // check that we dont overfill the input event queue
         assert!(
-            self.events_input.last_event_time().is_none_or(|t| t < samples),
+            self.events_input.last_event_time().is_none_or(|t| t < run.block_size),
             "The input event queue contains events beyond the current processing block size"
         );
 
@@ -128,7 +140,7 @@ impl<'a> ProcessScope<'a> {
         let status = self.buffer.process(|inputs, outputs| {
             let transport = self.transport.as_clap_transport(0);
             self.plugin.process(ProcessInfo {
-                frames_count: samples,
+                frames_count: run.block_size,
                 steady_time: self.transport.sample_pos,
                 audio_inputs: inputs,
                 audio_outputs: outputs,
@@ -140,10 +152,10 @@ impl<'a> ProcessScope<'a> {
 
         // clear input event queue and advance transport
         self.events_input.clear();
-        self.transport.advance(samples as i64, self.sample_rate());
+        self.transport.advance(run.block_size as i64, self.sample_rate());
 
         // check output audio buffers for NaNs or infinities
-        check_process_call_consistency(&self.buffer[..], &original_buffers, &self.events_output.read(), samples)?;
+        check_process_call_consistency(&self.buffer[..], &original_buffers, &self.events_output.read(), run)?;
 
         Ok(status)
     }
@@ -179,7 +191,7 @@ fn check_process_call_consistency(
     resulting_buffers: &[AudioBuffer],
     original_buffers: &[AudioBuffer],
     output_events: &[Event],
-    block_size: u32,
+    run: ProcessRun,
 ) -> Result<()> {
     for (buffer, before) in resulting_buffers.iter().zip(original_buffers.iter()) {
         // Input-only buffers must not be overwritten during out of place processing
@@ -194,8 +206,12 @@ fn check_process_call_consistency(
 
             // Output buffers must not contain any non-finite or denormal values
             AudioBufferPort::Output(port_idx) | AudioBufferPort::Inplace(_, port_idx) => {
+                if run.output_ignore_mask & (1 << port_idx) != 0 {
+                    continue;
+                }
+
                 let maybe_non_finite = (0..buffer.channels())
-                    .flat_map(|channel| (0..block_size).map(move |sample| (channel, sample)))
+                    .flat_map(|channel| (0..run.block_size).map(move |sample| (channel, sample)))
                     .find_map(|(channel, sample)| {
                         let x = buffer.get(channel, sample);
                         if x.either(
@@ -247,10 +263,11 @@ fn check_process_call_consistency(
             )
         }
 
-        if event_time >= block_size {
+        if event_time >= run.block_size {
             anyhow::bail!(
-                "The plugin output an event for sample {event_time} but the audio buffer only contains {block_size} \
-                 samples."
+                "The plugin output an event for sample {} but the audio buffer only contains {} samples.",
+                event_time,
+                run.block_size
             )
         }
 

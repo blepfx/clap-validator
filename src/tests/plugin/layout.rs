@@ -5,7 +5,7 @@ use crate::plugin::ext::audio_ports_config::{AudioPortsConfig, AudioPortsConfigI
 use crate::plugin::ext::configurable_audio_ports::ConfigurableAudioPorts;
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::library::PluginLibrary;
-use crate::plugin::process::{AudioBuffers, ProcessScope};
+use crate::plugin::process::{AudioBuffers, ProcessRun, ProcessScope};
 use crate::tests::TestStatus;
 use crate::tests::rng::{NoteGenerator, new_prng, random_layout_requests};
 use anyhow::{Context, Result};
@@ -466,7 +466,10 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
                     }
 
                     process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
-                    process.run()?;
+                    process.run_with(ProcessRun {
+                        block_size: BUFFER_SIZE,
+                        output_ignore_mask: !next_output_mask, // ignore deactivated output ports for NaN checks
+                    })?;
                 }
 
                 Ok(())

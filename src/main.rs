@@ -118,7 +118,7 @@ fn main() -> ExitCode {
             Ok(()) => eprintln!(
                 "{}",
                 format!(
-                    "Trace written to '{}'. Use 'https://ui.perfetto.dev/ to view it.",
+                    "Trace written to '{}'. Go to https://ui.perfetto.dev/ to view it.",
                     trace_path.display()
                 )
                 .dim()

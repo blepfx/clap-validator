@@ -359,7 +359,6 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
 }
 
 /// The test for `PluginTestCase::LayoutAudioPortsActivation`.
-/// TODO: fix deactivated output ports false positive
 /// TODO: audio ports activation invalidation test (audio-ports-config extension and port rescan)
 pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();

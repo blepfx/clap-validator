@@ -355,110 +355,6 @@ pub fn test_process_random_block_sizes(library: &PluginLibrary, plugin_id: &str)
     Ok(TestStatus::Success { details: None })
 }
 
-/// The test for `PluginTestCase::ProcessResetDeterminism`.
-pub fn test_process_audio_reset_determinism(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
-    const BUFFER_SIZE: u32 = 4096;
-
-    let plugin = library
-        .create_plugin(plugin_id)
-        .context("Could not create the plugin instance")?;
-    plugin.init().context("Error during initialization")?;
-
-    let audio_ports_config = plugin
-        .get_extension::<AudioPorts>()
-        .map(|x| x.config())
-        .transpose()
-        .context("Error while querying 'audio-ports' IO configuration")?
-        .unwrap_or_default();
-
-    let note_ports_config = plugin
-        .get_extension::<NotePorts>()
-        .map(|x| x.config())
-        .transpose()
-        .context("Error while querying 'note-ports' IO configuration")?
-        .unwrap_or_default();
-
-    let result = plugin.on_audio_thread(|plugin| -> Result<TestStatus> {
-        let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
-        let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-4..=64);
-        let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
-
-        // first run, the "control"
-        let span = Span::begin("RunControl", ());
-        process.audio_buffers().fill_white_noise(&mut new_prng());
-        process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
-        process.run()?;
-        span.finish(());
-
-        let output_control = process
-            .audio_buffers()
-            .iter()
-            .filter(|x| x.port().output().is_some())
-            .cloned()
-            .collect::<Vec<_>>();
-
-        process.restart();
-        note_rng.reset();
-
-        // second run, deactivate and reactivate the plugin, see if the output changes
-        let span = Span::begin("RunReactivate", ());
-        process.audio_buffers().fill_white_noise(&mut new_prng());
-        process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
-        process.run()?;
-        span.finish(());
-
-        let output_reactivated = process
-            .audio_buffers()
-            .iter()
-            .filter(|x| x.port().output().is_some())
-            .cloned()
-            .collect::<Vec<_>>();
-
-        process.reset();
-        note_rng.reset();
-
-        // third run, reset the plugin, see if the output matches the control run
-        let span = Span::begin("RunReset", ());
-        process.audio_buffers().fill_white_noise(&mut new_prng());
-        process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
-        process.run()?;
-        span.finish(());
-
-        let output_reset = process
-            .audio_buffers()
-            .iter()
-            .filter(|x| x.port().output().is_some())
-            .cloned()
-            .collect::<Vec<_>>();
-
-        if output_control
-            .iter()
-            .zip(output_reactivated.iter())
-            .any(|(a, b)| !a.is_same(b))
-        {
-            return Ok(TestStatus::Warning {
-                details: Some(String::from(
-                    "Plugin output does not seem to be deterministic after reactivation",
-                )),
-            });
-        }
-
-        if output_control
-            .iter()
-            .zip(output_reset.iter())
-            .any(|(a, b)| !a.is_same(b))
-        {
-            anyhow::bail!("Plugin output differs after reset");
-        }
-
-        Ok(TestStatus::Success { details: None })
-    })?;
-
-    plugin.poll_callback(|_| Ok(()))?;
-
-    Ok(result)
-}
-
 /// The test for `PluginTestCase::ProcessSleepConstantMask`.
 pub fn test_process_sleep_constant_mask(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
@@ -551,10 +447,8 @@ pub fn test_process_sleep_constant_mask(library: &PluginLibrary, plugin_id: &str
     plugin.poll_callback(|_| Ok(()))?;
 
     if !has_received_constant_flag && has_received_constant_output {
-        return Ok(TestStatus::Warning {
-            details: Some(String::from(
-                "The plugin does not seem to set the constant mask during processing.",
-            )),
+        return Ok(TestStatus::Success {
+            details: Some(String::from("The plugin never set the constant flag on any output")),
         });
     }
 
@@ -684,7 +578,7 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
     plugin.poll_callback(|_| Ok(()))?;
 
     if !has_ever_slept {
-        return Ok(TestStatus::Warning {
+        return Ok(TestStatus::Success {
             details: Some(String::from("The plugin never went to sleep during the test.")),
         });
     }

@@ -29,6 +29,8 @@ pub enum Event {
     ParamValue(clap_event_param_value),
     /// `CLAP_EVENT_PARAM_MOD`.
     ParamMod(clap_event_param_mod),
+    /// `CLAP_EVENT_PARAM_GESTURE_BEGIN` or `CLAP_EVENT_PARAM_GESTURE_END`.
+    ParamGesture(clap_event_param_gesture),
     /// `CLAP_EVENT_TRANSPORT`.
     Transport(clap_event_transport),
     /// An unhandled event type. This is only used when the plugin outputs an event we don't handle
@@ -210,6 +212,7 @@ impl Event {
             Event::NoteExpression(event) => &event.header,
             Event::ParamValue(event) => &event.header,
             Event::ParamMod(event) => &event.header,
+            Event::ParamGesture(event) => &event.header,
             Event::Midi(event) => &event.header,
             Event::Midi2(event) => &event.header,
             Event::Sysex(event) => &event.header,
@@ -295,6 +298,9 @@ impl Recordable for Event {
                 record.record("info.key", event.key);
                 record.record("info.channel", event.channel);
             }
+            Event::ParamGesture(event) => {
+                record.record("info.param_id", event.param_id);
+            }
             Event::Midi(event) => {
                 record.record("info.port_index", event.port_index);
                 record.record("info.raw", format_args!("{:X?}", event.data));
@@ -317,7 +323,6 @@ impl Recordable for Event {
                     );
                 }
             }
-
             Event::Transport(event) => {
                 record.record("info.transport", event);
             }

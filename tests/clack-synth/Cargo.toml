@@ -9,5 +9,5 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-clack-plugin = { git = "https://github.com/Quant1um/clack", rev = "8f39ba01643103bac2acaabad1b22ea9ee452400" }
-clack-extensions = { git = "https://github.com/Quant1um/clack", rev = "8f39ba01643103bac2acaabad1b22ea9ee452400", features = ["audio-ports", "audio-ports-config", "audio-ports-activation", "configurable-audio-ports", "clack-plugin", "note-ports", "params", "state"] }
+clack-plugin = { git = "https://github.com/Quant1um/clack", rev = "683d8067d357e81e49d3d786d0329dd04e4c5496" }
+clack-extensions = { git = "https://github.com/Quant1um/clack", rev = "683d8067d357e81e49d3d786d0329dd04e4c5496", features = ["audio-ports", "audio-ports-config", "audio-ports-activation", "configurable-audio-ports", "clack-plugin", "note-ports", "params", "state", "surround", "ambisonic"] }

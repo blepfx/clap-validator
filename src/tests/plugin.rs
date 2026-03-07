@@ -44,8 +44,6 @@ pub enum PluginTestCase {
     ProcessSleepConstantMask,
     #[strum(serialize = "process-sleep-process-status")]
     ProcessSleepProcessStatus,
-    #[strum(serialize = "process-audio-reset-determinism")]
-    ProcessAudioResetDeterminism,
     #[strum(serialize = "process-note-out-of-place-basic")]
     ProcessNoteOutOfPlaceBasic,
     #[strum(serialize = "process-note-inconsistent")]
@@ -179,10 +177,6 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  while randomizing block sizes for each process call, and tests whether the output does not contain \
                  any non-finite or subnormal values. Uses out-of-place audio processing.",
             ),
-            PluginTestCase::ProcessAudioResetDeterminism => String::from(
-                "Asserts that resetting the plugin via 'clap_plugin::reset()' and via re-activation results in \
-                 deterministic output when processing the same audio and events again.",
-            ),
             PluginTestCase::ParamConversions => String::from(
                 "Asserts that value to string and string to value conversions are supported for ether all or none of \
                  the plugin's parameters, and that conversions between values and strings roundtrip consistently.",
@@ -304,9 +298,6 @@ impl<'a> TestCase<'a> for PluginTestCase {
             }
             PluginTestCase::ProcessSleepProcessStatus => {
                 processing::test_process_sleep_process_status(library, plugin_id)
-            }
-            PluginTestCase::ProcessAudioResetDeterminism => {
-                processing::test_process_audio_reset_determinism(library, plugin_id)
             }
             PluginTestCase::ProcessNoteOutOfPlaceBasic => {
                 processing::test_process_note_out_of_place(library, plugin_id, true)

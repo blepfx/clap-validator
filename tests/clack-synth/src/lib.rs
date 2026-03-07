@@ -9,7 +9,7 @@ use clack_extensions::audio_ports_config::{
     PluginAudioPortsConfigInfo, PluginAudioPortsConfigInfoImpl,
 };
 use clack_extensions::configurable_audio_ports::{
-    AudioPortsRequestList, PluginConfigurableAudioPorts, PluginConfigurableAudioPortsImpl,
+    AudioPortsRequest, PluginConfigurableAudioPorts, PluginConfigurableAudioPortsImpl,
 };
 use clack_extensions::note_ports::*;
 use clack_extensions::params::*;
@@ -276,19 +276,23 @@ impl PluginAudioPortsConfigInfoImpl for PolySynthPluginMainThread<'_> {
 }
 
 impl PluginConfigurableAudioPortsImpl for PolySynthPluginMainThread<'_> {
-    fn can_apply_configuration(&mut self, requests: AudioPortsRequestList) -> bool {
-        matches!(requests.get(0), Some(request) if !request.is_input && request.port_index == 0 && request.channel_count > 0 && request.channel_count <= 8)
+    fn can_apply_configuration(&mut self, requests: &[AudioPortsRequest]) -> bool {
+        dbg!(requests);
+
+        matches!(requests.first(), Some(request) if !request.is_input() && request.port_index() == 0 && request.channel_count() > 0 && request.channel_count() <= 8)
     }
 
-    fn apply_configuration(&mut self, requests: AudioPortsRequestList) -> bool {
-        match requests.get(0) {
+    fn apply_configuration(&mut self, requests: &[AudioPortsRequest]) -> bool {
+        dbg!(requests);
+
+        match requests.first() {
             Some(request)
-                if !request.is_input
-                    && request.port_index == 0
-                    && request.channel_count > 0
-                    && request.channel_count <= 8 =>
+                if !request.is_input()
+                    && request.port_index() == 0
+                    && request.channel_count() > 0
+                    && request.channel_count() <= 8 =>
             {
-                self.config = ClapId::new(request.channel_count);
+                self.config = ClapId::new(request.channel_count());
                 true
             }
             _ => false,

@@ -586,6 +586,68 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
     Ok(TestStatus::Success { details: None })
 }
 
+/// The test for `PluginTestCase::ProcessResetReactivate`.
+pub fn test_process_reset_reactivate(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+    let mut prng = new_prng();
+    let plugin = library
+        .create_plugin(plugin_id)
+        .context("Could not create the plugin instance")?;
+    plugin.init().context("Error during initialization")?;
+
+    let audio_ports_config = plugin
+        .get_extension::<AudioPorts>()
+        .map(|x| x.config())
+        .transpose()
+        .context("Error while querying 'audio-ports' IO configuration")?
+        .unwrap_or_default();
+
+    let note_ports_config = plugin
+        .get_extension::<NotePorts>()
+        .map(|x| x.config())
+        .transpose()
+        .context("Error while querying 'note-ports' IO configuration")?
+        .unwrap_or_default();
+
+    let result = plugin.on_audio_thread(|plugin| -> Result<TestStatus> {
+        let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
+        let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-4..=64);
+        let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
+
+        // first run, the "control"
+        let span = Span::begin("InitialRun", ());
+        process.audio_buffers().fill_white_noise(&mut prng);
+        process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+        process.run()?;
+        span.finish(());
+
+        process.restart();
+        note_rng.reset();
+
+        // second run, deactivate and reactivate the plugin
+        let span = Span::begin("ReactivateRun", ());
+        process.audio_buffers().fill_white_noise(&mut prng);
+        process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
+        process.run()?;
+        span.finish(());
+
+        process.reset();
+        note_rng.reset();
+
+        // third run, reset the plugin
+        let span = Span::begin("ResetRun", ());
+        process.audio_buffers().fill_white_noise(&mut new_prng());
+        process.add_events(note_rng.generate_events(&mut new_prng(), BUFFER_SIZE));
+        process.run()?;
+        span.finish(());
+
+        Ok(TestStatus::Success { details: None })
+    })?;
+
+    plugin.poll_callback(|_| Ok(()))?;
+
+    Ok(result)
+}
+
 /// A channel is considered quiet if the signal (excluding first 32 samples) is below -80 dbfs, ignoring DC.
 ///
 /// This function is designed to be very lenient in what it considers "quiet", to avoid false positives.

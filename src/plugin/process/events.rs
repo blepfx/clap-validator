@@ -192,6 +192,9 @@ impl Event {
                 (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_MOD) => {
                     Event::ParamMod(*(ptr as *const clap_event_param_mod))
                 }
+                (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_GESTURE_BEGIN | CLAP_EVENT_PARAM_GESTURE_END) => {
+                    Event::ParamGesture(*(ptr as *const clap_event_param_gesture))
+                }
                 (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI) => Event::Midi(*(ptr as *const clap_event_midi)),
                 (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI2) => Event::Midi2(*(ptr as *const clap_event_midi2)),
                 (CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI_SYSEX) => {

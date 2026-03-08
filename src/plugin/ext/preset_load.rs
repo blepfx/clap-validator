@@ -6,7 +6,7 @@ use std::ffi::{CStr, CString};
 use std::ptr::NonNull;
 
 use super::Extension;
-use crate::debug::{Span, record};
+use crate::cli::tracing::{Span, record};
 use crate::plugin::instance::Plugin;
 use crate::plugin::preset_discovery::LocationValue;
 use crate::plugin::util::clap_call;

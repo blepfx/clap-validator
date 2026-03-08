@@ -1,4 +1,4 @@
-use crate::debug::{Recordable, Recorder, Span, record};
+use crate::cli::tracing::{Recordable, Recorder, Span, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::ext::ambisonic::Ambisonic;
 use crate::plugin::ext::audio_ports::{AudioPort, check_audio_port_info_valid, check_audio_port_type_consistent};

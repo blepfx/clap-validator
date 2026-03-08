@@ -1,7 +1,7 @@
 //! Abstractions for interacting with the `note-ports` extension.
 
 use super::Extension;
-use crate::debug::{Recordable, Span, record};
+use crate::cli::tracing::{Recordable, Recorder, Span, record};
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::clap_call;
 use anyhow::{Context, Result};
@@ -184,7 +184,7 @@ fn check_note_port_valid(info: &clap_note_port_info) -> Result<NotePort> {
 }
 
 impl Recordable for clap_note_port_info {
-    fn record(&self, record: &mut dyn crate::debug::Recorder) {
+    fn record(&self, record: &mut dyn Recorder) {
         record.record("id", self.id);
 
         record.record(

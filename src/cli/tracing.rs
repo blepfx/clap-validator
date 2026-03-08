@@ -7,14 +7,14 @@ pub use record::*;
 
 static WRITER: OnceLock<Mutex<writer::TraceWriter>> = OnceLock::new();
 
-pub fn begin_instrumentation(path: &str) {
+pub fn install(path: &str) {
     WRITER
         .set(Mutex::new(writer::TraceWriter::new(path)))
         .map_err(|_| ())
         .expect("instrumentation already started");
 }
 
-pub fn check_instrumentation() -> Result<(), String> {
+pub fn check_error() -> Result<(), String> {
     match WRITER.get() {
         Some(writer) => writer.lock().unwrap().check_error().map_err(|x| x.to_string()),
         None => Err("instrumentation not started".to_string()),

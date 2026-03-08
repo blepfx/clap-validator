@@ -1,7 +1,8 @@
 //! Abstractions for interacting with the `state` extension.
 
 use super::Extension;
-use crate::debug::{Span, fail_test, record};
+use crate::cli::fail_test;
+use crate::cli::tracing::{Span, record};
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::{CHECK_POINTER, Proxy, Proxyable, clap_call};
 use anyhow::Result;

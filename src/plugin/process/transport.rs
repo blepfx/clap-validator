@@ -1,7 +1,7 @@
 use clap_sys::events::*;
 use clap_sys::fixedpoint::*;
 
-use crate::debug::{Recordable, Recorder};
+use crate::cli::tracing::{Recordable, Recorder};
 
 /// The current transport state. This can be modified between process calls to simulate
 /// transport changes.

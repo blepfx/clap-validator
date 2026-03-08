@@ -655,7 +655,6 @@ impl<'a> NoteGenerator<'a> {
         events
     }
 
-    #[allow(unused)]
     pub fn reset(&mut self) {
         self.next_note_id = 0;
         for active_notes in &mut self.active_notes {

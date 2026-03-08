@@ -1,4 +1,4 @@
-use crate::debug::{Recordable, Recorder, Span, record};
+use crate::cli::tracing::{Recordable, Recorder, Span, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::clap_call;

@@ -2,9 +2,8 @@
 //! way that somewhat mimics a real host.
 
 use crate::Verbosity;
-use crate::cli::Config;
+use crate::cli::{Config, panic_message};
 use crate::commands::validate::{OutOfProcessSettings, ValidatorSettings};
-use crate::debug::panic_message;
 use crate::plugin::library::{PluginLibrary, PluginMetadata};
 use crate::tests::{PluginLibraryTestCase, PluginTestCase, SerializedTest, TestCase, TestResult, TestStatus};
 use crate::util::IteratorExt;

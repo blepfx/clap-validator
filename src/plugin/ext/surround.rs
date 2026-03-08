@@ -1,4 +1,4 @@
-use crate::debug::{Span, record};
+use crate::cli::tracing::{Span, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::clap_call;

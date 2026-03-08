@@ -1,7 +1,7 @@
 //! Abstractions for interacting with the `audio-ports` extension.
 
 use super::Extension;
-use crate::debug::{Recordable, Recorder, Span, record};
+use crate::cli::tracing::{Recordable, Recorder, Span, record};
 use crate::plugin::ext::ambisonic::Ambisonic;
 use crate::plugin::ext::surround::Surround;
 use crate::plugin::instance::Plugin;

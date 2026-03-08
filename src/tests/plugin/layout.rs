@@ -1,4 +1,4 @@
-use crate::debug::{Span, from_fn, record};
+use crate::cli::tracing::{Span, from_fn, record};
 use crate::plugin::ext::audio_ports::AudioPorts;
 use crate::plugin::ext::audio_ports_activation::AudioPortsActivation;
 use crate::plugin::ext::audio_ports_config::{AudioPortsConfig, AudioPortsConfigInfo};

@@ -1,11 +1,10 @@
 //! A tracing layer that logs events to standard output in a compact human readable format.
 
+use crate::cli::tracing::{event, record};
 use std::cell::RefCell;
 use std::fmt::Write;
 use std::time::Instant;
 use yansi::Paint;
-
-use crate::debug::{instrument, record};
 
 pub struct CustomLogger {
     start: Instant,
@@ -36,7 +35,7 @@ impl log::Log for CustomLogger {
             log::Level::Trace => "TRACE".white(),
         };
 
-        instrument::event(
+        event(
             log.args(),
             record! {
                 level: log.level().to_string(),

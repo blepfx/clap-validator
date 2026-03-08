@@ -1,4 +1,5 @@
-use crate::debug::{Recordable, Recorder, Span, fail_test, record};
+use crate::cli::fail_test;
+use crate::cli::tracing::{Recordable, Recorder, Span, record};
 use crate::plugin::util::{CHECK_POINTER, Proxy, Proxyable};
 use clap_sys::events::*;
 use std::fmt::Debug;

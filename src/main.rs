@@ -4,7 +4,6 @@ use yansi::Paint;
 
 mod cli;
 mod commands;
-mod debug;
 mod plugin;
 mod tests;
 mod util;
@@ -75,11 +74,11 @@ fn main() -> ExitCode {
     let trace_path = util::validator_temp_dir().join("trace.json");
     let trace_enabled = matches!(&cli.command, Command::Validate(settings) if settings.trace);
     if trace_enabled {
-        debug::begin_instrumentation(trace_path.to_str().unwrap());
+        cli::tracing::install(trace_path.to_str().unwrap());
     }
 
     // setup logging
-    log::set_logger(Box::leak(Box::new(debug::CustomLogger::new()))).unwrap();
+    log::set_logger(Box::leak(Box::new(cli::CustomLogger::new()))).unwrap();
     log::set_max_level(match cli.verbosity {
         Verbosity::Quiet => log::LevelFilter::Off,
         Verbosity::Error => log::LevelFilter::Error,
@@ -90,7 +89,7 @@ fn main() -> ExitCode {
     });
 
     // install the panic hook to log panics instead of printing them to stderr directly
-    debug::install_panic_hook();
+    cli::install_panic_hook();
 
     // mark the main thread as such for plugin instance creation checks
     unsafe {
@@ -113,7 +112,7 @@ fn main() -> ExitCode {
     };
 
     if trace_enabled {
-        match debug::check_instrumentation() {
+        match cli::tracing::check_error() {
             Err(e) => eprintln!("{}: {}", "Failed to write trace".red().italic(), e),
             Ok(()) => eprintln!(
                 "{}",

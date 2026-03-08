@@ -3,7 +3,7 @@
 use super::instance::Plugin;
 use super::preset_discovery::PresetDiscoveryFactory;
 use super::util::{self, clap_call};
-use crate::debug::{Span, record};
+use crate::cli::tracing::{Span, record};
 use crate::plugin::instance::PluginShared;
 use anyhow::{Context, Result};
 use clap_sys::entry::clap_plugin_entry;

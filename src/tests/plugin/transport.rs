@@ -1,4 +1,4 @@
-use crate::debug::{Span, record};
+use crate::cli::tracing::{Span, record};
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::library::PluginLibrary;

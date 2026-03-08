@@ -1,4 +1,4 @@
-use crate::debug::{Span, record};
+use crate::cli::tracing::{Span, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::{CallbackEvent, PluginAudioThread, PluginShared, PluginStatus};
 use crate::plugin::library::PluginMetadata;

@@ -1,7 +1,7 @@
 //! Abstractions for single CLAP plugin instances for audio thread interactions.
 
 use super::{Plugin, PluginStatus};
-use crate::debug::{Recordable, Recorder, Span, record};
+use crate::cli::tracing::{Recordable, Recorder, Span, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::{CallbackEvent, MainThreadTask, PluginShared};
 use crate::plugin::process::{InputEventQueue, OutputEventQueue};

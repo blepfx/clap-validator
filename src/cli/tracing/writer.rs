@@ -1,4 +1,4 @@
-use crate::debug::{Recordable, Recorder};
+use super::{Recordable, Recorder};
 use std::fs::File;
 use std::io::{BufWriter, Error, Write};
 use std::path::Path;

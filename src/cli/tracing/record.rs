@@ -131,7 +131,7 @@ pub fn from_fn(f: impl Fn(&mut dyn Recorder)) -> impl Recordable {
 
 macro_rules! record {
     ($($name:ident: $value:expr),*) => {
-        $crate::debug::from_fn(|record| {
+        $crate::cli::tracing::from_fn(|record| {
             $(record.record_entry(stringify!($name), &$value);)*
         })
     };

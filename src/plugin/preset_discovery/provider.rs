@@ -3,7 +3,7 @@
 use super::indexer::{Indexer, IndexerResults};
 use super::metadata_receiver::{MetadataReceiver, PresetFile};
 use super::{Location, LocationValue, PresetDiscoveryFactory, ProviderMetadata};
-use crate::debug::{Span, record};
+use crate::cli::tracing::{Span, record};
 use crate::plugin::util::{Proxy, clap_call};
 use anyhow::{Context, Result};
 use clap_sys::factory::preset_discovery::clap_preset_discovery_provider;

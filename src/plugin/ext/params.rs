@@ -1,7 +1,7 @@
 //! Abstractions for interacting with the `params` extension.
 
 use super::Extension;
-use crate::debug::{Recordable, Recorder, Span, record};
+use crate::cli::tracing::{Recordable, Recorder, Span, record};
 use crate::plugin::instance::Plugin;
 use crate::plugin::process::{InputEventQueue, OutputEventQueue};
 use crate::plugin::util::{self, Proxy, c_char_slice_to_string, clap_call};

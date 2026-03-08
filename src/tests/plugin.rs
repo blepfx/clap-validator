@@ -1,7 +1,7 @@
 //! Tests for individual plugin instances.
 
 use super::TestCase;
-use crate::debug::{Span, record};
+use crate::cli::tracing::{Span, record};
 use crate::plugin::library::PluginLibrary;
 use crate::tests::TestStatus;
 use anyhow::{Context, Result};

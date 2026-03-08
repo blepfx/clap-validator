@@ -62,7 +62,7 @@ pub struct TestFailure(pub String);
 /// The difference between this and a regular panic is that regular panics are treated as bugs in the validator itself.
 macro_rules! fail_test {
     ($($arg:tt)*) => {
-        std::panic::panic_any($crate::debug::TestFailure(format!($($arg)*)))
+        std::panic::panic_any($crate::cli::TestFailure(format!($($arg)*)))
     };
 }
 

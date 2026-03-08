@@ -1,7 +1,7 @@
 //! Tests for entire plugin libraries. These are mostly used to test plugin scanning behavior.
 
 use super::TestCase;
-use crate::debug::{Span, record};
+use crate::cli::tracing::{Span, record};
 use crate::tests::TestStatus;
 use anyhow::Result;
 use std::path::Path;

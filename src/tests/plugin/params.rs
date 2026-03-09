@@ -176,8 +176,8 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
     Ok(TestStatus::Success { details: None })
 }
 
-/// The test for `ProcessingTest::ParamFlush`.
-pub fn test_param_flush(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+/// The test for `ProcessingTest::ParamChangeEvents`.
+pub fn test_param_change_events(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
 
     // first, flush run
@@ -259,20 +259,38 @@ pub fn test_param_flush(library: &PluginLibrary, plugin_id: &str) -> Result<Test
         None => anyhow::bail!("The second instance does not implement the 'params' extension."),
     };
 
-    plugin.on_audio_thread(|plugin| {
-        let mut buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
-        let mut process = ProcessScope::new(&plugin, &mut buffers)?;
+    let process_param_values = {
+        let initial_param_values: BTreeMap<clap_id, f64> = param_info
+            .keys()
+            .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
+            .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
-        process.add_events(param_events);
-        process.run()
-    })?;
+        plugin.poll_callback(|_| Ok(()))?;
 
-    plugin.poll_callback(|_| Ok(()))?;
+        plugin.on_audio_thread(|plugin| {
+            let mut buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
+            let mut process = ProcessScope::new(&plugin, &mut buffers)?;
 
-    let process_param_values: BTreeMap<clap_id, f64> = param_info
-        .keys()
-        .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
-        .collect::<Result<BTreeMap<clap_id, f64>>>()?;
+            process.add_events(param_events);
+            process.run()
+        })?;
+
+        plugin.poll_callback(|_| Ok(()))?;
+
+        let process_param_values: BTreeMap<clap_id, f64> = param_info
+            .keys()
+            .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
+            .collect::<Result<BTreeMap<clap_id, f64>>>()?;
+
+        if process_param_values == initial_param_values {
+            anyhow::bail!(
+                "After sending parameter changes via 'clap_plugin::process()', the plugin's parameter values did not \
+                 change"
+            );
+        }
+
+        process_param_values
+    };
 
     span.finish(());
 

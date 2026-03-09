@@ -58,8 +58,8 @@ pub enum PluginTestCase {
     ProcessResetReactivate,
     #[strum(serialize = "param-conversions")]
     ParamConversions,
-    #[strum(serialize = "param-flush")]
-    ParamFlush,
+    #[strum(serialize = "param-change-events")]
+    ParamChangeEvents,
     #[strum(serialize = "param-fuzz-basic")]
     ParamFuzzBasic,
     #[strum(serialize = "param-fuzz-bounds")]
@@ -189,7 +189,7 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 "Asserts that value to string and string to value conversions are supported for ether all or none of \
                  the plugin's parameters, and that conversions between values and strings roundtrip consistently.",
             ),
-            PluginTestCase::ParamFlush => String::from(
+            PluginTestCase::ParamChangeEvents => String::from(
                 "Asserts that the resulting parameter values after a flush are the same as if the parameter changes \
                  were sent via a process call.",
             ),
@@ -327,7 +327,7 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::ProcessRandomBlockSizes => processing::test_process_random_block_sizes(library, plugin_id),
             PluginTestCase::ProcessResetReactivate => processing::test_process_reset_reactivate(library, plugin_id),
             PluginTestCase::ParamConversions => params::test_param_conversions(library, plugin_id),
-            PluginTestCase::ParamFlush => params::test_param_flush(library, plugin_id),
+            PluginTestCase::ParamChangeEvents => params::test_param_change_events(library, plugin_id),
             PluginTestCase::ParamFuzzBasic => params::test_param_fuzz_basic(library, plugin_id, false),
             PluginTestCase::ParamFuzzBounds => params::test_param_fuzz_basic(library, plugin_id, true),
             PluginTestCase::ParamFuzzSampleAccurate => params::test_param_fuzz_sample_accurate(library, plugin_id),

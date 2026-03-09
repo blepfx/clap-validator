@@ -180,39 +180,38 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
 pub fn test_param_flush(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
 
-    let mut flush_param_values = BTreeMap::new();
+    // first, flush run
+    let span = Span::begin("FlushRun", ());
 
-    for use_process in [false, true] {
-        let _span = Span::begin(if use_process { "ProcessRun" } else { "FlushRun" }, ());
+    let plugin = library
+        .create_plugin(plugin_id)
+        .context("Could not create the plugin instance")?;
+    plugin.init().context("Error during initialization")?;
 
-        let plugin = library
-            .create_plugin(plugin_id)
-            .context("Could not create the plugin instance")?;
-        plugin.init().context("Error during initialization")?;
-
-        let params = match plugin.get_extension::<Params>() {
-            Some(params) => params,
-            None => {
-                return Ok(TestStatus::Skipped {
-                    details: Some(String::from("The plugin does not implement the 'params' extension.")),
-                });
-            }
-        };
-
-        let param_info = params
-            .info()
-            .context("Failure while fetching the plugin's parameters")?;
-
-        let param_events = ParamFuzzer::new(&param_info)
-            .randomize_params_at(&mut prng, 0)
-            .collect::<Vec<_>>();
-
-        if param_events.is_empty() {
+    let params = match plugin.get_extension::<Params>() {
+        Some(params) => params,
+        None => {
             return Ok(TestStatus::Skipped {
-                details: Some(String::from("The plugin does not have any automatable parameters")),
+                details: Some(String::from("The plugin does not implement the 'params' extension.")),
             });
         }
+    };
 
+    let param_info = params
+        .info()
+        .context("Failure while fetching the plugin's parameters")?;
+
+    let param_events = ParamFuzzer::new(&param_info)
+        .randomize_params_at(&mut prng, 0)
+        .collect::<Vec<_>>();
+
+    if param_events.is_empty() {
+        return Ok(TestStatus::Skipped {
+            details: Some(String::from("The plugin does not have any automatable parameters")),
+        });
+    }
+
+    let flush_param_values = {
         let initial_param_values: BTreeMap<clap_id, f64> = param_info
             .keys()
             .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
@@ -220,50 +219,69 @@ pub fn test_param_flush(library: &PluginLibrary, plugin_id: &str) -> Result<Test
 
         plugin.poll_callback(|_| Ok(()))?;
 
-        if use_process {
-            plugin.on_audio_thread(|plugin| {
-                let mut buffers = AudioBuffers::new_out_of_place_f32(&AudioPortConfig::default(), BUFFER_SIZE);
-                let mut process = ProcessScope::new(&plugin, &mut buffers)?;
+        let input_queue = InputEventQueue::new();
+        input_queue.add_events(param_events.iter().cloned());
+        params.flush(&input_queue, &OutputEventQueue::new());
 
-                process.add_events(param_events);
-                process.run()
-            })?;
-        } else {
-            let input_queue = InputEventQueue::new();
-            input_queue.add_events(param_events);
-            params.flush(&input_queue, &OutputEventQueue::new());
-        }
+        plugin.poll_callback(|_| Ok(()))?;
 
-        let result_param_values: BTreeMap<clap_id, f64> = param_info
+        let flush_param_values: BTreeMap<clap_id, f64> = param_info
             .keys()
             .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
             .collect::<Result<BTreeMap<clap_id, f64>>>()?;
 
-        if result_param_values == initial_param_values {
-            anyhow::bail!(
-                "After calling '{}', the plugin's parameter values did not change",
-                if use_process {
-                    "clap_plugin::process()"
-                } else {
-                    "clap_plugin_params::flush()"
-                },
-            );
+        if flush_param_values == initial_param_values {
+            anyhow::bail!("After calling 'clap_plugin_params::flush()', the plugin's parameter values did not change");
         }
 
-        if use_process {
-            if let Some(diff) = generate_param_diff(&flush_param_values, &result_param_values, &params)? {
-                anyhow::bail!(
-                    "The resulting parameter values after calling 'clap_plugin_params::flush()' were different from \
-                     the resulting parameter values after sending the same parameter changes via \
-                     'clap_plugin::process()': \n{}",
-                    diff
-                );
-            }
-        } else {
-            flush_param_values = result_param_values;
-        }
+        flush_param_values
+    };
 
-        plugin.poll_callback(|_| Ok(()))?;
+    span.finish(());
+
+    // second run, use process this time
+    let span = Span::begin("ProcessRun", ());
+
+    let plugin = library
+        .create_plugin(plugin_id)
+        .context("Could not create the plugin instance")?;
+    plugin.init().context("Error during initialization")?;
+
+    let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
+        Some(audio_ports) => audio_ports
+            .config()
+            .context("Error while querying 'audio-ports' IO configuration")?,
+        None => AudioPortConfig::default(),
+    };
+
+    let params = match plugin.get_extension::<Params>() {
+        Some(params) => params,
+        None => anyhow::bail!("The second instance does not implement the 'params' extension."),
+    };
+
+    plugin.on_audio_thread(|plugin| {
+        let mut buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
+        let mut process = ProcessScope::new(&plugin, &mut buffers)?;
+
+        process.add_events(param_events);
+        process.run()
+    })?;
+
+    plugin.poll_callback(|_| Ok(()))?;
+
+    let process_param_values: BTreeMap<clap_id, f64> = param_info
+        .keys()
+        .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
+        .collect::<Result<BTreeMap<clap_id, f64>>>()?;
+
+    span.finish(());
+
+    if let Some(diff) = generate_param_diff(&flush_param_values, &process_param_values, &params)? {
+        anyhow::bail!(
+            "The resulting parameter values after calling 'clap_plugin_params::flush()' were different from the \
+             resulting parameter values after sending the same parameter changes via 'clap_plugin::process()': \n{}",
+            diff
+        );
     }
 
     Ok(TestStatus::Success { details: None })

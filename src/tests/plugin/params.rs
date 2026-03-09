@@ -6,7 +6,7 @@ use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::ext::params::{Param, ParamInfo, Params};
 use crate::plugin::library::PluginLibrary;
-use crate::plugin::process::{AudioBuffers, Event, ProcessScope};
+use crate::plugin::process::{AudioBuffers, Event, InputEventQueue, OutputEventQueue, ProcessScope};
 use crate::tests::rng::{NoteGenerator, ParamFuzzer, new_prng};
 use crate::tests::{TestCase, TestStatus};
 use anyhow::{Context, Result};
@@ -171,6 +171,99 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
              {expected_conversions} calls. This function is expected to be supported for either none of the \
              parameters or for all of them. Examples of failing conversions were: {failed_text_to_value_calls:#?}"
         );
+    }
+
+    Ok(TestStatus::Success { details: None })
+}
+
+/// The test for `ProcessingTest::ParamFlush`.
+pub fn test_param_flush(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+    let mut prng = new_prng();
+
+    let mut flush_param_values = BTreeMap::new();
+
+    for use_process in [false, true] {
+        let _span = Span::begin(if use_process { "ProcessRun" } else { "FlushRun" }, ());
+
+        let plugin = library
+            .create_plugin(plugin_id)
+            .context("Could not create the plugin instance")?;
+        plugin.init().context("Error during initialization")?;
+
+        let params = match plugin.get_extension::<Params>() {
+            Some(params) => params,
+            None => {
+                return Ok(TestStatus::Skipped {
+                    details: Some(String::from("The plugin does not implement the 'params' extension.")),
+                });
+            }
+        };
+
+        let param_info = params
+            .info()
+            .context("Failure while fetching the plugin's parameters")?;
+
+        let param_events = ParamFuzzer::new(&param_info)
+            .randomize_params_at(&mut prng, 0)
+            .collect::<Vec<_>>();
+
+        if param_events.is_empty() {
+            return Ok(TestStatus::Skipped {
+                details: Some(String::from("The plugin does not have any automatable parameters")),
+            });
+        }
+
+        let initial_param_values: BTreeMap<clap_id, f64> = param_info
+            .keys()
+            .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
+            .collect::<Result<BTreeMap<clap_id, f64>>>()?;
+
+        plugin.poll_callback(|_| Ok(()))?;
+
+        if use_process {
+            plugin.on_audio_thread(|plugin| {
+                let mut buffers = AudioBuffers::new_out_of_place_f32(&AudioPortConfig::default(), BUFFER_SIZE);
+                let mut process = ProcessScope::new(&plugin, &mut buffers)?;
+
+                process.add_events(param_events);
+                process.run()
+            })?;
+        } else {
+            let input_queue = InputEventQueue::new();
+            input_queue.add_events(param_events);
+            params.flush(&input_queue, &OutputEventQueue::new());
+        }
+
+        let result_param_values: BTreeMap<clap_id, f64> = param_info
+            .keys()
+            .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
+            .collect::<Result<BTreeMap<clap_id, f64>>>()?;
+
+        if result_param_values == initial_param_values {
+            anyhow::bail!(
+                "After calling '{}', the plugin's parameter values did not change",
+                if use_process {
+                    "clap_plugin::process()"
+                } else {
+                    "clap_plugin_params::flush()"
+                },
+            );
+        }
+
+        if use_process {
+            if let Some(diff) = generate_param_diff(&flush_param_values, &result_param_values, &params)? {
+                anyhow::bail!(
+                    "The resulting parameter values after calling 'clap_plugin_params::flush()' were different from \
+                     the resulting parameter values after sending the same parameter changes via \
+                     'clap_plugin::process()': \n{}",
+                    diff
+                );
+            }
+        } else {
+            flush_param_values = result_param_values;
+        }
+
+        plugin.poll_callback(|_| Ok(()))?;
     }
 
     Ok(TestStatus::Success { details: None })
@@ -544,5 +637,50 @@ pub fn param_compare_approx(param: &Param, actual: f64, expected: f64) -> bool {
         let expected = (expected - param.range.start()) / (param.range.end() - param.range.start());
 
         (actual - expected).abs() <= 1e-4 // 0.01% of the range
+    }
+}
+
+/// Build a string containing differences between two sets of parameters, pretty formatted
+pub fn generate_param_diff(
+    actual: &BTreeMap<clap_id, f64>,
+    expected: &BTreeMap<clap_id, f64>,
+    params: &Params,
+) -> Result<Option<String>> {
+    let param_infos = params.info()?;
+
+    let mut diff = actual
+        .iter()
+        .filter_map(|(&param_id, &actual_value)| {
+            let info = &param_infos[&param_id];
+            let expected_value = expected[&param_id];
+
+            if param_compare_approx(info, actual_value, expected_value) {
+                return None;
+            }
+
+            let string_actual = params.value_to_text(param_id, actual_value).ok().flatten();
+            let string_expected = params.value_to_text(param_id, expected_value).ok().flatten();
+
+            match (string_actual, string_expected) {
+                (Some(string_actual), Some(string_expected)) => Some(format!(
+                    " - {} ({}) - {} ({:.4}) vs {} ({:.4})",
+                    info.name, param_id, string_actual, actual_value, string_expected, expected_value,
+                )),
+                _ => Some(format!(
+                    " - {} ({}) - {:.4} vs {:.4}",
+                    info.name, param_id, actual_value, expected_value,
+                )),
+            }
+        })
+        .collect::<Vec<String>>();
+
+    let num_diffs = diff.len();
+    if num_diffs == 0 {
+        Ok(None)
+    } else if num_diffs > 5 {
+        diff.truncate(5);
+        Ok(Some(format!("{}\n...and {} more", diff.join("\n"), num_diffs - 5)))
+    } else {
+        Ok(Some(diff.join("\n")))
     }
 }

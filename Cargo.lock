@@ -165,7 +165,6 @@ dependencies = [
  "core-foundation",
  "crossbeam",
  "either",
- "libc",
  "libloading",
  "log",
  "midi-consts",

@@ -113,7 +113,6 @@ impl Params<'_> {
                     }
                 }
             } else {
-                span.finish(record!(result: false));
                 Ok(None)
             }
         }
@@ -147,7 +146,6 @@ impl Params<'_> {
                 span.finish(record!(result: value));
                 Ok(Some(value))
             } else {
-                span.finish(record!(result: false));
                 Ok(None)
             }
         }

@@ -58,6 +58,8 @@ pub enum PluginTestCase {
     ProcessResetReactivate,
     #[strum(serialize = "param-conversions")]
     ParamConversions,
+    #[strum(serialize = "param-flush")]
+    ParamFlush,
     #[strum(serialize = "param-fuzz-basic")]
     ParamFuzzBasic,
     #[strum(serialize = "param-fuzz-bounds")]
@@ -76,12 +78,12 @@ pub enum PluginTestCase {
     StateInvalidRandom,
     #[strum(serialize = "state-reproducibility-basic")]
     StateReproducibilityBasic,
+    #[strum(serialize = "state-reproducibility-binary")]
+    StateReproducibilityBinary,
     #[strum(serialize = "state-reproducibility-null-cookies")]
     StateReproducibilityNullCookies,
-    #[strum(serialize = "state-reproducibility-flush")]
-    StateReproducibilityFlush,
-    #[strum(serialize = "state-buffered-streams")]
-    StateBufferedStreams,
+    #[strum(serialize = "state-reproducibility-buffered-streams")]
+    StateReproducibilityBufferedStreams,
     #[strum(serialize = "transport-null")]
     TransportNull,
     #[strum(serialize = "transport-fuzz")]
@@ -187,6 +189,10 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 "Asserts that value to string and string to value conversions are supported for ether all or none of \
                  the plugin's parameters, and that conversions between values and strings roundtrip consistently.",
             ),
+            PluginTestCase::ParamFlush => String::from(
+                "Asserts that the resulting parameter values after a flush are the same as if the parameter changes \
+                 were sent via a process call.",
+            ),
             PluginTestCase::ParamFuzzBasic => format!(
                 "Generates {} sets of random parameter values, sets those on the plugin, and has the plugin process \
                  {} buffers of random audio and note events. The plugin passes the test if it doesn't produce any \
@@ -227,7 +233,7 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::StateReproducibilityBasic => String::from(
                 "Randomizes a plugin's parameters, saves its state, recreates the plugin instance, reloads the state, \
                  and then checks whether the parameter values are the same and whether saving the state once more \
-                 results in the same state file as before. The parameter values are updated using the process \
+                 results in the same parameters as before. The parameter values are updated using the process \
                  function.",
             ),
             PluginTestCase::StateReproducibilityNullCookies => format!(
@@ -235,15 +241,16 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  plugin should handle this in the same way as the other test case.",
                 PluginTestCase::StateReproducibilityBasic
             ),
-            PluginTestCase::StateReproducibilityFlush => String::from(
-                "Randomizes a plugin's parameters, saves its state, recreates the plugin instance, sets the same \
-                 parameters as before, saves the state again, and then asserts that the two states are identical. The \
-                 parameter values are set updated using the process function to create the first state, and using the \
-                 flush function to create the second state.",
+            PluginTestCase::StateReproducibilityBufferedStreams => format!(
+                "Performs the same parameter reproducibility check as in '{}', but this time the plugin is only \
+                 allowed to read a small prime number of bytes at a time when reloading and resaving the state.",
+                PluginTestCase::StateReproducibilityBasic
             ),
-            PluginTestCase::StateBufferedStreams => format!(
-                "Performs the same state and parameter reproducibility check as in '{}', but this time the plugin is \
-                 only allowed to read a small prime number of bytes at a time when reloading and resaving the state.",
+            PluginTestCase::StateReproducibilityBinary => format!(
+                "Performs the same parameter reproducibility check as in '{}', but also checks that the saved state \
+                 data is exactly the same byte for byte. This means that the plugin needs to save the state in a \
+                 completely deterministic way, without any non-determinism coming from things like uninitialized \
+                 memory or random bytes.",
                 PluginTestCase::StateReproducibilityBasic
             ),
             PluginTestCase::TransportNull => String::from(
@@ -320,6 +327,7 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::ProcessRandomBlockSizes => processing::test_process_random_block_sizes(library, plugin_id),
             PluginTestCase::ProcessResetReactivate => processing::test_process_reset_reactivate(library, plugin_id),
             PluginTestCase::ParamConversions => params::test_param_conversions(library, plugin_id),
+            PluginTestCase::ParamFlush => params::test_param_flush(library, plugin_id),
             PluginTestCase::ParamFuzzBasic => params::test_param_fuzz_basic(library, plugin_id, false),
             PluginTestCase::ParamFuzzBounds => params::test_param_fuzz_basic(library, plugin_id, true),
             PluginTestCase::ParamFuzzSampleAccurate => params::test_param_fuzz_sample_accurate(library, plugin_id),
@@ -329,13 +337,18 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::StateInvalidEmpty => state::test_state_invalid_empty(library, plugin_id),
             PluginTestCase::StateInvalidRandom => state::test_state_invalid_random(library, plugin_id),
             PluginTestCase::StateReproducibilityBasic => {
-                state::test_state_reproducibility_basic(library, plugin_id, false)
+                state::test_state_reproducibility(library, plugin_id, false, false, false)
             }
             PluginTestCase::StateReproducibilityNullCookies => {
-                state::test_state_reproducibility_basic(library, plugin_id, true)
+                state::test_state_reproducibility(library, plugin_id, true, false, false)
             }
-            PluginTestCase::StateReproducibilityFlush => state::test_state_reproducibility_flush(library, plugin_id),
-            PluginTestCase::StateBufferedStreams => state::test_state_buffered_streams(library, plugin_id),
+            PluginTestCase::StateReproducibilityBufferedStreams => {
+                state::test_state_reproducibility(library, plugin_id, false, true, false)
+            }
+            PluginTestCase::StateReproducibilityBinary => {
+                state::test_state_reproducibility(library, plugin_id, false, false, true)
+            }
+
             PluginTestCase::TransportNull => transport::test_transport_null(library, plugin_id),
             PluginTestCase::TransportFuzz => transport::test_transport_fuzz(library, plugin_id),
             PluginTestCase::TransportFuzzSampleAccurate => {

@@ -65,23 +65,6 @@ pub struct ValidatorSettings {
     pub trace: bool,
 }
 
-/// Options for running a single test. This is used for the out-of-process testing method. This
-/// option is hidden from the CLI as it's merely an implementation detail.
-#[derive(Debug, Args)]
-pub struct OutOfProcessSettings {
-    /// The type of test (plugin library or plugin) to run.
-    pub test_type: String,
-    /// The name of the test to run.
-    pub test_name: String,
-    /// The serialized test data as JSON.
-    pub test_data: String,
-
-    /// The name of the file to write the test's JSON result to. This is not done through STDIO
-    /// because the hosted plugin may also write things there.
-    #[arg(long)]
-    pub output_file: PathBuf,
-}
-
 /// The main validator command. This will validate one or more plugins and print the results.
 pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<ExitCode> {
     let config = Config::from_current()?;
@@ -105,13 +88,6 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings) -> Result<Ex
     } else {
         Ok(ExitCode::FAILURE)
     }
-}
-
-/// Run a single test and write the output to a file. This command is a hidden implementation detail
-/// used by the validator to run tests in a different process.
-pub fn validate_out_of_process(settings: &OutOfProcessSettings) -> Result<ExitCode> {
-    validator::validate_out_of_process(settings)?;
-    Ok(ExitCode::SUCCESS)
 }
 
 fn pretty_print(result: &ValidationResult, tally: &ValidationTally) {

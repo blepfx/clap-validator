@@ -12,7 +12,6 @@
 use crate::util;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::any::TypeId;
 use std::fmt::Display;
 use std::fs;
 use std::path::PathBuf;
@@ -159,45 +158,6 @@ impl Default for TestList {
         Self {
             plugin_library_tests: PluginLibraryTestCase::iter().map(|c| TestListItem::from(&c)).collect(),
             plugin_tests: PluginTestCase::iter().map(|c| TestListItem::from(&c)).collect(),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct SerializedTest {
-    pub test_type: String,
-    pub test_name: String,
-    pub data: String,
-}
-
-impl SerializedTest {
-    pub fn from_test<'a, T: TestCase<'a>>(test: &T, data: &T::TestArgs) -> Result<Self> {
-        if TypeId::of::<T>() == TypeId::of::<PluginTestCase>() {
-            Ok(Self {
-                test_type: "plugin".into(),
-                test_name: test.to_string(),
-                data: serde_json::to_string(&data)?,
-            })
-        } else if TypeId::of::<T>() == TypeId::of::<PluginLibraryTestCase>() {
-            Ok(Self {
-                test_type: "plugin_library".into(),
-                test_name: test.to_string(),
-                data: serde_json::to_string(&data)?,
-            })
-        } else {
-            panic!("Unsupported test case type for serialization.");
-        }
-    }
-
-    pub fn run(&self) -> Result<TestStatus> {
-        if self.test_type == "plugin" {
-            let test: PluginTestCase = self.test_name.parse()?;
-            test.run(serde_json::from_str(&self.data)?)
-        } else if self.test_type == "plugin_library" {
-            let test: PluginLibraryTestCase = self.test_name.parse()?;
-            test.run(serde_json::from_str(&self.data)?)
-        } else {
-            panic!("Unsupported test type '{}'", self.test_type);
         }
     }
 }

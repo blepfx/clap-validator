@@ -1,8 +1,8 @@
 //! Commands for listing information about the validator or installed plugins.
 
 use crate::Verbosity;
-use crate::commands::list::scan_out_of_process::ScanStatus;
-use crate::plugin::index::index_plugins;
+use crate::cli::sandbox::{SandboxConfig, SandboxOperation};
+use crate::plugin::index::{SandboxedScanLibrary, ScanStatus, index_plugins};
 use crate::util::IteratorExt;
 use anyhow::{Context, Result};
 use clap::Subcommand;
@@ -21,6 +21,9 @@ pub enum ListCommand {
         /// Run the plugin indexing in-process instead of out-of-process.
         #[arg(long)]
         in_process: bool,
+        /// When running the scans out-of-process, hide the plugin's output.
+        #[arg(long)]
+        hide_output: bool,
         /// Paths to one or more plugins that should be loaded and scanned, optional.
         ///
         /// All installed plugins are crawled if this value is missing.
@@ -34,6 +37,9 @@ pub enum ListCommand {
         /// Run the plugin indexing in-process instead of out-of-process.
         #[arg(long)]
         in_process: bool,
+        /// When running the scans out-of-process, hide the plugin's output.
+        #[arg(long)]
+        hide_output: bool,
         /// Paths to one or more plugins that should be indexed for presets, optional.
         ///
         /// All installed plugins are crawled if this value is missing.
@@ -56,14 +62,23 @@ pub fn list(verbosity: Verbosity, command: ListCommand) -> Result<ExitCode> {
         ListCommand::Plugins {
             json,
             in_process,
+            hide_output,
             paths,
-        } => list_plugins(json, in_process, verbosity, paths),
+        } => list_plugins(json, in_process, hide_output, verbosity, paths),
         ListCommand::Presets {
             json,
             in_process,
+            hide_output,
             paths,
             limit,
-        } => list_presets(json, in_process, verbosity, paths, limit.unwrap_or(usize::MAX)),
+        } => list_presets(
+            json,
+            in_process,
+            hide_output,
+            verbosity,
+            paths,
+            limit.unwrap_or(usize::MAX),
+        ),
     }
 }
 
@@ -71,6 +86,7 @@ pub fn list(verbosity: Verbosity, command: ListCommand) -> Result<ExitCode> {
 fn list_presets(
     json: bool,
     in_process: bool,
+    hide_output: bool,
     verbosity: Verbosity,
     paths: Option<Vec<PathBuf>>,
     preset_limit: usize,
@@ -82,7 +98,9 @@ fn list_presets(
 
     let results = plugins
         .into_iter()
-        .map_parallel(!in_process, |path| scan_single(path, in_process, true, verbosity))
+        .map_parallel(!in_process, |path| {
+            scan_single(path, in_process, true, hide_output, verbosity)
+        })
         .collect::<Result<BTreeMap<_, _>>>()?;
 
     if json {
@@ -98,7 +116,13 @@ fn list_presets(
 }
 
 /// Lists basic information about all installed CLAP plugins.
-fn list_plugins(json: bool, in_process: bool, verbosity: Verbosity, paths: Option<Vec<PathBuf>>) -> Result<ExitCode> {
+fn list_plugins(
+    json: bool,
+    in_process: bool,
+    hide_output: bool,
+    verbosity: Verbosity,
+    paths: Option<Vec<PathBuf>>,
+) -> Result<ExitCode> {
     let plugins = match paths {
         Some(paths) => paths,
         None => index_plugins().context("Error while crawling plugins")?,
@@ -106,7 +130,9 @@ fn list_plugins(json: bool, in_process: bool, verbosity: Verbosity, paths: Optio
 
     let results = plugins
         .into_iter()
-        .map_parallel(!in_process, |path| scan_single(path, in_process, false, verbosity))
+        .map_parallel(!in_process, |path| {
+            scan_single(path, in_process, false, hide_output, verbosity)
+        })
         .collect::<Result<BTreeMap<_, _>>>()?;
 
     if json {
@@ -142,20 +168,34 @@ fn scan_single(
     path: PathBuf,
     in_process: bool,
     scan_presets: bool,
+    hide_output: bool,
     verbosity: Verbosity,
 ) -> Result<(PathBuf, ScanStatus)> {
-    let result = if in_process {
-        scan_out_of_process::scan_in_process(&path, scan_presets)
-    } else {
-        scan_out_of_process::scan_out_of_process(&path, scan_presets, verbosity)?
+    let request = SandboxedScanLibrary {
+        library_path: path.clone(),
+        scan_presets,
     };
+
+    let result = request
+        .invoke(if in_process {
+            None
+        } else {
+            Some(SandboxConfig {
+                verbosity,
+                hide_output,
+                timeout: Some(std::time::Duration::from_secs(10)),
+            })
+        })
+        .unwrap_or_else(|err| ScanStatus::Crashed {
+            details: err.to_string(),
+        });
 
     Ok((path, result))
 }
 
 mod pretty {
-    use super::scan_out_of_process::ScanStatus;
     use crate::cli::{Config, Report, ReportItem, pluralize};
+    use crate::plugin::index::ScanStatus;
     use crate::plugin::preset_discovery::*;
     use crate::tests::TestList;
     use std::path::PathBuf;
@@ -590,130 +630,5 @@ mod pretty {
 
             println!("\n{}", group);
         }
-    }
-}
-
-pub mod scan_out_of_process {
-    use crate::Verbosity;
-    use crate::plugin::index::{ScannedLibrary, scan_library};
-    use anyhow::{Context, Result};
-    use clap::{Args, ValueEnum};
-    use serde::{Deserialize, Serialize};
-    use std::ffi::OsStr;
-    use std::path::{Path, PathBuf};
-    use std::process::{Command, ExitCode};
-    use std::time::{Duration, Instant};
-    use wait_timeout::ChildExt;
-
-    #[derive(Debug, Args)]
-    pub struct Settings {
-        #[arg(long)]
-        pub plugin_path: PathBuf,
-        #[arg(long)]
-        pub output_file: PathBuf,
-        #[arg(long)]
-        pub scan_presets: bool,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    #[serde(rename_all = "kebab-case")]
-    #[serde(tag = "status")]
-    pub enum ScanStatus {
-        Success {
-            #[serde(flatten)]
-            library: ScannedLibrary,
-            duration: Duration,
-        },
-        Error {
-            details: String,
-        },
-        Crashed {
-            details: String,
-        },
-    }
-
-    pub fn scan_in_process(plugin_path: &Path, scan_presets: bool) -> ScanStatus {
-        let start = Instant::now();
-        match scan_library(plugin_path, scan_presets) {
-            Ok(library) => ScanStatus::Success {
-                library,
-                duration: start.elapsed(),
-            },
-            Err(err) => ScanStatus::Error {
-                details: format!("{err:#}"),
-            },
-        }
-    }
-
-    pub fn scan_out_of_process(plugin_path: &Path, scan_presets: bool, verbosity: Verbosity) -> Result<ScanStatus> {
-        const WAIT_TIMEOUT: Duration = Duration::from_secs(30);
-
-        // This temporary file will automatically be removed when this function exits
-        let output_file_path = tempfile::Builder::new()
-            .suffix(".json")
-            .tempfile()
-            .context("Could not create a temporary file path")?
-            .into_temp_path();
-
-        let mut command =
-            Command::new(std::env::current_exe().context("Could not find the path to the current executable")?);
-
-        command
-            .arg("--verbosity")
-            .arg(verbosity.to_possible_value().unwrap().get_name())
-            .arg("scan-out-of-process")
-            .args([OsStr::new("--output-file"), output_file_path.as_os_str()])
-            .args([OsStr::new("--plugin-path"), plugin_path.as_os_str()]);
-
-        if scan_presets {
-            command.arg("--scan-presets");
-        }
-
-        let status = command
-            .spawn()
-            .context("Could not call clap-validator for out-of-process scanning")?
-            .wait_timeout(WAIT_TIMEOUT)
-            .context("Error while waiting on clap-validator to finish running the scan")?;
-
-        match status {
-            None => Ok(ScanStatus::Crashed {
-                details: format!("Timed out after {} seconds", WAIT_TIMEOUT.as_secs()),
-            }),
-
-            Some(status) if !status.success() => Ok(ScanStatus::Crashed {
-                details: status.to_string(),
-            }),
-
-            _ => {
-                // At this point, the child process _should_ have written its output to `output_file_path`,
-                // and we can just parse it from there
-                let result = serde_json::from_str(&std::fs::read_to_string(&output_file_path).with_context(|| {
-                    format!(
-                        "Could not read the child process output from '{}'",
-                        output_file_path.display()
-                    )
-                })?)
-                .context("Could not parse the child process output to JSON")?;
-
-                Ok(result)
-            }
-        }
-    }
-
-    pub fn run(settings: &Settings) -> Result<ExitCode> {
-        let result = scan_in_process(&settings.plugin_path, settings.scan_presets);
-
-        std::fs::write(
-            &settings.output_file,
-            serde_json::to_string(&result).context("Could not serialize the test result to JSON")?,
-        )
-        .with_context(|| {
-            format!(
-                "Could not write the scan result to '{}'",
-                settings.output_file.display()
-            )
-        })?;
-
-        Ok(ExitCode::SUCCESS)
     }
 }

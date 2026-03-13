@@ -5,6 +5,7 @@ use crate::cli::tracing::{Span, record};
 use crate::plugin::library::PluginLibrary;
 use crate::tests::TestStatus;
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 mod descriptor;
@@ -16,7 +17,14 @@ mod transport;
 
 /// The tests for individual CLAP plugins. See the module's heading for more information, and the
 /// `description` function below for a description of each test case.
-#[derive(strum_macros::Display, strum_macros::EnumString, strum_macros::EnumIter, strum_macros::IntoStaticStr)]
+#[derive(
+    strum_macros::Display,
+    strum_macros::EnumString,
+    strum_macros::EnumIter,
+    strum_macros::IntoStaticStr,
+    Serialize,
+    Deserialize,
+)]
 pub enum PluginTestCase {
     #[strum(serialize = "descriptor-consistency")]
     DescriptorConsistency,

@@ -1,4 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Write};
+use textwrap::core::display_width;
 use yansi::Paint;
 
 #[derive(Debug, Default)]
@@ -110,4 +112,80 @@ pub fn pretty_wrap(text: &str, width: usize) -> Vec<std::borrow::Cow<'_, str>> {
             .break_words(true)
             .wrap_algorithm(textwrap::WrapAlgorithm::OptimalFit(Default::default())),
     )
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Printable {
+    Group(Vec<Printable>),
+    Table(Vec<Vec<String>>),
+    Text(String),
+    Scope(Scope),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Scope {
+    header: String,
+    body: Vec<Printable>,
+    footer: Vec<String>,
+}
+
+impl Printable {
+    pub fn print(&self) {
+        let width = match textwrap::termwidth() {
+            w if w > 40 => w - 5,
+            w => w,
+        };
+
+        self.print_terminal(width, &mut |args| println!("{}", args));
+    }
+
+    fn print_terminal(&self, width: usize, print_line: &mut dyn FnMut(std::fmt::Arguments)) {
+        match self {
+            Printable::Group(items) => {
+                for item in items {
+                    item.print_terminal(width, print_line);
+                }
+            }
+
+            Printable::Text(text) => {
+                for line in pretty_wrap(text, width) {
+                    print_line(format_args!("{}", line));
+                }
+            }
+
+            Printable::Scope(scope) => {
+                print_line(format_args!(""));
+                print_line(format_args!("{} {}", "┌─".dim(), scope.header.bold()));
+
+                for item in scope.body.iter() {
+                    item.print_terminal(width.saturating_sub(2), &mut |args| {
+                        print_line(format_args!("{} {}", "│".dim(), args));
+                    });
+                }
+
+                print_line(format_args!("{} ", "└──".dim()));
+
+                for (i, footer) in scope.footer.iter().enumerate() {
+                    if i > 0 {
+                        print_line(format_args!(" {} ", "─".dim()));
+                    }
+
+                    print_line(format_args!("{}", footer));
+                }
+            }
+
+            Printable::Table(rows) => {
+                let mut columns = vec![];
+                for row in rows {
+                    for (i, cell) in row.iter().enumerate() {
+                        columns.resize(i + 1, 0);
+                        columns[i] = columns[i].max(display_width(cell));
+                    }
+                }
+
+                let mut total_width = columns.iter().sum::<usize>() + (columns.len() - 1);
+                while total_width > width && total_width > 2 * columns.len() {}
+            }
+        }
+    }
 }

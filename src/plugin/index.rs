@@ -1,11 +1,13 @@
 //! Utilities and data structures for indexing plugins and presets.
 
+use crate::cli::sandbox::SandboxOperation;
 use crate::plugin::library::PluginMetadata;
 use crate::plugin::preset_discovery::{LocationValue, PresetFile, Soundpack};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use walkdir::{DirEntry, WalkDir};
 
 /// The separator for path environment variables.
@@ -41,6 +43,48 @@ pub struct ScannedPresets {
     // because JSON object keys must be strings, and with the change from URIs to a location
     // kind+value that's not longer the case.
     pub presets: Vec<(LocationValue, PresetFile)>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(tag = "status")]
+pub enum ScanStatus {
+    Success {
+        #[serde(flatten)]
+        library: ScannedLibrary,
+        duration: Duration,
+    },
+    Error {
+        details: String,
+    },
+    Crashed {
+        details: String,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SandboxedScanLibrary {
+    pub library_path: PathBuf,
+    pub scan_presets: bool,
+}
+
+impl SandboxOperation for SandboxedScanLibrary {
+    const ID: &'static str = "scan-library";
+
+    type Result = ScanStatus;
+
+    fn run(&self) -> Self::Result {
+        let start = std::time::Instant::now();
+        match scan_library(&self.library_path, self.scan_presets) {
+            Ok(library) => ScanStatus::Success {
+                library,
+                duration: start.elapsed(),
+            },
+            Err(err) => ScanStatus::Error {
+                details: format!("{:#}", err),
+            },
+        }
+    }
 }
 
 /// Load the CLAP plugin at `plugin_path`, read plugin metadata, and optionally scan for presets.

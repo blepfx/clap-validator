@@ -4,6 +4,7 @@ use super::TestCase;
 use crate::cli::tracing::{Span, record};
 use crate::tests::TestStatus;
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 mod factories;
@@ -13,7 +14,15 @@ mod scanning;
 /// Tests for entire CLAP libraries. These are mostly to ensure good plugin scanning practices. See
 /// the module's heading for more information, and the `description` function below for a
 /// description of each test case.
-#[derive(strum_macros::Display, strum_macros::EnumString, strum_macros::EnumIter, strum_macros::IntoStaticStr)]
+/// TODO: use display+fromstr instead of serde
+#[derive(
+    strum_macros::Display,
+    strum_macros::EnumString,
+    strum_macros::EnumIter,
+    strum_macros::IntoStaticStr,
+    Serialize,
+    Deserialize,
+)]
 pub enum PluginLibraryTestCase {
     #[strum(serialize = "preset-discovery-crawl")]
     PresetDiscoveryCrawl,

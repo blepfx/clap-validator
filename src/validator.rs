@@ -2,25 +2,21 @@
 //! way that somewhat mimics a real host.
 
 use crate::Verbosity;
+use crate::cli::sandbox::{SandboxConfig, SandboxOperation};
 use crate::cli::{Config, panic_message};
-use crate::commands::validate::{OutOfProcessSettings, ValidatorSettings};
+use crate::commands::validate::ValidatorSettings;
 use crate::plugin::library::{PluginLibrary, PluginMetadata};
-use crate::tests::{PluginLibraryTestCase, PluginTestCase, SerializedTest, TestCase, TestResult, TestStatus};
+use crate::tests::{PluginLibraryTestCase, PluginTestCase, TestCase, TestResult, TestStatus};
 use crate::util::IteratorExt;
 use anyhow::{Context, Result};
-use clap::ValueEnum;
 use clap_sys::version::clap_version_is_compatible;
 use regex_lite::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::ffi::OsStr;
-use std::fs;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use strum::IntoEnumIterator;
-use wait_timeout::ChildExt;
 
 /// The results of running the validation test suite on one or more plugins. Use the
 /// [`tally()`][Self::tally()] method to compute the number of successful and failed tests.
@@ -107,7 +103,16 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings, config: &Con
                 library_path.clone(),
                 PluginLibraryTestCase::iter()
                     .filter(|test| filter_test(&test.to_string()))
-                    .map_parallel(parallel, |test| run_test(&test, verbosity, settings, library_path))
+                    .map_parallel(parallel, |test| {
+                        run_test(
+                            verbosity,
+                            settings,
+                            SandboxedValidation::PluginLibrary {
+                                test,
+                                path: library_path.clone(),
+                            },
+                        )
+                    })
                     .collect::<Result<Vec<TestResult>>>()?,
             );
 
@@ -142,7 +147,15 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings, config: &Con
                     let tests = PluginTestCase::iter()
                         .filter(|test| filter_test(&test.to_string()))
                         .map_parallel(parallel, |test| {
-                            run_test(&test, verbosity, settings, (library_path, &plugin_metadata.id))
+                            run_test(
+                                verbosity,
+                                settings,
+                                SandboxedValidation::Plugin {
+                                    test,
+                                    path: library_path.clone(),
+                                    plugin_id: plugin_metadata.id.clone(),
+                                },
+                            )
                         });
 
                     Ok((plugin_metadata.id.clone(), tests.collect::<Result<Vec<TestResult>>>()?))
@@ -190,161 +203,102 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings, config: &Con
     Ok(results)
 }
 
-/// Validate a single test, this is used for out-of-process testing.
-pub fn validate_out_of_process(settings: &OutOfProcessSettings) -> Result<()> {
-    let test = SerializedTest {
-        test_type: settings.test_type.clone(),
-        test_name: settings.test_name.clone(),
-        data: settings.test_data.clone(),
-    };
-
-    let result = run_test_in_process(|| test.run());
-
-    std::fs::write(
-        &settings.output_file,
-        serde_json::to_string(&result).context("Could not serialize the test result to JSON")?,
-    )
-    .with_context(|| {
-        format!(
-            "Could not write the test result to '{}'",
-            settings.output_file.display()
-        )
-    })?;
-
-    Ok(())
-}
-
-/// The filter function for determining whether or not a test should be run based on the validator's
-/// settings settings.
-fn run_test<'a, T: TestCase<'a>>(
-    test: &T,
-    verbosity: Verbosity,
-    settings: &ValidatorSettings,
-    args: T::TestArgs,
-) -> Result<TestResult> {
+fn run_test(verbosity: Verbosity, settings: &ValidatorSettings, request: SandboxedValidation) -> Result<TestResult> {
     let start = Instant::now();
-    let status = if settings.in_process {
-        run_test_in_process(|| test.run(args))
-    } else {
-        run_test_out_of_process(test, args, verbosity, settings.hide_output)?
+    let (status, duration) = request
+        .invoke(if settings.in_process {
+            None
+        } else {
+            Some(SandboxConfig {
+                verbosity,
+                hide_output: settings.hide_output,
+                timeout: Some(Duration::from_secs(30)),
+            })
+        })
+        .unwrap_or_else(|err| {
+            (
+                TestStatus::Crashed {
+                    details: err.to_string(),
+                },
+                start.elapsed(),
+            )
+        });
+
+    let (name, description) = match &request {
+        SandboxedValidation::PluginLibrary { test, .. } => (test.to_string(), test.description()),
+        SandboxedValidation::Plugin { test, .. } => (test.to_string(), test.description()),
     };
 
     match &status {
         TestStatus::Success { details: None } => {
-            log::info!("Test {} completed", test)
+            log::info!("Test {} completed", name)
         }
         TestStatus::Success { details: Some(details) } => {
-            log::info!("Test {} completed: {}", test, details)
+            log::info!("Test {} completed: {}", name, details)
         }
         TestStatus::Warning { details: None } => {
-            log::warn!("Test {} completed with a warning", test)
+            log::warn!("Test {} completed with a warning", name)
         }
         TestStatus::Warning { details: Some(details) } => {
-            log::warn!("Test {} completed with a warning: {}", test, details)
+            log::warn!("Test {} completed with a warning: {}", name, details)
         }
         TestStatus::Failed { details: None } => {
-            log::error!("Test {} failed", test)
+            log::error!("Test {} failed", name)
         }
         TestStatus::Failed { details: Some(details) } => {
-            log::error!("Test {} failed: {}", test, details)
+            log::error!("Test {} failed: {}", name, details)
         }
         TestStatus::Crashed { details } => {
-            log::error!("Test {} crashed: {}", test, details)
+            log::error!("Test {} crashed: {}", name, details)
         }
         _ => {}
     }
 
     Ok(TestResult {
-        name: test.to_string(),
-        description: test.description(),
-        duration: start.elapsed(),
+        name,
+        description,
+        duration,
         status,
     })
 }
 
-fn run_test_out_of_process<'a, T: TestCase<'a>>(
-    test: &T,
-    args: T::TestArgs,
-    verbosity: Verbosity,
-    hide_output: bool,
-) -> Result<TestStatus> {
-    const WAIT_TIMEOUT: Duration = Duration::from_secs(30);
-
-    let test = SerializedTest::from_test(test, &args)?;
-
-    // The idea here is that we'll invoke the same clap-validator binary with a special hidden command
-    // that runs a single test. This is the reason why test cases must be convertible to and
-    // from strings. If everything goes correctly, then the child process will write the results
-    // as JSON to the specified file path. This is intentionaly not done through STDIO since the
-    // hosted plugin may also write things there, and doing STDIO redirection within the child
-    // process is more complicated than just writing the result to a temporary file.
-
-    // This temporary file will automatically be removed when this function exits
-    let output_file_path = tempfile::Builder::new()
-        .suffix(".json")
-        .tempfile()
-        .context("Could not create a temporary file path")?
-        .into_temp_path();
-
-    let mut command =
-        Command::new(std::env::current_exe().context("Could not find the path to the current executable")?);
-
-    command
-        .arg("--verbosity")
-        .arg(verbosity.to_possible_value().unwrap().get_name())
-        .arg("validate-out-of-process")
-        .args([OsStr::new("--output-file"), output_file_path.as_os_str()])
-        .arg(test.test_type)
-        .arg(test.test_name)
-        .arg(test.data);
-
-    if hide_output {
-        command.stdout(Stdio::null());
-        command.stderr(Stdio::null());
-    }
-
-    let status = command
-        .spawn()
-        .context("Could not call clap-validator for out-of-process validation")?
-        // The docs make it seem like this can only fail if the process isn't running, but if
-        // spawn succeeds then this can never fail:
-        .wait_timeout(WAIT_TIMEOUT)
-        .context("Error while waiting on clap-validator to finish running the test")?;
-
-    match status {
-        None => Ok(TestStatus::Crashed {
-            details: format!("Timed out after {} seconds", WAIT_TIMEOUT.as_secs()),
-        }),
-
-        Some(status) if !status.success() => Ok(TestStatus::Crashed {
-            details: status.to_string(),
-        }),
-
-        _ => {
-            // At this point, the child process _should_ have written its output to `output_file_path`,
-            // and we can just parse it from there
-            let result = serde_json::from_str(&fs::read_to_string(&output_file_path).with_context(|| {
-                format!(
-                    "Could not read the child process output from '{}'",
-                    output_file_path.display()
-                )
-            })?)
-            .context("Could not parse the child process output to JSON")?;
-
-            Ok(result)
-        }
-    }
+#[derive(Serialize, Deserialize)]
+pub enum SandboxedValidation {
+    PluginLibrary {
+        test: PluginLibraryTestCase,
+        path: PathBuf,
+    },
+    Plugin {
+        test: PluginTestCase,
+        path: PathBuf,
+        plugin_id: String,
+    },
 }
 
-fn run_test_in_process(test: impl FnOnce() -> Result<TestStatus>) -> TestStatus {
-    match catch_unwind(AssertUnwindSafe(test)) {
-        Ok(Ok(test_status)) => test_status,
-        Ok(Err(err)) => TestStatus::Failed {
-            details: Some(format!("{err:#}")),
-        },
-        Err(panic) => TestStatus::Crashed {
-            details: panic_message(&*panic),
-        },
+impl SandboxOperation for SandboxedValidation {
+    const ID: &'static str = "validate";
+
+    type Result = (TestStatus, Duration);
+
+    fn run(&self) -> Self::Result {
+        let start = Instant::now();
+
+        let closure = || match self {
+            SandboxedValidation::PluginLibrary { test, path } => test.run(path),
+            SandboxedValidation::Plugin { test, path, plugin_id } => test.run((path, plugin_id)),
+        };
+
+        let status = match catch_unwind(AssertUnwindSafe(closure)) {
+            Ok(Ok(test_status)) => test_status,
+            Ok(Err(err)) => TestStatus::Failed {
+                details: Some(format!("{err:#}")),
+            },
+            Err(panic) => TestStatus::Crashed {
+                details: panic_message(&*panic),
+            },
+        };
+
+        (status, start.elapsed())
     }
 }
 

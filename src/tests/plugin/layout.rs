@@ -4,6 +4,7 @@ use crate::plugin::ext::audio_ports_activation::AudioPortsActivation;
 use crate::plugin::ext::audio_ports_config::{AudioPortsConfig, AudioPortsConfigInfo};
 use crate::plugin::ext::configurable_audio_ports::ConfigurableAudioPorts;
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
+use crate::plugin::instance::CallbackEvent;
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::process::{AudioBuffers, ProcessRun, ProcessScope};
 use crate::tests::TestStatus;
@@ -359,7 +360,6 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
 }
 
 /// The test for `PluginTestCase::LayoutAudioPortsActivation`.
-/// TODO: audio ports activation invalidation test (audio-ports-config extension and port rescan)
 pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     let mut prng = new_prng();
 
@@ -368,10 +368,8 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
-    let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
-        Some(audio_ports) => audio_ports
-            .config()
-            .context("Error while querying 'audio-ports' IO configuration")?,
+    let audio_ports = match plugin.get_extension::<AudioPorts>() {
+        Some(audio_ports) => audio_ports,
         None => {
             return Ok(TestStatus::Skipped {
                 details: Some(String::from(
@@ -379,13 +377,6 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
                 )),
             });
         }
-    };
-
-    let note_ports_config = match plugin.get_extension::<NotePorts>() {
-        Some(note_ports) => note_ports
-            .config()
-            .context("Error while querying 'note-ports' IO configuration")?,
-        None => NotePortConfig::default(),
     };
 
     let audio_ports_activation = match plugin.get_extension::<AudioPortsActivation>() {
@@ -399,10 +390,21 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
         }
     };
 
-    let full_input_mask = 1u64
+    let note_ports_config = match plugin.get_extension::<NotePorts>() {
+        Some(note_ports) => note_ports
+            .config()
+            .context("Error while querying 'note-ports' IO configuration")?,
+        None => NotePortConfig::default(),
+    };
+
+    let mut audio_ports_config = audio_ports
+        .config()
+        .context("Error while querying 'audio-ports' IO configuration")?;
+
+    let mut full_input_mask = 1u64
         .unbounded_shl(audio_ports_config.inputs.len() as u32)
         .wrapping_sub(1);
-    let full_output_mask = 1u64
+    let mut full_output_mask = 1u64
         .unbounded_shl(audio_ports_config.outputs.len() as u32)
         .wrapping_sub(1);
 
@@ -411,6 +413,26 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
 
     // 32 different attempts
     for _ in 0..32 {
+        plugin.poll_callback(|event| match event {
+            // TODO: this is not supported currently (host impl reports it as false)
+            CallbackEvent::AudioPortsRescanAll => {
+                // rescan ports, reset masks
+                audio_ports_config = audio_ports
+                    .config()
+                    .context("Error while querying 'audio-ports' IO configuration after rescan")?;
+
+                full_input_mask = 1u64
+                    .unbounded_shl(audio_ports_config.inputs.len() as u32)
+                    .wrapping_sub(1);
+                full_output_mask = 1u64
+                    .unbounded_shl(audio_ports_config.outputs.len() as u32)
+                    .wrapping_sub(1);
+
+                Ok(())
+            }
+            _ => Ok(()),
+        })?;
+
         let prev_input_mask = std::mem::replace(&mut next_input_mask, prng.random());
         let prev_output_mask = std::mem::replace(&mut next_output_mask, prng.random());
 

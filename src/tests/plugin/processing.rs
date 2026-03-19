@@ -1,12 +1,15 @@
 //! Contains most of the boilerplate around testing audio processing.
 
+use std::f32;
+use std::time::Instant;
+
 use crate::cli::tracing::{Span, record};
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::ext::tail::Tail;
 use crate::plugin::instance::{CallbackEvent, ProcessStatus};
 use crate::plugin::library::PluginLibrary;
-use crate::plugin::process::{AudioBuffers, ProcessRun, ProcessScope};
+use crate::plugin::process::{AudioBuffers, ConstantMask, ProcessRun, ProcessScope};
 use crate::tests::TestStatus;
 use crate::tests::rng::{NoteGenerator, new_prng};
 use anyhow::{Context, Result};
@@ -122,6 +125,109 @@ pub fn test_process_audio_double(library: &PluginLibrary, plugin_id: &str, in_pl
     })?;
 
     plugin.poll_callback(|_| Ok(()))?;
+
+    Ok(TestStatus::Success { details: None })
+}
+
+/// The test for `PluginTestCase::ProcessAudioDenormal`.
+pub fn test_process_audio_denormals(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+    let mut prng = new_prng();
+
+    let plugin = library
+        .create_plugin(plugin_id)
+        .context("Could not create the plugin instance")?;
+    plugin.init().context("Error during initialization")?;
+
+    let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
+        Some(audio_ports) => audio_ports
+            .config()
+            .context("Error while querying 'audio-ports' IO configuration")?,
+        None => {
+            return Ok(TestStatus::Skipped {
+                details: Some(String::from(
+                    "The plugin does not implement the 'audio-ports' extension.",
+                )),
+            });
+        }
+    };
+
+    if audio_ports_config.inputs.is_empty() {
+        return Ok(TestStatus::Skipped {
+            details: Some(String::from(
+                "The plugin implements the 'audio-ports' extension but it does not have any input audio ports.",
+            )),
+        });
+    }
+
+    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
+
+    let time_normal = Instant::now();
+    plugin.on_audio_thread(|plugin| -> Result<()> {
+        let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
+
+        for _ in 0..5 {
+            process.audio_buffers().fill_white_noise(&mut prng);
+            process.run_with(ProcessRun {
+                block_size: BUFFER_SIZE,
+                output_ignore_mask: 0,
+                output_ignore_denormals: true,
+            })?;
+        }
+
+        Ok(())
+    })?;
+    let time_normal = time_normal.elapsed();
+
+    plugin.poll_callback(|_| Ok(()))?;
+
+    let time_denormal = Instant::now();
+    plugin.on_audio_thread(|plugin| -> Result<()> {
+        let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
+
+        for _ in 0..5 {
+            for buffer in process.audio_buffers().iter_mut() {
+                if buffer.port().input().is_some() {
+                    buffer.set_input_constant_mask(ConstantMask::DYNAMIC);
+                    for channel in 0..buffer.channels() {
+                        match buffer.channel_mut(channel) {
+                            Either::Left(c) => c.fill_with(|| prng.random_range(-f32::MIN_POSITIVE..f32::MIN_POSITIVE)),
+                            Either::Right(c) => {
+                                c.fill_with(|| prng.random_range(-f64::MIN_POSITIVE..f64::MIN_POSITIVE))
+                            }
+                        }
+                    }
+                }
+            }
+
+            process.run_with(ProcessRun {
+                block_size: BUFFER_SIZE,
+                output_ignore_mask: 0,
+                output_ignore_denormals: true,
+            })?;
+        }
+
+        Ok(())
+    })?;
+    let time_denormal = time_denormal.elapsed();
+
+    plugin.poll_callback(|_| Ok(()))?;
+
+    let ratio = time_denormal.as_secs_f64() / time_normal.as_secs_f64();
+    if ratio > 2.0 {
+        return Ok(TestStatus::Warning {
+            details: Some(format!(
+                "The plugin took {:.2}x longer to process denormals, you should set flush-to-zero flags or avoid \
+                 denormals in some other way.",
+                ratio
+            )),
+        });
+    }
+
+    if ratio > 1.2 {
+        return Ok(TestStatus::Success {
+            details: Some(format!("The plugin took {:.2}x longer to process denormals", ratio)),
+        });
+    }
 
     Ok(TestStatus::Success { details: None })
 }
@@ -343,6 +449,7 @@ pub fn test_process_random_block_sizes(library: &PluginLibrary, plugin_id: &str)
                 .run_with(ProcessRun {
                     block_size,
                     output_ignore_mask: 0,
+                    output_ignore_denormals: false,
                 })
                 .with_context(|| format!("Error while processing with buffer size of {}", block_size))?;
         }

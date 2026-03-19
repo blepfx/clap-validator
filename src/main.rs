@@ -6,7 +6,6 @@ mod cli;
 mod commands;
 mod plugin;
 mod tests;
-mod util;
 mod validator;
 
 fn main() -> ExitCode {
@@ -16,18 +15,18 @@ fn main() -> ExitCode {
     // run are cleaned up. These are used for things like state dumps when one of the state tests
     // fail. This is allowed to fail since the directory may not exist and even if it does and we
     // cannot remove it, then that may not be a problem.
-    let _ = std::fs::remove_dir_all(util::validator_temp_dir());
-    let _ = std::fs::create_dir_all(util::validator_temp_dir());
+    let _ = std::fs::remove_dir_all(cli::validator_temp_dir());
+    let _ = std::fs::create_dir_all(cli::validator_temp_dir());
 
     // begin instrumentation if enabled
-    let trace_path = util::validator_temp_dir().join("trace.json");
+    let trace_path = cli::validator_temp_dir().join("trace.json");
     let trace_enabled = matches!(&args.command, Command::Validate(settings) if settings.trace);
     if trace_enabled {
         cli::tracing::install(trace_path.to_str().unwrap());
     }
 
     // setup logging
-    log::set_logger(Box::leak(Box::new(cli::CustomLogger::new()))).unwrap();
+    log::set_logger(&cli::CustomLogger).unwrap();
     log::set_max_level(match args.verbosity {
         Verbosity::Quiet => log::LevelFilter::Off,
         Verbosity::Error => log::LevelFilter::Error,
@@ -49,7 +48,7 @@ fn main() -> ExitCode {
         Command::Validate(settings) => commands::validate::validate(args.verbosity, &settings),
         Command::Fuzz(_) => todo!(),
         Command::List(command) => commands::list::list(args.verbosity, command),
-        Command::Sandbox(payload) => cli::sandbox::dispatch(payload),
+        Command::Sandbox(payload) => payload.dispatch().map(|_| ExitCode::SUCCESS),
     };
 
     let status = match &result {

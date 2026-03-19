@@ -1,3 +1,5 @@
+// TODO: we should probably add a negative test (a plugin that fails some of the clap-validator tests)
+
 use crate::params::{PolySynthParamModulations, PolySynthParams};
 use crate::poly_oscillator::PolyOscillator;
 use clack_extensions::audio_ports::*;
@@ -9,7 +11,7 @@ use clack_extensions::audio_ports_config::{
     PluginAudioPortsConfigInfo, PluginAudioPortsConfigInfoImpl,
 };
 use clack_extensions::configurable_audio_ports::{
-    AudioPortsRequest, PluginConfigurableAudioPorts, PluginConfigurableAudioPortsImpl,
+    AudioPortRequest, PluginConfigurableAudioPorts, PluginConfigurableAudioPortsImpl,
 };
 use clack_extensions::note_ports::*;
 use clack_extensions::params::*;
@@ -276,23 +278,23 @@ impl PluginAudioPortsConfigInfoImpl for PolySynthPluginMainThread<'_> {
 }
 
 impl PluginConfigurableAudioPortsImpl for PolySynthPluginMainThread<'_> {
-    fn can_apply_configuration(&mut self, requests: &[AudioPortsRequest]) -> bool {
+    fn can_apply_configuration(&mut self, requests: &[AudioPortRequest]) -> bool {
         dbg!(requests);
 
-        matches!(requests.first(), Some(request) if !request.is_input() && request.port_index() == 0 && request.channel_count() > 0 && request.channel_count() <= 8)
+        matches!(requests.first(), Some(request) if !request.is_input() && request.port_index() == 0 && request.details().channel_count() > 0 && request.details().channel_count() <= 8)
     }
 
-    fn apply_configuration(&mut self, requests: &[AudioPortsRequest]) -> bool {
+    fn apply_configuration(&mut self, requests: &[AudioPortRequest]) -> bool {
         dbg!(requests);
 
         match requests.first() {
             Some(request)
                 if !request.is_input()
                     && request.port_index() == 0
-                    && request.channel_count() > 0
-                    && request.channel_count() <= 8 =>
+                    && request.details().channel_count() > 0
+                    && request.details().channel_count() <= 8 =>
             {
-                self.config = ClapId::new(request.channel_count());
+                self.config = ClapId::new(request.details().channel_count());
                 true
             }
             _ => false,

@@ -6,8 +6,8 @@ use crate::cli::sandbox::{SandboxConfig, SandboxOperation};
 use crate::cli::{Config, panic_message};
 use crate::commands::validate::ValidatorSettings;
 use crate::plugin::library::{PluginLibrary, PluginMetadata};
+use crate::plugin::util::IteratorExt;
 use crate::tests::{PluginLibraryTestCase, PluginTestCase, TestCase, TestResult, TestStatus};
-use crate::util::IteratorExt;
 use anyhow::{Context, Result};
 use clap_sys::version::clap_version_is_compatible;
 use regex_lite::Regex;
@@ -262,46 +262,6 @@ fn run_test(verbosity: Verbosity, settings: &ValidatorSettings, request: Sandbox
     })
 }
 
-#[derive(Serialize, Deserialize)]
-pub enum SandboxedValidation {
-    PluginLibrary {
-        test: PluginLibraryTestCase,
-        path: PathBuf,
-    },
-    Plugin {
-        test: PluginTestCase,
-        path: PathBuf,
-        plugin_id: String,
-    },
-}
-
-impl SandboxOperation for SandboxedValidation {
-    const ID: &'static str = "validate";
-
-    type Result = (TestStatus, Duration);
-
-    fn run(&self) -> Self::Result {
-        let start = Instant::now();
-
-        let closure = || match self {
-            SandboxedValidation::PluginLibrary { test, path } => test.run(path),
-            SandboxedValidation::Plugin { test, path, plugin_id } => test.run((path, plugin_id)),
-        };
-
-        let status = match catch_unwind(AssertUnwindSafe(closure)) {
-            Ok(Ok(test_status)) => test_status,
-            Ok(Err(err)) => TestStatus::Failed {
-                details: Some(format!("{err:#}")),
-            },
-            Err(panic) => TestStatus::Crashed {
-                details: panic_message(&*panic),
-            },
-        };
-
-        (status, start.elapsed())
-    }
-}
-
 impl ValidationResult {
     /// Count the number of passing, failing, and skipped tests.
     pub fn tally(&self) -> ValidationTally {
@@ -372,5 +332,44 @@ impl ValidationTally {
     /// Get the total number of tests run.
     pub fn total(&self) -> usize {
         self.num_passed + self.num_failed + self.num_skipped + self.num_warnings
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum SandboxedValidation {
+    PluginLibrary {
+        test: PluginLibraryTestCase,
+        path: PathBuf,
+    },
+    Plugin {
+        test: PluginTestCase,
+        path: PathBuf,
+        plugin_id: String,
+    },
+}
+
+impl SandboxOperation for SandboxedValidation {
+    const ID: &'static str = "validate";
+    type Result = (TestStatus, Duration);
+
+    fn run(&self) -> Self::Result {
+        let start = Instant::now();
+
+        let closure = || match self {
+            SandboxedValidation::PluginLibrary { test, path } => test.run(path),
+            SandboxedValidation::Plugin { test, path, plugin_id } => test.run((path, plugin_id)),
+        };
+
+        let status = match catch_unwind(AssertUnwindSafe(closure)) {
+            Ok(Ok(test_status)) => test_status,
+            Ok(Err(err)) => TestStatus::Failed {
+                details: Some(format!("{err:#}")),
+            },
+            Err(panic) => TestStatus::Crashed {
+                details: panic_message(&*panic),
+            },
+        };
+
+        (status, start.elapsed())
     }
 }

@@ -361,6 +361,27 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
 
 /// The test for `PluginTestCase::LayoutAudioPortsActivation`.
 pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
+    #[derive(Debug, Clone, Copy)]
+    struct PortMask(u64);
+
+    impl PortMask {
+        fn random(rng: &mut impl RngExt, port_count: usize) -> Self {
+            Self(rng.next_u64() & (1u64.unbounded_shl(port_count as u32).wrapping_sub(1)))
+        }
+
+        fn is_active(&self, port_index: usize) -> bool {
+            (self.0 & 1u64.unbounded_shl(port_index as u32)) != 0
+        }
+
+        fn with_active(&self, port_index: usize, active: bool) -> Self {
+            if active {
+                Self(self.0 | 1u64.unbounded_shl(port_index as u32))
+            } else {
+                Self(self.0 & !1u64.unbounded_shl(port_index as u32))
+            }
+        }
+    }
+
     let mut prng = new_prng();
 
     let plugin = library
@@ -401,15 +422,8 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
         .config()
         .context("Error while querying 'audio-ports' IO configuration")?;
 
-    let mut full_input_mask = 1u64
-        .unbounded_shl(audio_ports_config.inputs.len() as u32)
-        .wrapping_sub(1);
-    let mut full_output_mask = 1u64
-        .unbounded_shl(audio_ports_config.outputs.len() as u32)
-        .wrapping_sub(1);
-
-    let mut next_input_mask = full_input_mask;
-    let mut next_output_mask = full_output_mask;
+    let mut next_input_mask = PortMask::random(&mut prng, audio_ports_config.inputs.len());
+    let mut next_output_mask = PortMask::random(&mut prng, audio_ports_config.outputs.len());
 
     // 32 different attempts
     for _ in 0..32 {
@@ -421,63 +435,44 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
                     .config()
                     .context("Error while querying 'audio-ports' IO configuration after rescan")?;
 
-                full_input_mask = 1u64
-                    .unbounded_shl(audio_ports_config.inputs.len() as u32)
-                    .wrapping_sub(1);
-                full_output_mask = 1u64
-                    .unbounded_shl(audio_ports_config.outputs.len() as u32)
-                    .wrapping_sub(1);
-
                 Ok(())
             }
             _ => Ok(()),
         })?;
 
-        let prev_input_mask = std::mem::replace(&mut next_input_mask, prng.random());
-        let prev_output_mask = std::mem::replace(&mut next_output_mask, prng.random());
+        let prev_input_mask = std::mem::replace(
+            &mut next_input_mask,
+            PortMask::random(&mut prng, audio_ports_config.inputs.len()),
+        );
 
-        next_input_mask &= full_input_mask;
-        next_output_mask &= full_output_mask;
+        let prev_output_mask = std::mem::replace(
+            &mut next_output_mask,
+            PortMask::random(&mut prng, audio_ports_config.outputs.len()),
+        );
 
         let _span = Span::begin(
             "AudioPortActivationMask",
             record! {
-                input_mask: format_args!("0b{:b}", next_input_mask),
-                output_mask: format_args!("0b{:b}", next_output_mask)
+                input_mask: format_args!("0b{:b}", next_input_mask.0),
+                output_mask: format_args!("0b{:b}", next_output_mask.0)
             },
         );
 
         for input in 0..audio_ports_config.inputs.len() {
-            let currently_active = (prev_input_mask & (1 << input)) != 0;
-            let should_be_active = (next_input_mask & (1 << input)) != 0;
+            let prev = prev_input_mask.is_active(input);
+            let next = next_input_mask.is_active(input);
 
-            if currently_active != should_be_active {
-                audio_ports_activation
-                    .set_active(true, input as u32, should_be_active, 32)
-                    .with_context(|| {
-                        format!(
-                            "Could not make input port {} {}",
-                            input,
-                            if should_be_active { "active" } else { "inactive" }
-                        )
-                    })?;
+            if prev != next && !audio_ports_activation.set_active(true, input as u32, next, 32) {
+                next_input_mask = next_input_mask.with_active(input, prev);
             }
         }
 
         for output in 0..audio_ports_config.outputs.len() {
-            let currently_active = (prev_output_mask & (1 << output)) != 0;
-            let should_be_active = (next_output_mask & (1 << output)) != 0;
+            let prev = prev_output_mask.is_active(output);
+            let next = next_output_mask.is_active(output);
 
-            if currently_active != should_be_active {
-                audio_ports_activation
-                    .set_active(false, output as u32, should_be_active, 32)
-                    .with_context(|| {
-                        format!(
-                            "Could not make output port {} {}",
-                            output,
-                            if should_be_active { "active" } else { "inactive" }
-                        )
-                    })?;
+            if prev != next && !audio_ports_activation.set_active(false, output as u32, next, 32) {
+                next_output_mask = next_output_mask.with_active(output, prev);
             }
         }
 
@@ -490,10 +485,10 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
                 for _ in 0..5 {
                     for buffer in process.audio_buffers().iter_mut() {
                         if let Some(input) = buffer.port().input() {
-                            if (next_input_mask & (1 << input)) == 0 {
-                                buffer.fill_silence();
-                            } else {
+                            if next_input_mask.is_active(input) {
                                 buffer.fill_white_noise(&mut prng);
+                            } else {
+                                buffer.fill_silence();
                             }
                         }
                     }
@@ -501,7 +496,8 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
                     process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
                     process.run_with(ProcessRun {
                         block_size: BUFFER_SIZE,
-                        output_ignore_mask: !next_output_mask, // ignore deactivated output ports for NaN checks
+                        output_ignore_mask: !next_output_mask.0, // ignore deactivated output ports for NaN checks
+                        output_ignore_denormals: false,
                     })?;
                 }
 
@@ -510,7 +506,7 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
             .with_context(|| {
                 format!(
                     "Error while processing audio with input mask 0b{:b} and output mask 0b{:b}",
-                    next_input_mask, next_output_mask
+                    next_input_mask.0, next_output_mask.0
                 )
             })?;
     }

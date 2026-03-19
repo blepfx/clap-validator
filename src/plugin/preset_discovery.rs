@@ -40,13 +40,13 @@ pub struct PresetDiscoveryFactory<'lib> {
 }
 
 /// Metadata (descriptor) for a preset discovery provider. These providers can be instantiated by
-/// passing the IDs to [`PresetDiscoveryFactory::create()`].
+/// passing the metadata to [`PresetDiscoveryFactory::create_provider()`].
 #[derive(Debug, PartialEq, Eq)]
 pub struct ProviderMetadata {
-    pub version: (u32, u32, u32),
     pub id: String,
     pub name: String,
     pub vendor: Option<String>,
+    pub version: (u32, u32, u32),
 }
 
 impl ProviderMetadata {
@@ -60,17 +60,17 @@ impl ProviderMetadata {
         let descriptor = unsafe { &*descriptor };
 
         Ok(ProviderMetadata {
-            version: (
-                descriptor.clap_version.major,
-                descriptor.clap_version.minor,
-                descriptor.clap_version.revision,
-            ),
             id: unsafe { util::cstr_ptr_to_mandatory_string(descriptor.id) }
                 .context("Error parsing the provider's 'id' field")?,
             name: unsafe { util::cstr_ptr_to_mandatory_string(descriptor.name) }
                 .context("Error parsing the provider's 'name' field")?,
             vendor: unsafe { util::cstr_ptr_to_optional_string(descriptor.vendor) }
                 .context("Error parsing the provider's 'vendor' field")?,
+            version: (
+                descriptor.clap_version.major,
+                descriptor.clap_version.minor,
+                descriptor.clap_version.revision,
+            ),
         })
     }
 

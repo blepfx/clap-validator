@@ -3,7 +3,7 @@
 use crate::Verbosity;
 use crate::cli::sandbox::{SandboxConfig, SandboxOperation};
 use crate::plugin::index::{SandboxedScanLibrary, ScanStatus, index_plugins};
-use crate::util::IteratorExt;
+use crate::plugin::util::IteratorExt;
 use anyhow::{Context, Result};
 use clap::Subcommand;
 use std::collections::BTreeMap;

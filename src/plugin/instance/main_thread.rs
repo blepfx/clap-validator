@@ -182,6 +182,8 @@ impl<'lib> Plugin<'lib> {
     /// Activate the plugin. Returns an error if the plugin returned `false`. See
     /// [plugin.h](https://github.com/free-audio/clap/blob/main/include/clap/plugin.h) for the
     /// preconditions.
+    ///
+    /// Also checks for 'activate'/'request_restart' loops.
     pub fn activate(&self, sample_rate: f64, min_buffer_size: u32, max_buffer_size: u32) -> Result<()> {
         self.status().assert_is(PluginStatus::Deactivated);
 
@@ -192,28 +194,42 @@ impl<'lib> Plugin<'lib> {
         // we need to track the `Activating` state to validate that we call clap_host_latency::changed only within the activation call.
         self.shared.set_status(PluginStatus::Activating);
 
-        let span = Span::begin(
-            "clap_plugin::activate",
-            record! {
-                sample_rate: sample_rate,
-                min_buffer_size: min_buffer_size,
-                max_buffer_size: max_buffer_size
-            },
-        );
+        for _ in 0..10 {
+            let result = unsafe {
+                let span = Span::begin(
+                    "clap_plugin::activate",
+                    record! {
+                        sample_rate: sample_rate,
+                        min_buffer_size: min_buffer_size,
+                        max_buffer_size: max_buffer_size
+                    },
+                );
 
-        let result = unsafe {
-            clap_call! { self.as_ptr()=>activate(self.as_ptr(), sample_rate, min_buffer_size, max_buffer_size) }
-        };
+                let result = clap_call! { self.as_ptr()=>activate(self.as_ptr(), sample_rate, min_buffer_size, max_buffer_size) };
+                span.finish(record!(result: result));
+                result
+            };
 
-        span.finish(record!(result: result));
+            if result {
+                self.shared.set_status(PluginStatus::Activated);
+            } else {
+                self.shared.set_status(PluginStatus::Deactivated);
+                anyhow::bail!("'clap_plugin::activate()' returned false.")
+            }
 
-        if result {
-            self.shared.set_status(PluginStatus::Activated);
-            Ok(())
-        } else {
-            self.shared.set_status(PluginStatus::Deactivated);
-            anyhow::bail!("'clap_plugin::activate()' returned false.")
+            if self.shared.requested_callback.swap(false) {
+                self.deactivate();
+                continue;
+            }
+
+            break;
         }
+
+        if self.shared.requested_callback.load() {
+            log::warn!("The plugin seems to be stuck in an 'activate' callback loop");
+        }
+
+        Ok(())
     }
 
     /// Deactivate the plugin. See
@@ -231,11 +247,18 @@ impl<'lib> Plugin<'lib> {
     }
 
     fn poll_callback_unchecked(&self) {
-        if self.shared.requested_callback.swap(false) {
+        // 10 iterations, then bail
+        for _ in 0..10 {
+            if !self.shared.requested_callback.swap(false) {
+                return;
+            }
+
             unsafe {
                 let _span = Span::begin("clap_plugin::on_main_thread", ());
                 clap_call! { self.as_ptr()=>on_main_thread(self.as_ptr()) }
             };
         }
+
+        log::warn!("The plugin seems to be stuck in an 'on_main_thread' callback loop");
     }
 }

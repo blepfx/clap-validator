@@ -3,18 +3,10 @@
 use crate::cli::tracing::{event, record};
 use std::cell::RefCell;
 use std::fmt::Write;
-use std::time::Instant;
+use std::time::SystemTime;
 use yansi::Paint;
 
-pub struct CustomLogger {
-    start: Instant,
-}
-
-impl CustomLogger {
-    pub fn new() -> Self {
-        Self { start: Instant::now() }
-    }
-}
+pub struct CustomLogger;
 
 impl log::Log for CustomLogger {
     fn enabled(&self, _: &log::Metadata) -> bool {
@@ -26,7 +18,12 @@ impl log::Log for CustomLogger {
             static BUFFER: RefCell<String> = const { RefCell::new(String::new()) }
         }
 
-        let elapsed = self.start.elapsed();
+        let elapsed = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f64()
+            .rem_euclid(1.0);
+
         let prefix = match log.level() {
             log::Level::Error => "ERROR".red().bold(),
             log::Level::Warn => " WARN".yellow(),
@@ -45,7 +42,7 @@ impl log::Log for CustomLogger {
 
         BUFFER.with_borrow_mut(|buffer| {
             buffer.clear();
-            write!(buffer, "{:>5}{}", elapsed.as_millis().dim(), "ms".dim()).ok();
+            write!(buffer, "{:>5.3}", elapsed.dim()).ok();
             write!(buffer, " {}: ", prefix).ok();
             write!(buffer, "{}", log.args()).ok();
             write!(buffer, " {}", log.target().dim().italic()).ok();

@@ -2,7 +2,6 @@ use crate::cli::tracing::{Span, record};
 use crate::plugin::ext::Extension;
 use crate::plugin::instance::Plugin;
 use crate::plugin::util::clap_call;
-use anyhow::Result;
 use clap_sys::ext::audio_ports_activation::*;
 use std::ffi::CStr;
 use std::ptr::NonNull;
@@ -44,7 +43,7 @@ impl<'a> AudioPortsActivation<'a> {
     }
 
     /// Activates or deactivates audio ports while inactive.
-    pub fn set_active(&self, is_input: bool, port_index: u32, is_active: bool, sample_size: u32) -> Result<()> {
+    pub fn set_active(&self, is_input: bool, port_index: u32, is_active: bool, sample_size: u32) -> bool {
         self.plugin.status().assert_inactive();
 
         let audio_ports_activation = self.audio_ports_activation.as_ptr();
@@ -65,11 +64,6 @@ impl<'a> AudioPortsActivation<'a> {
         };
 
         span.finish(record!(result: result));
-
-        if result {
-            Ok(())
-        } else {
-            anyhow::bail!("clap_plugin_audio_ports_activation::set_active returned false")
-        }
+        result
     }
 }

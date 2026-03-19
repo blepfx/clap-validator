@@ -5,7 +5,6 @@ use anyhow::{Context, Result};
 use clap::{Args, ValueEnum};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::process::ExitCode;
 use std::time::Duration;
 use wait_timeout::ChildExt;
 
@@ -75,19 +74,21 @@ pub trait SandboxOperation: Serialize + DeserializeOwned {
     }
 }
 
-pub fn dispatch(payload: SandboxPayload) -> Result<ExitCode> {
-    fn dispatch<T: SandboxOperation>(payload: &SandboxPayload) -> Result<()> {
-        let operation: T = serde_json::from_str(&payload.sandbox_data)?;
-        let result = operation.run();
-        std::fs::write(&payload.output_file, serde_json::to_string(&result)?)?;
+impl SandboxPayload {
+    pub fn dispatch(self) -> Result<()> {
+        fn dispatch<T: SandboxOperation>(payload: &SandboxPayload) -> Result<()> {
+            let operation: T = serde_json::from_str(&payload.sandbox_data)?;
+            let result = operation.run();
+            std::fs::write(&payload.output_file, serde_json::to_string(&result)?)?;
+            Ok(())
+        }
+
+        match self.sandbox_id.as_str() {
+            SandboxedScanLibrary::ID => dispatch::<SandboxedScanLibrary>(&self)?,
+            SandboxedValidation::ID => dispatch::<SandboxedValidation>(&self)?,
+            _ => anyhow::bail!("Unknown sandbox ID"),
+        };
+
         Ok(())
     }
-
-    match payload.sandbox_id.as_str() {
-        SandboxedScanLibrary::ID => dispatch::<SandboxedScanLibrary>(&payload)?,
-        SandboxedValidation::ID => dispatch::<SandboxedValidation>(&payload)?,
-        _ => anyhow::bail!("Unknown sandbox ID"),
-    };
-
-    Ok(ExitCode::SUCCESS)
 }

@@ -16,15 +16,11 @@ fn parse_duration(str: &str) -> Result<Duration, String> {
     Err(format!("Invalid duration format: {}", str))
 }
 
-#[derive(Debug, Clone, Copy, strum_macros::EnumString, strum_macros::Display, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum FuzzerTag {
-    #[strum(serialize = "process-out-of-place")]
     ProcessOutOfPlace,
-    #[strum(serialize = "process-in-place")]
     ProcessInPlace,
-    #[strum(serialize = "process-32")]
     Process32,
-    #[strum(serialize = "process-64")]
     Process64,
 }
 

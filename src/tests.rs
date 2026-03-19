@@ -9,7 +9,6 @@
 //! To facilitate this, the test cases are all identified by variants in an enum, and that enum can
 //! be converted to and from a string representation.
 
-use crate::util;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
@@ -19,6 +18,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use strum::IntoEnumIterator;
 
+mod fuzz;
 mod plugin;
 mod plugin_library;
 mod rng;
@@ -36,7 +36,7 @@ pub struct TestResult {
     pub description: String,
     /// The outcome of the test.
     pub status: TestStatus,
-    /// How much time it took
+    /// How much time it tooktodo!()
     pub duration: Duration,
 }
 
@@ -102,7 +102,7 @@ pub trait TestCase<'a>: Into<&'static str> + Display + FromStr + Sized + 'static
     /// `$TMP_DIR/clap-validator/$plugin_id/$test_name/$file_name`. The temporary files directory is
     /// cleared on a new validator run, but the files will persist until then.
     fn temporary_file(&self, plugin_id: &str, name: &str) -> Result<(PathBuf, fs::File)> {
-        let path = util::validator_temp_dir()
+        let path = crate::cli::validator_temp_dir()
             .join(plugin_id)
             .join(self.to_string())
             .join(name);

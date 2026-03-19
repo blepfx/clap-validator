@@ -29,6 +29,9 @@ pub struct ProcessRun {
 
     /// A mask of which output ports should be ignored while doing NaN/write checks (i.e. if 1, we do not care about the port's output)
     pub output_ignore_mask: u64,
+
+    /// If false, denormal values in the output buffers will be treated as an error.
+    pub output_ignore_denormals: bool,
 }
 
 impl<'a> ProcessScope<'a> {
@@ -88,6 +91,7 @@ impl<'a> ProcessScope<'a> {
         self.run_with(ProcessRun {
             block_size: self.buffer.samples(),
             output_ignore_mask: 0,
+            output_ignore_denormals: false,
         })
     }
 
@@ -215,8 +219,8 @@ fn check_process_call_consistency(
                     .find_map(|(channel, sample)| {
                         let x = buffer.get(channel, sample);
                         if x.either(
-                            |x| !x.is_finite() || x.is_subnormal(),
-                            |x| !x.is_finite() || x.is_subnormal(),
+                            |x| !x.is_finite() || (x.is_subnormal() && !run.output_ignore_denormals),
+                            |x| !x.is_finite() || (x.is_subnormal() && !run.output_ignore_denormals),
                         ) {
                             Some((x, channel, sample))
                         } else {

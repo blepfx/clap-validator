@@ -48,6 +48,8 @@ pub enum PluginTestCase {
     ProcessAudioDoubleOutOfPlace,
     #[strum(serialize = "process-audio-double-in-place")]
     ProcessAudioDoubleInPlace,
+    #[strum(serialize = "process-audio-denormals")]
+    ProcessAudioDenormals,
     #[strum(serialize = "process-sleep-constant-mask")]
     ProcessSleepConstantMask,
     #[strum(serialize = "process-sleep-process-status")]
@@ -138,6 +140,10 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 "Same as '{}', but uses 64-bit floating point audio buffers instead of 32-bit ones for ports that \
                  support it.",
                 PluginTestCase::ProcessAudioBasicInPlace,
+            ),
+            PluginTestCase::ProcessAudioDenormals => String::from(
+                "Processes random audio through the plugin with its default parameter values two times: without and \
+                 with denormals as the input. Emits a warning if processing denormals causes a significant slowdown.",
             ),
             PluginTestCase::LayoutAudioPortsActivation => format!(
                 "Same as '{}', but this time it toggles the activation state of audio ports on and off via the \
@@ -314,6 +320,7 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::ProcessAudioDoubleInPlace => {
                 processing::test_process_audio_double(library, plugin_id, true)
             }
+            PluginTestCase::ProcessAudioDenormals => processing::test_process_audio_denormals(library, plugin_id),
             PluginTestCase::ProcessSleepConstantMask => {
                 processing::test_process_sleep_constant_mask(library, plugin_id)
             }

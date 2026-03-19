@@ -256,7 +256,7 @@ pub fn test_state_reproducibility(
 
     if let Some(diff) = generate_param_diff(&actual_param_values, &expected_param_values, &params)? {
         anyhow::bail!(
-            "After reloading the state, the parameter values do not match the old values: \n{}",
+            "After reloading the state, these parameter values do not match the old values: \n{}",
             diff
         );
     }

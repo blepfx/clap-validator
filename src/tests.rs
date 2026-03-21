@@ -18,7 +18,6 @@ use std::str::FromStr;
 use std::time::Duration;
 use strum::IntoEnumIterator;
 
-mod fuzz;
 mod plugin;
 mod plugin_library;
 mod rng;
@@ -36,7 +35,7 @@ pub struct TestResult {
     pub description: String,
     /// The outcome of the test.
     pub status: TestStatus,
-    /// How much time it tooktodo!()
+    /// How much time it took
     pub duration: Duration,
 }
 

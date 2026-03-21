@@ -133,8 +133,8 @@ pub fn test_features_standard(library: &PluginLibrary, plugin_id: &str) -> Resul
         Ok(TestStatus::Success { details: None })
     } else {
         anyhow::bail!(
-            "The plugin has the following non-standard features: {invalid_features:?}.
-            Any non-standard feature must be in the format 'namespace:feature'"
+            "The plugin has the following non-standard features: {invalid_features:?}.\n Any non-standard feature \
+             must be in the format 'namespace:feature'"
         );
     }
 }

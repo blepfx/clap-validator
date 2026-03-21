@@ -8,6 +8,7 @@ use clap_sys::plugin::clap_plugin;
 use std::marker::PhantomData;
 use std::panic::resume_unwind;
 use std::sync::mpsc::Receiver;
+use std::time::{Duration, Instant};
 
 pub enum MainThreadTask {
     Dispatch {
@@ -117,43 +118,71 @@ impl<'lib> Plugin<'lib> {
         unsafe { self.shared.raw_extension::<T>().map(|ptr| T::new(self, ptr)) }
     }
 
+    /// Execute some code for this plugin from both the main thread and an audio thread context.
+    pub fn on_parallel<
+        M: FnMut(&Plugin) -> Result<Option<Duration>>,
+        A: FnOnce(PluginAudioThread) -> Result<R> + Send,
+        R: Send,
+    >(
+        &self,
+        mut main_thread_fn: M,
+        audio_thread_fn: A,
+    ) -> Result<R> {
+        if self.shared.audio_thread_id.load().is_some() {
+            panic!("An audio thread is already running for this plugin instance.");
+        }
+
+        let result = crossbeam::scope(|s| {
+            let shared = self.shared.clone();
+            let audio_thread = s
+                .builder()
+                .name("audio".into())
+                .spawn(|_| audio_thread_fn(PluginAudioThread::new(shared)))
+                .unwrap();
+
+            let mut current = Instant::now();
+            let mut deadline = Some(Instant::now());
+            let mut audio_running = true;
+
+            while audio_running || deadline.is_some() {
+                if deadline.is_some_and(|deadline| deadline <= current) {
+                    match main_thread_fn(self)? {
+                        Some(duration) => deadline = Some(current + duration),
+                        None => deadline = None,
+                    }
+                }
+
+                current = Instant::now();
+
+                let task = if let Some(deadline) = deadline {
+                    self.task_receiver.recv_timeout(deadline.duration_since(current)).ok()
+                } else {
+                    self.task_receiver.recv().ok()
+                };
+
+                match task {
+                    None => {}
+                    Some(MainThreadTask::Dispatch { call, data }) => call(self, data),
+                    Some(MainThreadTask::CallbackRequest) => self.poll_callback_unchecked(),
+                    Some(MainThreadTask::StopAudioThread) => audio_running = false,
+                }
+            }
+
+            audio_thread.join().unwrap_or_else(|e| resume_unwind(e))
+        });
+
+        self.poll_callback_unchecked();
+        result.unwrap_or_else(|e| resume_unwind(e))
+    }
+
     /// Execute some code for this plugin from an audio thread context. The closure receives a
     /// [`PluginAudioThread`], which disallows calling main thread functions, and permits calling
     /// audio thread functions.
     ///
     /// If whatever happens on the audio thread caused main-thread callback requests to be emited,
     /// then those will be handled concurrently.
-    pub fn on_audio_thread<T: Send, F: FnOnce(PluginAudioThread) -> T + Send>(&self, f: F) -> T {
-        let result = crossbeam::scope(|s| {
-            if self.shared.audio_thread_id.load().is_some() {
-                panic!("An audio thread is already running for this plugin instance.");
-            }
-
-            let shared = self.shared.clone();
-            let thread = s
-                .builder()
-                .name("audio".into())
-                .spawn(move |_| {
-                    let _span = Span::begin("AudioThread", ());
-                    f(PluginAudioThread::new(shared))
-                })
-                .unwrap();
-
-            // Handle callbacks requests on the main thread while the audio thread is running
-            while let Ok(task) = self.task_receiver.recv() {
-                match task {
-                    MainThreadTask::Dispatch { call, data } => call(self, data),
-                    MainThreadTask::CallbackRequest => self.poll_callback_unchecked(),
-                    MainThreadTask::StopAudioThread => break,
-                }
-            }
-
-            // Wait for the result, propagating panics
-            thread.join()
-        });
-
-        self.poll_callback_unchecked();
-        result.flatten().unwrap_or_else(|e| resume_unwind(e))
+    pub fn on_audio_thread<T: Send, F: FnOnce(PluginAudioThread) -> Result<T> + Send>(&self, f: F) -> Result<T> {
+        self.on_parallel(|_| Ok(None), f)
     }
 
     /// Initialize the plugin. This needs to be called before doing anything else.

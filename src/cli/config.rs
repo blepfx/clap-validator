@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Default, serde::Deserialize)]
 pub struct Config {
     pub test: HashMap<String, bool>,
 }
@@ -37,17 +37,5 @@ impl Config {
 
     pub fn is_test_enabled(&self, test_name: &str) -> bool {
         self.test.get(test_name).copied().unwrap_or(true)
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            test: {
-                let mut map = HashMap::new();
-                map.insert("".to_string(), true);
-                map
-            },
-        }
     }
 }

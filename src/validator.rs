@@ -230,28 +230,19 @@ fn run_test(verbosity: Verbosity, settings: &ValidatorSettings, request: Sandbox
     };
 
     match &status {
-        TestStatus::Success { details: None } => {
+        TestStatus::Success { .. } => {
             log::info!("Test {} completed", name)
         }
-        TestStatus::Success { details: Some(details) } => {
-            log::info!("Test {} completed: {}", name, details)
-        }
-        TestStatus::Warning { details: None } => {
+        TestStatus::Warning { .. } => {
             log::warn!("Test {} completed with a warning", name)
         }
-        TestStatus::Warning { details: Some(details) } => {
-            log::warn!("Test {} completed with a warning: {}", name, details)
-        }
-        TestStatus::Failed { details: None } => {
+        TestStatus::Failed { .. } => {
             log::error!("Test {} failed", name)
-        }
-        TestStatus::Failed { details: Some(details) } => {
-            log::error!("Test {} failed: {}", name, details)
         }
         TestStatus::Crashed { details } => {
             log::error!("Test {} crashed: {}", name, details)
         }
-        _ => {}
+        TestStatus::Skipped { .. } => {}
     }
 
     Ok(TestResult {
@@ -362,9 +353,10 @@ impl SandboxOperation for SandboxedValidation {
 
         let status = match catch_unwind(AssertUnwindSafe(closure)) {
             Ok(Ok(test_status)) => test_status,
-            Ok(Err(err)) => TestStatus::Failed {
-                details: Some(format!("{err:#}")),
-            },
+            Ok(Err(err)) => {
+                let error = err.chain().map(|x| x.to_string()).collect::<Vec<_>>().join("\n");
+                TestStatus::Failed { details: Some(error) }
+            }
             Err(panic) => TestStatus::Crashed {
                 details: panic_message(&*panic),
             },

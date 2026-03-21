@@ -1,8 +1,5 @@
 //! Contains most of the boilerplate around testing audio processing.
 
-use std::f32;
-use std::time::Instant;
-
 use crate::cli::tracing::{Span, record};
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
@@ -15,6 +12,8 @@ use crate::tests::rng::{NoteGenerator, new_prng};
 use anyhow::{Context, Result};
 use either::Either;
 use rand::RngExt;
+use std::f32;
+use std::time::Instant;
 
 const BUFFER_SIZE: u32 = 512;
 
@@ -151,6 +150,13 @@ pub fn test_process_audio_denormals(library: &PluginLibrary, plugin_id: &str) ->
         }
     };
 
+    let note_ports_config = match plugin.get_extension::<NotePorts>() {
+        Some(note_ports) => note_ports
+            .config()
+            .context("Error while querying 'note-ports' IO configuration")?,
+        None => NotePortConfig::default(),
+    };
+
     if audio_ports_config.inputs.is_empty() {
         return Ok(TestStatus::Skipped {
             details: Some(String::from(
@@ -160,12 +166,14 @@ pub fn test_process_audio_denormals(library: &PluginLibrary, plugin_id: &str) ->
     }
 
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
+    let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-4..=128);
 
     let time_normal = Instant::now();
     plugin.on_audio_thread(|plugin| -> Result<()> {
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
-        for _ in 0..5 {
+        for _ in 0..50 {
+            process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
             process.audio_buffers().fill_white_noise(&mut prng);
             process.run_with(ProcessRun {
                 block_size: BUFFER_SIZE,
@@ -184,7 +192,7 @@ pub fn test_process_audio_denormals(library: &PluginLibrary, plugin_id: &str) ->
     plugin.on_audio_thread(|plugin| -> Result<()> {
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
-        for _ in 0..5 {
+        for _ in 0..50 {
             for buffer in process.audio_buffers().iter_mut() {
                 if buffer.port().input().is_some() {
                     buffer.set_input_constant_mask(ConstantMask::DYNAMIC);
@@ -199,6 +207,7 @@ pub fn test_process_audio_denormals(library: &PluginLibrary, plugin_id: &str) ->
                 }
             }
 
+            process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
             process.run_with(ProcessRun {
                 block_size: BUFFER_SIZE,
                 output_ignore_mask: 0,
@@ -755,7 +764,7 @@ pub fn test_process_reset_reactivate(library: &PluginLibrary, plugin_id: &str) -
     Ok(result)
 }
 
-/// A channel is considered quiet if the signal (excluding first 32 samples) is below -80 dbfs, ignoring DC.
+/// A channel is considered quiet if the signal is below -60 dbfs, ignoring DC.
 ///
 /// This function is designed to be very lenient in what it considers "quiet", to avoid false positives.
 /// Returns `Ok(())` if the channel is quiet, or `Err(max_amplitude_in_db)` if not.

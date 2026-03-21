@@ -2,7 +2,7 @@ use crate::cli::tracing::{Span, from_fn, record};
 use crate::plugin::ext::audio_ports::AudioPorts;
 use crate::plugin::ext::audio_ports_activation::AudioPortsActivation;
 use crate::plugin::ext::audio_ports_config::{AudioPortsConfig, AudioPortsConfigInfo};
-use crate::plugin::ext::configurable_audio_ports::ConfigurableAudioPorts;
+use crate::plugin::ext::configurable_audio_ports::{AudioPortsRequest, AudioPortsRequestInfo, ConfigurableAudioPorts};
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::instance::CallbackEvent;
 use crate::plugin::library::PluginLibrary;
@@ -10,6 +10,8 @@ use crate::plugin::process::{AudioBuffers, ProcessRun, ProcessScope};
 use crate::tests::TestStatus;
 use crate::tests::rng::{NoteGenerator, new_prng, random_layout_requests};
 use anyhow::{Context, Result};
+use clap_sys::ext::ambisonic::CLAP_PORT_AMBISONIC;
+use clap_sys::ext::surround::CLAP_PORT_SURROUND;
 use rand::RngExt;
 
 const BUFFER_SIZE: u32 = 512;
@@ -73,9 +75,12 @@ pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) 
 
         plugin.poll_callback(|_| Ok(()))?;
 
-        let config_audio_ports = audio_ports
-            .config()
-            .context("Error while querying 'audio-ports' IO configuration")?;
+        let config_audio_ports = audio_ports.config().with_context(|| {
+            format!(
+                "Error while querying 'audio-ports' IO configuration with layout '{}' ({})",
+                config_audio_ports_config.name, config_audio_ports_config.id,
+            )
+        })?;
 
         // Check that the audio-ports-config info matches the actual audio-ports config
         {
@@ -242,7 +247,7 @@ pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) 
 /// The test for `PluginTestCase::LayoutConfigurableAudioPorts`.
 pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
     const MAX_TOTAL_CHECKS: u32 = 200;
-    const MAX_PASSED_CHECKS: u32 = 20;
+    const MAX_PASSED_CHECKS: u32 = 50;
 
     let mut prng = new_prng();
     let plugin = library
@@ -271,6 +276,9 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
             });
         }
     };
+
+    let ambisonic = plugin.get_extension::<crate::plugin::ext::ambisonic::Ambisonic>();
+    let surround = plugin.get_extension::<crate::plugin::ext::surround::Surround>();
 
     let note_ports_config = plugin
         .get_extension::<NotePorts>()
@@ -304,10 +312,10 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
         if can_apply != has_applied {
             anyhow::bail!(
                 "The plugin returned conflicting results from 'can_apply_configuration' ({}) and \
-                 'apply_configuration' ({}) for the following layout: {}",
+                 'apply_configuration' ({}) for the following layout: \n{}",
                 can_apply,
                 has_applied,
-                requests.iter().map(|r| format!("{}", r)).collect::<Vec<_>>().join(", ")
+                print_layout(&requests)
             );
         }
 
@@ -319,9 +327,80 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
             continue;
         }
 
-        let config_audio_ports = audio_ports
-            .config()
-            .context("Error while querying 'audio-ports' IO configuration")?;
+        let config_audio_ports = audio_ports.config().with_context(|| {
+            format!(
+                "Error while querying 'audio-ports' IO configuration after applying the following layout: \n{}",
+                print_layout(&requests)
+            )
+        })?;
+
+        for request in &requests {
+            let port = match request.is_input {
+                true => config_audio_ports.inputs.get(request.port_index as usize),
+                false => config_audio_ports.outputs.get(request.port_index as usize),
+            };
+
+            let port = match port {
+                Some(port) => port,
+                None => continue, // we assume that the plugin being overly defensive and accepts configurations with out-of-range port indices, but then ignores the invalid requests instead of rejecting the whole configuration
+            };
+
+            if port.channel_count != request.request_info.channel_count() {
+                anyhow::bail!(
+                    "Wrong number of channels set for {} port (index {}) in response to the layout request: \n{}\n \
+                     Expected: {}, got: {}",
+                    if request.is_input { "input" } else { "output" },
+                    request.port_index,
+                    print_layout(&requests),
+                    request.request_info.channel_count(),
+                    port.channel_count,
+                );
+            }
+
+            match request.request_info {
+                AudioPortsRequestInfo::Ambisonic { config, .. } => {
+                    if port.port_type.as_deref() == Some(CLAP_PORT_AMBISONIC) {
+                        let result = ambisonic
+                            .as_ref()
+                            .expect("already checked")
+                            .get_config(request.is_input, request.port_index);
+
+                        if result
+                            .is_none_or(|x| x.normalization != config.normalization && x.ordering != config.ordering)
+                        {
+                            anyhow::bail!(
+                                "Wrong ambisonic config set for {} port (index {}) in response to the layout request: \
+                                 \n{}",
+                                if request.is_input { "input" } else { "output" },
+                                request.port_index,
+                                print_layout(&requests),
+                            );
+                        }
+                    }
+                }
+
+                AudioPortsRequestInfo::Surround { channel_map } => {
+                    if port.port_type.as_deref() == Some(CLAP_PORT_SURROUND) {
+                        let result_map = surround.as_ref().expect("already checked").get_channel_map(
+                            request.is_input,
+                            request.port_index,
+                            channel_map.len() as u32,
+                        );
+
+                        if channel_map != result_map {
+                            anyhow::bail!(
+                                "Wrong surround map set for {} port (index {}) in response to the layout request: \n{}",
+                                if request.is_input { "input" } else { "output" },
+                                request.port_index,
+                                print_layout(&requests),
+                            );
+                        }
+                    }
+                }
+
+                _ => {}
+            }
+        }
 
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
@@ -339,8 +418,8 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
             })
             .with_context(|| {
                 format!(
-                    "Error while processing audio with the following configuration: {}",
-                    requests.iter().map(|r| format!("{}", r)).collect::<Vec<_>>().join(", ")
+                    "Error while processing audio with the following configuration: \n{}",
+                    print_layout(&requests)
                 )
             })?;
     }
@@ -512,4 +591,12 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
     }
 
     Ok(TestStatus::Success { details: None })
+}
+
+fn print_layout(requests: &[AudioPortsRequest<'_>]) -> String {
+    requests
+        .iter()
+        .map(|r| format!("- {}", r))
+        .collect::<Vec<_>>()
+        .join("\n")
 }

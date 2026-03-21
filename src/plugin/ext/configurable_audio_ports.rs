@@ -119,6 +119,28 @@ impl<'a> ConfigurableAudioPorts<'a> {
     }
 }
 
+impl<'a> AudioPortsRequestInfo<'a> {
+    pub fn channel_count(&self) -> u32 {
+        match self {
+            AudioPortsRequestInfo::Mono => 1,
+            AudioPortsRequestInfo::Stereo => 2,
+            AudioPortsRequestInfo::Untyped { channel_count } => *channel_count,
+            AudioPortsRequestInfo::Ambisonic { channel_count, .. } => *channel_count,
+            AudioPortsRequestInfo::Surround { channel_map } => channel_map.len() as u32,
+        }
+    }
+
+    pub fn port_type(&self) -> Option<&'a CStr> {
+        match self {
+            AudioPortsRequestInfo::Mono => Some(CLAP_PORT_MONO),
+            AudioPortsRequestInfo::Stereo => Some(CLAP_PORT_STEREO),
+            AudioPortsRequestInfo::Ambisonic { .. } => Some(CLAP_PORT_AMBISONIC),
+            AudioPortsRequestInfo::Surround { .. } => Some(CLAP_PORT_SURROUND),
+            AudioPortsRequestInfo::Untyped { .. } => None,
+        }
+    }
+}
+
 fn convert_requests<'a>(
     requests: impl IntoIterator<Item = AudioPortsRequest<'a>>,
 ) -> Vec<clap_audio_port_configuration_request> {
@@ -127,20 +149,8 @@ fn convert_requests<'a>(
         .map(|r| clap_audio_port_configuration_request {
             is_input: r.is_input,
             port_index: r.port_index,
-            channel_count: match r.request_info {
-                AudioPortsRequestInfo::Mono => 1,
-                AudioPortsRequestInfo::Stereo => 2,
-                AudioPortsRequestInfo::Untyped { channel_count } => channel_count,
-                AudioPortsRequestInfo::Ambisonic { channel_count, .. } => channel_count,
-                AudioPortsRequestInfo::Surround { channel_map } => channel_map.len() as u32,
-            },
-            port_type: match r.request_info {
-                AudioPortsRequestInfo::Mono => CLAP_PORT_MONO.as_ptr(),
-                AudioPortsRequestInfo::Stereo => CLAP_PORT_STEREO.as_ptr(),
-                AudioPortsRequestInfo::Ambisonic { .. } => CLAP_PORT_AMBISONIC.as_ptr(),
-                AudioPortsRequestInfo::Surround { .. } => CLAP_PORT_SURROUND.as_ptr(),
-                AudioPortsRequestInfo::Untyped { .. } => null(),
-            },
+            channel_count: r.request_info.channel_count(),
+            port_type: r.request_info.port_type().map_or(null(), |f| f.as_ptr()),
             port_details: match r.request_info {
                 AudioPortsRequestInfo::Surround { channel_map } => channel_map.as_ptr() as *const _,
                 AudioPortsRequestInfo::Ambisonic { config, .. } => config as *const clap_ambisonic_config as *const _,

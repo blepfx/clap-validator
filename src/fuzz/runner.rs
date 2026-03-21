@@ -41,33 +41,46 @@ pub fn run(context: FuzzContext) -> Result<()> {
     };
 
     while start.elapsed() < context.duration {
-        plugin.poll_callback(|e| match e {
-            CallbackEvent::ParamsRescanAll | CallbackEvent::ParamsRescanInfo => {
-                if let Some(ext) = ext_params.as_ref() {
-                    params = ext.info().unwrap_or_default();
-                }
+        plugin.on_parallel(
+            |plugin| {
+                plugin.poll_callback(|e| match e {
+                    CallbackEvent::ParamsRescanAll | CallbackEvent::ParamsRescanInfo => {
+                        if let Some(ext) = ext_params.as_ref() {
+                            params = ext.info().unwrap_or_default();
+                        }
 
-                Ok(())
-            }
+                        Ok(())
+                    }
 
-            CallbackEvent::AudioPortsRescanAll => {
-                if let Some(ext) = ext_audio_ports.as_ref() {
-                    audio_ports_config = ext.config().unwrap_or_default();
-                }
+                    CallbackEvent::AudioPortsRescanAll => {
+                        if let Some(ext) = ext_audio_ports.as_ref() {
+                            audio_ports_config = ext.config().unwrap_or_default();
+                        }
 
-                Ok(())
-            }
+                        Ok(())
+                    }
 
-            CallbackEvent::NotePortsRescanAll => {
-                if let Some(ext) = ext_note_ports.as_ref() {
-                    note_ports_config = ext.config().unwrap_or_default();
-                }
+                    CallbackEvent::NotePortsRescanAll => {
+                        if let Some(ext) = ext_note_ports.as_ref() {
+                            note_ports_config = ext.config().unwrap_or_default();
+                        }
 
-                Ok(())
-            }
+                        Ok(())
+                    }
 
-            _ => Ok(()),
-        })?;
+                    _ => Ok(()),
+                })?;
+
+                Ok(Some(Duration::from_millis(16)))
+            },
+            |plugin| {
+                
+                
+
+
+                 Ok(())
+            },
+        )?;
     }
 
     Ok(())

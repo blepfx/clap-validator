@@ -1,26 +1,21 @@
 //! Tests surrounding state handling.
 
 use super::PluginTestCase;
-use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::params::Params;
 use crate::plugin::ext::state::State;
 use crate::plugin::library::PluginLibrary;
-use crate::plugin::process::{AudioBuffers, Event, ProcessScope};
-use crate::tests::plugin::params::generate_param_diff;
+use crate::plugin::process::{Event, InputEventQueue, OutputEventQueue};
+use crate::tests::plugin::params::{param_generate_diff, param_get_values};
 use crate::tests::rng::{ParamFuzzer, new_prng};
 use crate::tests::{TestCase, TestStatus};
 use anyhow::{Context, Result};
-use clap_sys::id::clap_id;
 use rand::RngExt;
-use std::collections::BTreeMap;
 use std::io::Write;
 
 /// The file name we'll use to dump the expected state when a test fails.
 const EXPECTED_STATE_FILE_NAME: &str = "state-expected";
 /// The file name we'll use to dump the actual state when a test fails.
 const ACTUAL_STATE_FILE_NAME: &str = "state-actual";
-
-const BUFFER_SIZE: u32 = 512;
 
 /// The test for `PluginTestCase::StateInvalidEmpty`.
 pub fn test_state_invalid_empty(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
@@ -118,13 +113,6 @@ pub fn test_state_reproducibility(
     let (expected_state, expected_param_values) = {
         plugin.init().context("Error during initialization")?;
 
-        let audio_ports_config = match plugin.get_extension::<AudioPorts>() {
-            Some(audio_ports) => audio_ports
-                .config()
-                .context("Error while querying 'audio-ports' IO configuration")?,
-            None => AudioPortConfig::default(),
-        };
-
         let params = match plugin.get_extension::<Params>() {
             Some(params) => params,
             None => {
@@ -133,6 +121,7 @@ pub fn test_state_reproducibility(
                 });
             }
         };
+
         let state = match plugin.get_extension::<State>() {
             Some(state) => state,
             None => {
@@ -144,13 +133,13 @@ pub fn test_state_reproducibility(
 
         plugin.poll_callback(|_| Ok(()))?;
 
-        let param_infos = params
+        let param_info = params
             .info()
             .context("Failure while fetching the plugin's parameters")?;
 
         // We can't compare the values from these events direclty as the plugin
         // may round the values during the parameter set
-        let param_fuzzer = ParamFuzzer::new(&param_infos);
+        let param_fuzzer = ParamFuzzer::new(&param_info);
         let mut random_param_set_events: Vec<_> = param_fuzzer.randomize_params_at(&mut prng, 0).collect();
 
         // This is a variation on the test that checks whether the plugin handles null
@@ -168,25 +157,19 @@ pub fn test_state_reproducibility(
             }
         }
 
-        plugin.on_audio_thread(|plugin| {
-            let mut buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
-            let mut process = ProcessScope::new(&plugin, &mut buffers)?;
-
-            process.audio_buffers().fill_white_noise(&mut prng);
-            process.add_events(random_param_set_events);
-            process.run()
-        })?;
+        {
+            let input_queue = InputEventQueue::new();
+            let output_queue = OutputEventQueue::new();
+            input_queue.add_events(random_param_set_events);
+            params.flush(&input_queue, &output_queue);
+        }
 
         plugin.poll_callback(|_| Ok(()))?;
 
         // We'll check that the plugin has these sames values after reloading the state. These
         // values are rounded to the tenth decimal to provide some leeway in the serialization and
-        // deserializatoin process.
-        let expected_param_values: BTreeMap<clap_id, f64> = param_infos
-            .keys()
-            .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
-            .collect::<Result<BTreeMap<clap_id, f64>>>()?;
-
+        // deserialization process.
+        let expected_param_values = param_get_values(&params)?;
         let expected_state = if buffered_streams {
             state.save_buffered(23)?
         } else {
@@ -207,6 +190,7 @@ pub fn test_state_reproducibility(
     let plugin = library
         .create_plugin(plugin_id)
         .context("Could not create the plugin instance a second time")?;
+
     plugin
         .init()
         .context("Error while initializing the second plugin instance")?;
@@ -243,18 +227,9 @@ pub fn test_state_reproducibility(
 
     plugin.poll_callback(|_| Ok(()))?;
 
-    let actual_param_values: BTreeMap<clap_id, f64> = expected_param_values
-        .keys()
-        .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
-        .collect::<Result<BTreeMap<clap_id, f64>>>()?;
+    let actual_param_values = param_get_values(&params)?;
 
-    let test = if zero_out_cookies {
-        PluginTestCase::StateReproducibilityNullCookies
-    } else {
-        PluginTestCase::StateReproducibilityBasic
-    };
-
-    if let Some(diff) = generate_param_diff(&actual_param_values, &expected_param_values, &params)? {
+    if let Some(diff) = param_generate_diff(&actual_param_values, &expected_param_values, &params)? {
         anyhow::bail!(
             "After reloading the state, these parameter values do not match the old values: \n{}",
             diff
@@ -272,8 +247,9 @@ pub fn test_state_reproducibility(
         Ok(TestStatus::Success { details: None })
     } else {
         let (expected_state_file_path, mut expected_state_file) =
-            test.temporary_file(plugin_id, EXPECTED_STATE_FILE_NAME)?;
-        let (actual_state_file_path, mut actual_state_file) = test.temporary_file(plugin_id, ACTUAL_STATE_FILE_NAME)?;
+            PluginTestCase::StateReproducibilityBinary.temporary_file(plugin_id, EXPECTED_STATE_FILE_NAME)?;
+        let (actual_state_file_path, mut actual_state_file) =
+            PluginTestCase::StateReproducibilityBinary.temporary_file(plugin_id, ACTUAL_STATE_FILE_NAME)?;
 
         expected_state_file.write_all(&expected_state)?;
         actual_state_file.write_all(&actual_state)?;

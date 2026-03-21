@@ -155,11 +155,11 @@ fn pretty_print(result: &ValidationResult, tally: &ValidationTally) {
     }
 
     println!(
-        "{} run, {} passed, {} failed, {} skipped, {} warnings",
+        "{} run, {} passed, {} failed, {} warnings, {} skipped",
         pluralize(tally.total(), "test"),
-        tally.num_passed,
-        tally.num_failed,
-        tally.num_skipped,
-        tally.num_warnings
+        tally.num_passed.green().bold(),
+        tally.num_failed.red().bold(),
+        tally.num_warnings.yellow().bold(),
+        tally.num_skipped.bold(),
     );
 }

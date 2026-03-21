@@ -20,7 +20,7 @@ const BUFFER_SIZE: u32 = 512;
 /// The number of different parameter combinations to try in the parameter fuzzing tests.
 pub const FUZZ_NUM_PERMUTATIONS: usize = 50;
 /// How many buffers of [`BUFFER_SIZE`] samples to process at each parameter permutation. This
-/// allows the plugin's state to settle in before moving to the next set of parameter values.
+/// allows the state to settle in before moving to the next set of parameter values.
 pub const FUZZ_RUNS_PER_PERMUTATION: usize = 5;
 
 /// The file name we'll use to dump the previous parameter values when a fuzzing test fails.
@@ -38,14 +38,14 @@ struct ParamValue<'a> {
 }
 
 impl<'a> ParamValue<'a> {
-    fn from_events(events: Option<Vec<Event>>, param_infos: &'a ParamInfo) -> Vec<Self> {
+    fn from_events(events: Option<Vec<Event>>, param_info: &'a ParamInfo) -> Vec<Self> {
         events
             .into_iter()
             .flatten()
             .map(|event| match event {
                 Event::ParamValue(event) => ParamValue {
                     id: event.param_id,
-                    name: &param_infos[&event.param_id].name,
+                    name: &param_info[&event.param_id].name,
                     value: event.value,
                 },
                 _ => panic!("Unexpected event type"),
@@ -72,23 +72,21 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
 
     plugin.poll_callback(|_| Ok(()))?;
 
-    let param_infos = params
-        .info()
-        .context("Failure while fetching the plugin's parameters")?;
+    let param_info = params.info().context("Failure while fetching the parameters")?;
 
     // We keep track of how many parameters support these conversions. A plugin
     // should support either conversion either for all of its parameters, or for
     // none of them.
 
-    let conversions_per_param = 4000usize.div_ceil(param_infos.len()).clamp(5, 100);
-    let expected_conversions = param_infos.len() * conversions_per_param;
+    let conversions_per_param = 4000usize.div_ceil(param_info.len()).clamp(5, 100);
+    let expected_conversions = param_info.len() * conversions_per_param;
 
     let mut num_supported_value_to_text = 0;
     let mut num_supported_text_to_value = 0;
     let mut failed_value_to_text_calls: Vec<(String, f64)> = Vec::new();
     let mut failed_text_to_value_calls: Vec<(String, String)> = Vec::new();
 
-    'param_loop: for (param_id, param_info) in param_infos {
+    'param_loop: for (param_id, param_info) in param_info {
         let param_name = &param_info.name;
         let _span = Span::begin("Param", record! { param_id: param_id, param_name: param_name });
 
@@ -127,7 +125,7 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
             if starting_text != reconverted_text {
                 anyhow::bail!(
                     "Converting {starting_value:?} to a string, back to a value, and then back to a string again for \
-                     parameter {param_id} ('{param_name}') results in '{starting_text}' -> {reconverted_value:?} -> \
+                     parameter '{param_name}' ({param_id}) results in '{starting_text}' -> {reconverted_value:?} -> \
                      '{reconverted_text}', which is not consistent."
                 );
             }
@@ -139,7 +137,7 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
             if final_value != reconverted_value {
                 anyhow::bail!(
                     "Converting {starting_value:?} to a string, back to a value, back to a string, and then back to a \
-                     value again for parameter {param_id} ('{param_name}') results in '{starting_text}' -> \
+                     value again for parameter '{param_name}' ({param_id}) results in '{starting_text}' -> \
                      {reconverted_value:?} -> '{reconverted_text}' -> {final_value:?}, which is not consistent."
                 );
             }
@@ -149,10 +147,9 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
     plugin.poll_callback(|_| Ok(()))?;
 
     if num_supported_value_to_text == 0 || num_supported_text_to_value == 0 {
-        return Ok(TestStatus::Skipped {
+        return Ok(TestStatus::Success {
             details: Some(String::from(
-                "The plugin's parameters need to support both value to text and text to value conversions for this \
-                 test.",
+                "The plugin does not support text-to-value and value-to-text parameter conversions",
             )),
         });
     }
@@ -197,10 +194,7 @@ pub fn test_param_change_events(library: &PluginLibrary, plugin_id: &str) -> Res
         }
     };
 
-    let param_info = params
-        .info()
-        .context("Failure while fetching the plugin's parameters")?;
-
+    let param_info = params.info().context("Failure while fetching the parameters")?;
     let param_events = ParamFuzzer::new(&param_info)
         .randomize_params_at(&mut prng, 0)
         .collect::<Vec<_>>();
@@ -212,10 +206,7 @@ pub fn test_param_change_events(library: &PluginLibrary, plugin_id: &str) -> Res
     }
 
     let flush_param_values = {
-        let initial_param_values: BTreeMap<clap_id, f64> = param_info
-            .keys()
-            .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
-            .collect::<Result<BTreeMap<clap_id, f64>>>()?;
+        let initial_param_values = param_get_values(&params)?;
 
         plugin.poll_callback(|_| Ok(()))?;
 
@@ -225,13 +216,9 @@ pub fn test_param_change_events(library: &PluginLibrary, plugin_id: &str) -> Res
 
         plugin.poll_callback(|_| Ok(()))?;
 
-        let flush_param_values: BTreeMap<clap_id, f64> = param_info
-            .keys()
-            .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
-            .collect::<Result<BTreeMap<clap_id, f64>>>()?;
-
+        let flush_param_values = param_get_values(&params)?;
         if flush_param_values == initial_param_values {
-            anyhow::bail!("After calling 'clap_plugin_params::flush()', the plugin's parameter values did not change");
+            anyhow::bail!("After calling 'clap_plugin_params::flush()', the parameter values did not change");
         }
 
         flush_param_values
@@ -260,10 +247,7 @@ pub fn test_param_change_events(library: &PluginLibrary, plugin_id: &str) -> Res
     };
 
     let process_param_values = {
-        let initial_param_values: BTreeMap<clap_id, f64> = param_info
-            .keys()
-            .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
-            .collect::<Result<BTreeMap<clap_id, f64>>>()?;
+        let initial_param_values = param_get_values(&params)?;
 
         plugin.poll_callback(|_| Ok(()))?;
 
@@ -277,15 +261,10 @@ pub fn test_param_change_events(library: &PluginLibrary, plugin_id: &str) -> Res
 
         plugin.poll_callback(|_| Ok(()))?;
 
-        let process_param_values: BTreeMap<clap_id, f64> = param_info
-            .keys()
-            .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
-            .collect::<Result<BTreeMap<clap_id, f64>>>()?;
-
+        let process_param_values = param_get_values(&params)?;
         if process_param_values == initial_param_values {
             anyhow::bail!(
-                "After sending parameter changes via 'clap_plugin::process()', the plugin's parameter values did not \
-                 change"
+                "After sending parameter changes via 'clap_plugin::process()', the parameter values did not change"
             );
         }
 
@@ -294,7 +273,7 @@ pub fn test_param_change_events(library: &PluginLibrary, plugin_id: &str) -> Res
 
     span.finish(());
 
-    if let Some(diff) = generate_param_diff(&flush_param_values, &process_param_values, &params)? {
+    if let Some(diff) = param_generate_diff(&flush_param_values, &process_param_values, &params)? {
         anyhow::bail!(
             "The resulting parameter values after calling 'clap_plugin_params::flush()' were different from the \
              resulting parameter values after sending the same parameter changes via 'clap_plugin::process()': \n{}",
@@ -330,18 +309,18 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str, snap_to_b
     let audio_ports_config = audio_ports
         .map(|ports| ports.config())
         .transpose()
-        .context("Could not fetch the plugin's audio port config")?
+        .context("Could not fetch the audio port config")?
         .unwrap_or_default();
     let note_ports_config = note_ports
         .map(|ports| ports.config())
         .transpose()
-        .context("Could not fetch the plugin's note port config")?
+        .context("Could not fetch the note port config")?
         .unwrap_or_default();
-    let param_infos = params.info().context("Could not fetch the plugin's parameters")?;
 
     // For each set of runs we'll generate new parameter values, and if the plugin supports notes
     // we'll also generate note events.
-    let mut param_fuzzer = ParamFuzzer::new(&param_infos);
+    let param_info = params.info().context("Could not fetch the parameters")?;
+    let mut param_fuzzer = ParamFuzzer::new(&param_info);
     if snap_to_bounds {
         param_fuzzer = param_fuzzer.snap_to_bounds();
     }
@@ -380,11 +359,11 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str, snap_to_b
 
             serde_json::to_writer_pretty(
                 previous_param_values_file,
-                &ParamValue::from_events(previous_events, &param_infos),
+                &ParamValue::from_events(previous_events, &param_info),
             )?;
             serde_json::to_writer_pretty(
                 current_param_values_file,
-                &ParamValue::from_events(current_events, &param_infos),
+                &ParamValue::from_events(current_events, &param_info),
             )?;
 
             // This is a bit weird and there may be a better way to do this, but we only want to
@@ -439,20 +418,20 @@ pub fn test_param_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &str)
     let audio_ports_config = audio_ports
         .map(|ports| ports.config())
         .transpose()
-        .context("Could not fetch the plugin's audio port config")?
+        .context("Could not fetch the audio port config")?
         .unwrap_or_default();
 
     let note_ports_config = note_ports
         .map(|ports| ports.config())
         .transpose()
-        .context("Could not fetch the plugin's note port config")?
+        .context("Could not fetch the note port config")?
         .unwrap_or_default();
 
-    let param_infos = params.info().context("Could not fetch the plugin's parameters")?;
+    let param_info = params.info().context("Could not fetch the parameters")?;
 
     // For each set of runs we'll generate new parameter values, and if the plugin supports notes
     // we'll also generate note events.
-    let param_fuzzer = ParamFuzzer::new(&param_infos);
+    let param_fuzzer = ParamFuzzer::new(&param_info);
     let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-1..=128);
     let mut current_events: Option<Vec<Event>> = None;
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
@@ -499,16 +478,12 @@ pub fn test_param_fuzz_modulation(library: &PluginLibrary, plugin_id: &str) -> R
     plugin.init().context("Error during initialization")?;
 
     let audio_ports = match plugin.get_extension::<AudioPorts>() {
-        Some(audio_ports) => audio_ports
-            .config()
-            .context("Could not fetch the plugin's audio port config")?,
+        Some(audio_ports) => audio_ports.config().context("Could not fetch the audio port config")?,
         None => AudioPortConfig::default(),
     };
 
     let note_ports = match plugin.get_extension::<NotePorts>() {
-        Some(note_ports) => note_ports
-            .config()
-            .context("Could not fetch the plugin's note port config")?,
+        Some(note_ports) => note_ports.config().context("Could not fetch the note port config")?,
         None => NotePortConfig::default(),
     };
 
@@ -521,10 +496,9 @@ pub fn test_param_fuzz_modulation(library: &PluginLibrary, plugin_id: &str) -> R
         }
     };
 
-    let param_infos = params.info().context("Could not fetch the plugin's parameters")?;
-
-    let param_fuzzer = ParamFuzzer::new(&param_infos);
-    let mut note_rng = NoteGenerator::new(&note_ports).with_params(&param_infos);
+    let param_info = params.info().context("Could not fetch the parameters")?;
+    let param_fuzzer = ParamFuzzer::new(&param_info);
+    let mut note_rng = NoteGenerator::new(&note_ports).with_params(&param_info);
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports, BUFFER_SIZE);
 
     plugin.on_audio_thread(|plugin| -> Result<()> {
@@ -566,18 +540,13 @@ pub fn test_param_set_wrong_namespace(library: &PluginLibrary, plugin_id: &str) 
 
     plugin.poll_callback(|_| Ok(()))?;
 
-    let param_infos = params
-        .info()
-        .context("Failure while fetching the plugin's parameters")?;
-    let initial_param_values: BTreeMap<clap_id, f64> = param_infos
-        .keys()
-        .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
-        .collect::<Result<BTreeMap<clap_id, f64>>>()?;
+    let param_info = params.info().context("Failure while fetching the parameters")?;
+    let initial_param_values = param_get_values(&params)?;
 
     // We'll generate random parameter set events, but we'll change the namespace ID to something
-    // else. The plugin's parameter values should thus not update its parameter values.
+    // else. The parameter values should thus not update its parameter values.
     const INCORRECT_NAMESPACE_ID: u16 = 0xb33f;
-    let param_fuzzer = ParamFuzzer::new(&param_infos);
+    let param_fuzzer = ParamFuzzer::new(&param_info);
     let mut random_param_set_events: Vec<_> = param_fuzzer.randomize_params_at(&mut prng, 0).collect();
 
     for event in random_param_set_events.iter_mut() {
@@ -598,11 +567,8 @@ pub fn test_param_set_wrong_namespace(library: &PluginLibrary, plugin_id: &str) 
 
     // We'll check that the plugin has these sames values after reloading the state. These values
     // are rounded to the tenth decimal to provide some leeway in the serialization and
-    // deserializatoin process.
-    let actual_param_values: BTreeMap<clap_id, f64> = param_infos
-        .keys()
-        .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
-        .collect::<Result<BTreeMap<clap_id, f64>>>()?;
+    // deserialization process.
+    let actual_param_values = param_get_values(&params)?;
 
     plugin.poll_callback(|_| Ok(()))?;
 
@@ -637,11 +603,9 @@ pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Re
 
     plugin.poll_callback(|_| Ok(()))?;
 
-    let param_infos = params
-        .info()
-        .context("Failure while fetching the plugin's parameters")?;
+    let param_info = params.info().context("Failure while fetching the parameters")?;
 
-    for (param_id, param_info) in param_infos {
+    for (param_id, param_info) in param_info {
         let default_value = params
             .get(param_id)
             .with_context(|| format!("Could not get value for parameter {param_id}"))?;
@@ -662,6 +626,14 @@ pub fn test_param_default_values(library: &PluginLibrary, plugin_id: &str) -> Re
     Ok(TestStatus::Success { details: None })
 }
 
+pub fn param_get_values(params: &Params) -> Result<BTreeMap<clap_id, f64>> {
+    params
+        .info()?
+        .keys()
+        .map(|param_id| params.get(*param_id).map(|value| (*param_id, value)))
+        .collect::<Result<BTreeMap<clap_id, f64>>>()
+}
+
 pub fn param_compare_approx(param: &Param, actual: f64, expected: f64) -> bool {
     if param.stepped() {
         let actual = actual.round() as i64;
@@ -677,36 +649,41 @@ pub fn param_compare_approx(param: &Param, actual: f64, expected: f64) -> bool {
 }
 
 /// Build a string containing differences between two sets of parameters, pretty formatted
-pub fn generate_param_diff(
+pub fn param_generate_diff(
     actual: &BTreeMap<clap_id, f64>,
     expected: &BTreeMap<clap_id, f64>,
     params: &Params,
 ) -> Result<Option<String>> {
-    let param_infos = params.info()?;
+    let param_info = params.info()?;
 
-    let mut diff = actual
+    let mut diff = param_info
         .iter()
-        .filter_map(|(&param_id, &actual_value)| {
-            let info = &param_infos[&param_id];
-            let expected_value = expected[&param_id];
+        .filter_map(|(param_id, info)| {
+            let value_a = actual.get(param_id);
+            let value_b = expected.get(param_id);
 
-            if param_compare_approx(info, actual_value, expected_value) {
+            if let (Some(value_a), Some(value_b)) = (value_a, value_b)
+                && param_compare_approx(info, *value_a, *value_b)
+            {
                 return None;
             }
 
-            let string_actual = params.value_to_text(param_id, actual_value).ok().flatten();
-            let string_expected = params.value_to_text(param_id, expected_value).ok().flatten();
+            let string_a = value_a.and_then(|&value| params.value_to_text(*param_id, value).ok().flatten());
+            let string_b = value_b.and_then(|&value| params.value_to_text(*param_id, value).ok().flatten());
 
-            match (string_actual, string_expected) {
-                (Some(string_actual), Some(string_expected)) => Some(format!(
-                    " - {} ({}) - {} ({:.4}) vs {} ({:.4})",
-                    info.name, param_id, string_actual, actual_value, string_expected, expected_value,
-                )),
-                _ => Some(format!(
-                    " - {} ({}) - {:.4} vs {:.4}",
-                    info.name, param_id, actual_value, expected_value,
-                )),
-            }
+            let print_a = match (string_a, value_a) {
+                (Some(string_a), Some(value_a)) => format!("{} ({:.4})", string_a, value_a),
+                (None, Some(value_a)) => format!("{:.4}", value_a),
+                _ => "missing".to_string(),
+            };
+
+            let print_b = match (string_b, value_b) {
+                (Some(string_b), Some(value_b)) => format!("{} ({:.4})", string_b, value_b),
+                (None, Some(value_b)) => format!("{:.4}", value_b),
+                _ => "missing".to_string(),
+            };
+
+            Some(format!(" - {} ({}) - {} vs {}", info.name, param_id, print_a, print_b))
         })
         .collect::<Vec<String>>();
 

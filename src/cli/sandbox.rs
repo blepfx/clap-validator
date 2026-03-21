@@ -1,3 +1,4 @@
+use crate::cli::timebase;
 use crate::commands::Verbosity;
 use crate::plugin::index::SandboxedScanLibrary;
 use crate::validator::SandboxedValidation;
@@ -43,6 +44,14 @@ pub trait SandboxOperation: Serialize + DeserializeOwned {
 
         let mut command = std::process::Command::new(std::env::current_exe()?);
 
+        command.env(
+            "CLAP_VALIDATOR_TIMEBASE",
+            timebase()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs_f64()
+                .to_string(),
+        );
         command.arg("--verbosity");
         command.arg(config.verbosity.to_possible_value().unwrap().get_name());
         command.arg("sandbox");

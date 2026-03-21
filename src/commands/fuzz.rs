@@ -1,5 +1,8 @@
+use crate::commands::Verbosity;
+use anyhow::Result;
 use clap::Args;
 use std::path::PathBuf;
+use std::process::ExitCode;
 use std::time::Duration;
 
 fn parse_duration(str: &str) -> Result<Duration, String> {
@@ -55,4 +58,8 @@ pub struct FuzzerSettings {
     /// The tags to apply to the fuzzing process.
     #[arg(long, short = 't')]
     pub tags: Vec<FuzzerTag>,
+}
+
+pub fn fuzz(verbosity: Verbosity, settings: &FuzzerSettings) -> Result<ExitCode> {
+    todo!()
 }

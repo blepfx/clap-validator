@@ -12,7 +12,7 @@ use clap_sys::ext::audio_ports::*;
 use clap_sys::ext::surround::CLAP_PORT_SURROUND;
 use clap_sys::id::{CLAP_INVALID_ID, clap_id};
 use std::collections::HashSet;
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::mem::zeroed;
 use std::ptr::NonNull;
 
@@ -39,6 +39,8 @@ pub struct AudioPort {
 
     /// Whether this is the main audio port.
     pub is_main: bool,
+
+    pub port_type: Option<CString>,
 
     /// The number of channels for an audio port.
     pub channel_count: u32,
@@ -244,6 +246,7 @@ pub fn check_audio_port_info_valid(
         id: info.id,
         is_main: (info.flags & CLAP_AUDIO_PORT_IS_MAIN) != 0,
         channel_count: info.channel_count,
+        port_type: port_type.map(|s| s.to_owned()),
         in_place_pair: if info.in_place_pair == CLAP_INVALID_ID {
             None
         } else {

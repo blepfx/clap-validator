@@ -36,23 +36,23 @@ jobs:
         plugin: [clack-synth, clack-effect]
         include:
           - os: ubuntu-latest
-           plugin: clack-synth
-           plugin_lib: libclack_synth.so
+            plugin: clack-synth
+            plugin_lib: libclack_synth.so
           - os: windows-latest
-           plugin: clack-synth
-           plugin_lib: clack_synth.dll
+            plugin: clack-synth
+            plugin_lib: clack_synth.dll
           - os: macos-latest
-           plugin: clack-synth
-           plugin_lib: libclack_synth.dylib
+            plugin: clack-synth
+            plugin_lib: libclack_synth.dylib
           - os: ubuntu-latest
-           plugin: clack-effect
-           plugin_lib: libclack_effect.so
+            plugin: clack-effect
+            plugin_lib: libclack_effect.so
           - os: windows-latest
-           plugin: clack-effect
-           plugin_lib: clack_effect.dll
+            plugin: clack-effect
+            plugin_lib: clack_effect.dll
           - os: macos-latest
-           plugin: clack-effect
-           plugin_lib: libclack_effect.dylib
+            plugin: clack-effect
+            plugin_lib: libclack_effect.dylib
     runs-on: ${{ matrix.os }}
     name: Validate ${{ matrix.plugin }} on ${{ matrix.os }}
     steps:

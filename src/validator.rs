@@ -212,7 +212,7 @@ fn run_test(verbosity: Verbosity, settings: &ValidatorSettings, request: Sandbox
             Some(SandboxConfig {
                 verbosity,
                 hide_output: settings.hide_output,
-                timeout: Some(Duration::from_secs(30)),
+                timeout: Some(Duration::from_secs(45)),
             })
         })
         .unwrap_or_else(|err| {

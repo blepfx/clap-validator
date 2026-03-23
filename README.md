@@ -56,5 +56,13 @@ state-buffered-streams = false
 After installing [Rust](https://rustup.rs/), you can compile and run clap-validator as follows:
 
 ```shell
-cargo run --release -- validate /path/to/the/plugin.clap
+cargo build --release # build the binary
+./target/release/clap-validator validate /path/to/the/plugin.clap # and run it
 ```
+
+or
+
+```shell
+cargo run --release -- validate /path/to/the/plugin.clap # build & run
+```
+

@@ -2,7 +2,7 @@
 
 [![Automated builds](https://github.com/blepfx/clap-validator/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/blepfx/clap-validator/actions/workflows/build.yml?query=branch%3Amaster)
 
-A validator and automatic test suite for [CLAP](https://github.com/free-audio/clap) plugins. Clap-validator can automatically test one or more plugins for common bugs and incorrect behavior.
+A validator and automatic test suite for [CLAP](https://github.com/free-audio/clap) plugins. Clap-validator can automatically test one or more plugins for common bugs and incorrect behavior. See [CHANGELOG](./CHANGELOG.md) for a detailed list of changes and additions in each version.
 
 ## Download
 

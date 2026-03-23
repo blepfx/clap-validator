@@ -206,15 +206,11 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings, config: &Con
 fn run_test(verbosity: Verbosity, settings: &ValidatorSettings, request: SandboxedValidation) -> Result<TestResult> {
     let start = Instant::now();
     let (status, duration) = request
-        .invoke(if settings.in_process {
-            None
-        } else {
-            Some(SandboxConfig {
-                verbosity,
-                hide_output: settings.hide_output,
-                timeout: Some(Duration::from_secs(45)),
-            })
-        })
+        .invoke((!settings.in_process).then_some(SandboxConfig {
+            verbosity,
+            hide_output: settings.hide_output,
+            timeout: Some(Duration::from_secs(45)),
+        }))
         .unwrap_or_else(|err| {
             (
                 TestStatus::Crashed {

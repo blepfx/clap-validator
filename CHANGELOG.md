@@ -6,10 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-03-23 (fork)
 
 ### Changed
 
+- Update `clap-sys` to latest (CLAP 1.2.2)
 - Having both the `CLAP_PARAM_IS_READONLY` flag and any of the
   `CLAP_PARAM_IS_AUTOMATABLE` or `CLAP_PARAM_IS_MODULATABLE` flags set now
   results in an error.
@@ -17,6 +18,55 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   parameters marked as automatable could be changed. Now parameters marked as
   hidden or readonly are ignored instead, as non-automatable parameters can
   still be changed as the result of live user input.
+- When doing out-of-process validation, the validator now also checks for timeouts in addition to crashes. 
+If a plugin takes too long to respond during validation, the validator will kill the process and report a timeout error. The timeout duration is currently set to 45 seconds.
+- Pretty printing of validation/list/scan results in non-JSON output modes has been improved.
+- Changed log formatting to be prettier, plugin log messages are propagated to the validator's output via the `log` extension.
+- Added `clap-validator.toml` config files for easier per-project test enabling/disabling.
+- When running validation in-process, it is possible to turn on tracing, which emits a detailed Chrome-tracing compatible .json trace file that can be loaded into Chrome's tracing viewer or other compatible tools. This is especially useful for debugging test failures and crashes.
+
+- New tests: 
+  - `features-standard`
+  - `layout-audio-ports-activation`
+  - `layout-audio-ports-config`
+  - `layout-configurable-audio-ports`
+  - `process-audio-basic-in-place`
+  - `process-audio-double-in-place`
+  - `process-audio-double-out-of-place`
+  - `process-audio-denormals`
+  - `process-sleep-constant-mask`
+  - `process-sleep-process-status`
+  - `process-varying-block-sizes`
+  - `process-varying-sample-rates`
+  - `process-random-block-sizes`
+  - `process-reset-reactivate`
+  - `param-fuzz-bounds`
+  - `param-fuzz-sample-accurate`
+  - `param-fuzz-modulation`
+  - `param-set-events`
+  - `param-set-no-cookies`
+  - `param-default-values`
+  - `state-invalid-random`
+  - `state-reproducibility-binary` (other reproducibility tests have been relaxed to not check for exact binary state matches)
+  - `transport-null`
+  - `transport-fuzz`
+  - `transport-fuzz-sample-accurate`
+  
+- Removed tests:
+  - `state-reproducibility-flush` - replaced by `param-set-events`.
+  - `state-reproducibility-null-cookies` - replaced by `param-set-no-cookies`.
+
+- Extra checks:
+  - `ambisonic`/`surround` checks when querying audio port info.
+  - Thread/state/extension checks for host callback functions.
+  - More lenient param reproducibility checks that allow for some imprecision when comparing parameter values.
+  - Object validity checks, now passing an invalid object pointer to a callback will catch it and report it as an error instead of causing undefined behavior in the validator. This has some performance impact but it is negligible. 
+  - Implemented more host-side extensions and specific checks for each host-side extension callback.
+  - Implemented infinite restart loop check in activate (similar to the infinite `request_callback` loop check for `on_main_thread`).
+
+### Fixed
+  - Wrong state transition check on plugin instance destroy.
+  - Output note events were queried as inputs.
 
 ## [0.3.2] - 2023-03-25
 

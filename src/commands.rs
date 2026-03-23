@@ -1,7 +1,6 @@
 //! All the different commands for the cli. Split up into modules and functions to make it a bit
 //! easier to navigate.
 
-pub mod fuzz;
 pub mod list;
 pub mod validate;
 
@@ -25,9 +24,6 @@ pub struct Arguments {
 pub enum Command {
     /// Validate one or more plugins.
     Validate(validate::ValidatorSettings),
-
-    /// Fuzz one or more plugins.
-    Fuzz(fuzz::FuzzerSettings),
 
     /// List available tests, scan plugins, presets, etc.
     #[command(subcommand)]

@@ -4,7 +4,6 @@ use yansi::Paint;
 
 mod cli;
 mod commands;
-mod fuzz;
 mod plugin;
 mod tests;
 mod validator;
@@ -47,7 +46,6 @@ fn main() -> ExitCode {
 
     let result = match args.command {
         Command::Validate(settings) => commands::validate::validate(args.verbosity, &settings),
-        Command::Fuzz(settings) => commands::fuzz::fuzz(args.verbosity, &settings),
         Command::List(command) => commands::list::list(args.verbosity, command),
         Command::Sandbox(payload) => payload.dispatch().map(|_| ExitCode::SUCCESS),
     };

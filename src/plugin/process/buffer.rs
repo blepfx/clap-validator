@@ -7,6 +7,7 @@ use rand::RngExt;
 use rand_pcg::Pcg32;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::mem::zeroed;
 use std::ops::{Deref, DerefMut};
 use std::ptr::null_mut;
 
@@ -24,6 +25,9 @@ pub struct AudioBuffers {
     /// The CLAP audio buffer representations for outputs
     clap_outputs: Box<[clap_audio_buffer]>,
 
+    ptrs_inputs: Box<[Box<[*mut ()]>]>,
+    ptrs_outputs: Box<[Box<[*mut ()]>]>,
+
     /// The number of samples for this buffer. This is consistent across all inner vectors.
     samples: u32,
 }
@@ -31,19 +35,15 @@ pub struct AudioBuffers {
 #[derive(Debug, Clone)]
 pub struct AudioBuffer {
     port: AudioBufferPort,
-    data: AudioBufferData,
 
     input_constant_mask: ConstantMask,
     output_constant_mask: ConstantMask,
 
     input_latency: u32,
     output_latency: u32,
-}
 
-pub struct AudioBufferData {
     #[allow(clippy::type_complexity)]
     data: Either<Box<[Box<[f32]>]>, Box<[Box<[f64]>]>>,
-    pointers: Box<[*const ()]>,
     samples: u32,
 }
 
@@ -59,8 +59,10 @@ impl AudioBuffers {
     /// Construct the audio buffers from the given buffer configurations. The number of samples must
     /// be greater than zero and all channel vectors must have the same length.
     pub fn new(buffers: Vec<AudioBuffer>, samples: u32) -> Self {
-        let mut clap_inputs = vec![];
-        let mut clap_outputs = vec![];
+        let mut clap_inputs: Vec<clap_audio_buffer> = vec![];
+        let mut clap_outputs: Vec<clap_audio_buffer> = vec![];
+        let mut ptrs_inputs: Vec<Box<[*mut ()]>> = vec![];
+        let mut ptrs_outputs: Vec<Box<[*mut ()]>> = vec![];
 
         for buffer in buffers.iter() {
             assert!(
@@ -70,44 +72,28 @@ impl AudioBuffers {
 
             if let Some(input) = buffer.port().input() {
                 if clap_inputs.len() <= input {
-                    clap_inputs.resize(input + 1, None);
+                    clap_inputs.resize(input + 1, unsafe { zeroed() });
+                    ptrs_inputs.resize(input + 1, Box::new([]));
                 }
 
-                clap_inputs[input] = Some(clap_audio_buffer {
-                    data32: buffer.as_ptr().either(|x| x, |_| null_mut()),
-                    data64: buffer.as_ptr().either(|_| null_mut(), |x| x),
-                    channel_count: buffer.channels(),
-                    latency: 0,
-                    constant_mask: 0,
-                });
+                ptrs_inputs[input] = vec![null_mut(); buffer.channels() as usize].into_boxed_slice();
             }
 
             if let Some(output) = buffer.port().output() {
                 if clap_outputs.len() <= output {
-                    clap_outputs.resize(output + 1, None);
+                    clap_outputs.resize(output + 1, unsafe { zeroed() });
+                    ptrs_outputs.resize(output + 1, Box::new([]));
                 }
 
-                clap_outputs[output] = Some(clap_audio_buffer {
-                    data32: buffer.as_ptr().either(|x| x, |_| null_mut()),
-                    data64: buffer.as_ptr().either(|_| null_mut(), |x| x),
-                    channel_count: buffer.channels(),
-                    latency: 0,
-                    constant_mask: 0,
-                });
+                ptrs_outputs[output] = vec![null_mut(); buffer.channels() as usize].into_boxed_slice();
             }
         }
 
         Self {
-            clap_inputs: clap_inputs
-                .into_iter()
-                .collect::<Option<Vec<_>>>()
-                .expect("Missing an input bus")
-                .into_boxed_slice(),
-            clap_outputs: clap_outputs
-                .into_iter()
-                .collect::<Option<Vec<_>>>()
-                .expect("Missing an output bus")
-                .into_boxed_slice(),
+            clap_inputs: clap_inputs.into_boxed_slice(),
+            clap_outputs: clap_outputs.into_boxed_slice(),
+            ptrs_inputs: ptrs_inputs.into_boxed_slice(),
+            ptrs_outputs: ptrs_outputs.into_boxed_slice(),
             buffers: buffers.into_boxed_slice(),
             samples,
         }
@@ -155,29 +141,104 @@ impl AudioBuffers {
         ))
     }
 
-    pub fn process<R>(&mut self, f: impl FnOnce(&[clap_audio_buffer], &mut [clap_audio_buffer]) -> R) -> R {
+    #[allow(clippy::obfuscated_if_else)]
+    pub fn process<R>(
+        &mut self,
+        f: impl FnOnce(&[clap_audio_buffer], &mut [clap_audio_buffer]) -> Result<R>,
+    ) -> Result<R> {
         for buffer in self.buffers.iter() {
             if let Some(input) = buffer.port().input() {
-                self.clap_inputs[input].constant_mask = buffer.input_constant_mask.0;
-                self.clap_inputs[input].latency = buffer.input_latency;
+                let clap = &mut self.clap_inputs[input];
+                let ptrs = &mut self.ptrs_inputs[input];
+
+                clap.data32 = buffer.is_32bit().then_some(ptrs.as_mut_ptr()).unwrap_or_default() as *mut _;
+                clap.data64 = buffer.is_64bit().then_some(ptrs.as_mut_ptr()).unwrap_or_default() as *mut _;
+                clap.channel_count = buffer.channels();
+                clap.constant_mask = buffer.input_constant_mask.0;
+                clap.latency = buffer.input_latency;
+
+                for i in 0..buffer.channels() as usize {
+                    ptrs[i] = buffer.channel_ptr(i as u32);
+                }
             }
 
             if let Some(output) = buffer.port().output() {
-                self.clap_outputs[output].constant_mask = 0;
-                self.clap_outputs[output].latency = 0;
+                let clap = &mut self.clap_outputs[output];
+                let ptrs = &mut self.ptrs_outputs[output];
+
+                clap.data32 = buffer.is_32bit().then_some(ptrs.as_mut_ptr()).unwrap_or_default() as *mut _;
+                clap.data64 = buffer.is_64bit().then_some(ptrs.as_mut_ptr()).unwrap_or_default() as *mut _;
+                clap.channel_count = buffer.channels();
+                clap.constant_mask = 0;
+                clap.latency = 0;
+
+                for i in 0..buffer.channels() as usize {
+                    ptrs[i] = buffer.channel_ptr(i as u32);
+                }
             }
         }
 
-        let result = f(&self.clap_inputs, &mut self.clap_outputs);
+        let result = f(&self.clap_inputs, &mut self.clap_outputs)?;
 
         for buffer in self.buffers.iter_mut() {
+            if let Some(input) = buffer.port().input() {
+                let clap = &self.clap_inputs[input];
+                let ptrs = &self.ptrs_inputs[input];
+
+                let ptr32 = buffer.is_32bit().then_some(ptrs.as_ptr()).unwrap_or_default() as *mut _;
+                let ptr64 = buffer.is_64bit().then_some(ptrs.as_ptr()).unwrap_or_default() as *mut _;
+
+                if clap.data32 != ptr32
+                    || clap.data64 != ptr64
+                    || clap.channel_count != buffer.channels()
+                    || clap.constant_mask != buffer.input_constant_mask.0
+                    || clap.latency != buffer.input_latency
+                {
+                    anyhow::bail!(
+                        "The plugin modified the input buffer (index {input}) data while processing, which is not \
+                         allowed."
+                    );
+                }
+
+                for i in 0..buffer.channels() as usize {
+                    if ptrs[i] != buffer.channel_ptr(i as u32) {
+                        anyhow::bail!(
+                            "The plugin modified the input buffer (index {input}) channel pointers while processing, \
+                             which is not allowed."
+                        );
+                    }
+                }
+            }
+
             if let Some(output) = buffer.port().output() {
-                buffer.output_constant_mask = ConstantMask(self.clap_outputs[output].constant_mask);
-                buffer.output_latency = self.clap_outputs[output].latency;
+                let clap = &self.clap_outputs[output];
+                let ptrs = &self.ptrs_outputs[output];
+
+                let ptr32 = buffer.is_32bit().then_some(ptrs.as_ptr()).unwrap_or_default() as *mut _;
+                let ptr64 = buffer.is_64bit().then_some(ptrs.as_ptr()).unwrap_or_default() as *mut _;
+
+                if clap.data32 != ptr32 || clap.data64 != ptr64 || clap.channel_count != buffer.channels() {
+                    anyhow::bail!(
+                        "The plugin modified the output buffer (index {output}) data while processing, which is not \
+                         allowed."
+                    );
+                }
+
+                for i in 0..buffer.channels() as usize {
+                    if ptrs[i] != buffer.channel_ptr(i as u32) {
+                        anyhow::bail!(
+                            "The plugin modified the output buffer (index {output}) channel pointers while \
+                             processing, which is not allowed."
+                        );
+                    }
+                }
+
+                buffer.output_constant_mask = ConstantMask(clap.constant_mask);
+                buffer.output_latency = clap.latency;
             }
         }
 
-        result
+        Ok(result)
     }
 
     pub fn samples(&self) -> u32 {
@@ -202,10 +263,17 @@ impl AudioBuffers {
 }
 
 impl AudioBuffer {
-    pub fn new(port: AudioBufferPort, data: AudioBufferData) -> Self {
+    pub fn new(port: AudioBufferPort, channels: u32, samples: u32, is_double: bool) -> Self {
+        let data = if is_double {
+            Either::Right(vec![vec![0.0f64; samples as usize].into_boxed_slice(); channels as usize].into_boxed_slice())
+        } else {
+            Either::Left(vec![vec![0.0f32; samples as usize].into_boxed_slice(); channels as usize].into_boxed_slice())
+        };
+
         Self {
             port,
             data,
+            samples,
             input_constant_mask: ConstantMask::DYNAMIC,
             output_constant_mask: ConstantMask::DYNAMIC,
             input_latency: 0,
@@ -236,87 +304,36 @@ impl AudioBuffer {
     }
 
     pub fn fill_white_noise(&mut self, prng: &mut Pcg32) {
-        self.data.fill_white_noise(prng);
+        for channel in 0..self.channels() {
+            match self.channel_mut(channel) {
+                Either::Left(data) => data.fill_with(|| prng.random_range(-1.0..1.0)),
+                Either::Right(data) => data.fill_with(|| prng.random_range(-1.0..1.0)),
+            }
+        }
+
         self.set_input_constant_mask(ConstantMask::DYNAMIC);
     }
 
     pub fn fill_silence(&mut self) {
-        self.data.fill(0.0, 0.0);
+        self.fill(0.0, 0.0);
         self.set_input_constant_mask(ConstantMask::CONSTANT);
     }
-}
 
-impl AudioBufferPort {
-    pub fn input(&self) -> Option<usize> {
-        match self {
-            AudioBufferPort::Input(index) => Some(*index),
-            AudioBufferPort::Inplace(index, _) => Some(*index),
-            AudioBufferPort::Output(_) => None,
-        }
-    }
-
-    pub fn output(&self) -> Option<usize> {
-        match self {
-            AudioBufferPort::Output(index) => Some(*index),
-            AudioBufferPort::Inplace(_, index) => Some(*index),
-            AudioBufferPort::Input(_) => None,
-        }
-    }
-
-    pub fn create_buffer(self, config: &AudioPortConfig, samples: u32, is_double: bool) -> AudioBuffer {
-        match self {
-            AudioBufferPort::Input(index) => AudioBuffer::new(
-                self,
-                AudioBufferData::new(
-                    config.inputs[index].channel_count,
-                    samples,
-                    is_double && config.inputs[index].supports_double_sample_size,
-                ),
-            ),
-            AudioBufferPort::Output(index) => AudioBuffer::new(
-                self,
-                AudioBufferData::new(
-                    config.outputs[index].channel_count,
-                    samples,
-                    is_double && config.outputs[index].supports_double_sample_size,
-                ),
-            ),
-            AudioBufferPort::Inplace(input_index, output_index) => AudioBuffer::new(
-                self,
-                AudioBufferData::new(
-                    config.inputs[input_index].channel_count,
-                    samples,
-                    is_double
-                        && config.inputs[input_index].supports_double_sample_size
-                        && config.outputs[output_index].supports_double_sample_size,
-                ),
-            ),
-        }
-    }
-}
-
-impl AudioBufferData {
-    pub fn new(channels: u32, samples: u32, is_double: bool) -> Self {
-        let data = if is_double {
-            Either::Right(vec![vec![0.0f64; samples as usize].into_boxed_slice(); channels as usize].into_boxed_slice())
-        } else {
-            Either::Left(vec![vec![0.0f32; samples as usize].into_boxed_slice(); channels as usize].into_boxed_slice())
-        };
-
-        let pointers = match &data {
-            Either::Left(data) => data.iter().map(|channel| channel.as_ptr() as *const ()).collect(),
-            Either::Right(data) => data.iter().map(|channel| channel.as_ptr() as *const ()).collect(),
-        };
-
-        Self {
-            samples,
-            pointers,
-            data,
+    pub fn fill(&mut self, value_f32: f32, value_f64: f64) {
+        for channel in 0..self.channels() {
+            match self.channel_mut(channel) {
+                Either::Left(data) => data.fill(value_f32),
+                Either::Right(data) => data.fill(value_f64),
+            }
         }
     }
 
     pub fn is_64bit(&self) -> bool {
         self.data.is_right()
+    }
+
+    pub fn is_32bit(&self) -> bool {
+        self.data.is_left()
     }
 
     pub fn samples(&self) -> u32 {
@@ -341,6 +358,13 @@ impl AudioBufferData {
         match &mut self.data {
             Either::Left(data) => Either::Left(&mut data[channel as usize]),
             Either::Right(data) => Either::Right(&mut data[channel as usize]),
+        }
+    }
+
+    pub fn channel_ptr(&self, channel: u32) -> *mut () {
+        match &self.data {
+            Either::Left(data) => data[channel as usize].as_ptr() as *mut (),
+            Either::Right(data) => data[channel as usize].as_ptr() as *mut (),
         }
     }
 
@@ -377,74 +401,53 @@ impl AudioBufferData {
 
         true
     }
-
-    /// Fill the buffer with silence (zeros).
-    pub fn fill(&mut self, value_f32: f32, value_f64: f64) {
-        for channel in 0..self.channels() {
-            match self.channel_mut(channel) {
-                Either::Left(data) => data.fill(value_f32),
-                Either::Right(data) => data.fill(value_f64),
-            }
-        }
-    }
-
-    /// Fill the buffer with white noise (random values in the range [-1, 1]).
-    pub fn fill_white_noise(&mut self, prng: &mut Pcg32) {
-        for channel in 0..self.channels() {
-            match self.channel_mut(channel) {
-                Either::Left(data) => data.fill_with(|| prng.random_range(-1.0..1.0)),
-                Either::Right(data) => data.fill_with(|| prng.random_range(-1.0..1.0)),
-            }
-        }
-    }
-
-    pub fn as_ptr(&self) -> Either<*mut *mut f32, *mut *mut f64> {
-        match &self.data {
-            Either::Left(_) => Either::Left(self.pointers.as_ptr() as *mut *mut f32),
-            Either::Right(_) => Either::Right(self.pointers.as_ptr() as *mut *mut f64),
-        }
-    }
 }
 
-unsafe impl Send for AudioBufferData {}
-unsafe impl Sync for AudioBufferData {}
+impl AudioBufferPort {
+    pub fn input(&self) -> Option<usize> {
+        match self {
+            AudioBufferPort::Input(index) => Some(*index),
+            AudioBufferPort::Inplace(index, _) => Some(*index),
+            AudioBufferPort::Output(_) => None,
+        }
+    }
 
-impl Clone for AudioBufferData {
-    fn clone(&self) -> Self {
-        let data = self.data.clone();
+    pub fn output(&self) -> Option<usize> {
+        match self {
+            AudioBufferPort::Output(index) => Some(*index),
+            AudioBufferPort::Inplace(_, index) => Some(*index),
+            AudioBufferPort::Input(_) => None,
+        }
+    }
 
-        Self {
-            samples: self.samples,
-            pointers: data.as_ref().either(
-                |x| x.iter().map(|channel| channel.as_ptr() as *const ()).collect(),
-                |x| x.iter().map(|channel| channel.as_ptr() as *const ()).collect(),
+    pub fn create_buffer(self, config: &AudioPortConfig, samples: u32, is_double: bool) -> AudioBuffer {
+        match self {
+            AudioBufferPort::Input(index) => AudioBuffer::new(
+                self,
+                config.inputs[index].channel_count,
+                samples,
+                is_double && config.inputs[index].supports_double_sample_size,
             ),
-            data,
+            AudioBufferPort::Output(index) => AudioBuffer::new(
+                self,
+                config.outputs[index].channel_count,
+                samples,
+                is_double && config.outputs[index].supports_double_sample_size,
+            ),
+            AudioBufferPort::Inplace(input_index, output_index) => AudioBuffer::new(
+                self,
+                config.inputs[input_index].channel_count,
+                samples,
+                is_double
+                    && config.inputs[input_index].supports_double_sample_size
+                    && config.outputs[output_index].supports_double_sample_size,
+            ),
         }
     }
 }
 
-impl Debug for AudioBufferData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AudioBufferData")
-            .field("channels", &self.channels())
-            .field("type", if self.is_64bit() { &"f64" } else { &"f32" })
-            .finish()
-    }
-}
-
-impl Deref for AudioBuffer {
-    type Target = AudioBufferData;
-    fn deref(&self) -> &Self::Target {
-        &self.data
-    }
-}
-
-impl DerefMut for AudioBuffer {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.data
-    }
-}
+unsafe impl Send for AudioBuffers {}
+unsafe impl Sync for AudioBuffers {}
 
 impl Deref for AudioBuffers {
     type Target = [AudioBuffer];

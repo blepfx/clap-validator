@@ -63,6 +63,7 @@ If a plugin takes too long to respond during validation, the validator will kill
   - Object validity checks, now passing an invalid object pointer to a callback will catch it and report it as an error instead of causing undefined behavior in the validator. This has some performance impact but it is negligible. 
   - Implemented more host-side extensions and specific checks for each host-side extension callback.
   - Implemented infinite restart loop check in activate (similar to the infinite `request_callback` loop check for `on_main_thread`).
+  - Check if `clap_audio_buffer` data is not modified by the plugin within the `clap_plugin::process` call.
 
 ### Fixed
   - Wrong state transition check on plugin instance destroy.

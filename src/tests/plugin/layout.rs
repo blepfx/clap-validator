@@ -596,7 +596,7 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
 fn print_layout(requests: &[AudioPortsRequest<'_>]) -> String {
     requests
         .iter()
-        .map(|r| format!("- {}", r))
+        .map(|r| format!(" - {}", r))
         .collect::<Vec<_>>()
         .join("\n")
 }

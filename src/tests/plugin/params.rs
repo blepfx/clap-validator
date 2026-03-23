@@ -14,6 +14,7 @@ use clap_sys::events::CLAP_EVENT_PARAM_VALUE;
 use clap_sys::id::clap_id;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::ptr::null_mut;
 
 /// The fixed buffer size to use for these tests.
 const BUFFER_SIZE: u32 = 512;
@@ -174,9 +175,7 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
 }
 
 /// The test for `ProcessingTest::ParamChangeEvents`.
-pub fn test_param_change_events(library: &PluginLibrary, plugin_id: &str) -> Result<TestStatus> {
-    let mut prng = new_prng();
-
+pub fn test_param_set_events(library: &PluginLibrary, plugin_id: &str, null_cookies: bool) -> Result<TestStatus> {
     // first, flush run
     let span = Span::begin("FlushRun", ());
 
@@ -195,14 +194,23 @@ pub fn test_param_change_events(library: &PluginLibrary, plugin_id: &str) -> Res
     };
 
     let param_info = params.info().context("Failure while fetching the parameters")?;
-    let param_events = ParamFuzzer::new(&param_info)
-        .randomize_params_at(&mut prng, 0)
+    let mut param_events = ParamFuzzer::new(&param_info)
+        .randomize_params_at(&mut new_prng(), 0)
         .collect::<Vec<_>>();
 
     if param_events.is_empty() {
         return Ok(TestStatus::Skipped {
             details: Some(String::from("The plugin does not have any automatable parameters")),
         });
+    }
+
+    if null_cookies {
+        for event in param_events.iter_mut() {
+            match event {
+                Event::ParamValue(event) => event.cookie = null_mut(),
+                event => panic!("Unexpected event {event:?}"),
+            }
+        }
     }
 
     let flush_param_values = {
@@ -245,6 +253,21 @@ pub fn test_param_change_events(library: &PluginLibrary, plugin_id: &str) -> Res
         Some(params) => params,
         None => anyhow::bail!("The second instance does not implement the 'params' extension."),
     };
+
+    // we have to recreate the events because of cookies (they can be different between plugin instances)
+    let param_info = params.info().context("Failure while fetching the parameters")?;
+    let mut param_events = ParamFuzzer::new(&param_info)
+        .randomize_params_at(&mut new_prng(), 0)
+        .collect::<Vec<_>>();
+
+    if null_cookies {
+        for event in param_events.iter_mut() {
+            match event {
+                Event::ParamValue(event) => event.cookie = null_mut(),
+                event => panic!("Unexpected event {event:?}"),
+            }
+        }
+    }
 
     let process_param_values = {
         let initial_param_values = param_get_values(&params)?;
@@ -662,14 +685,22 @@ pub fn param_generate_diff(
             let value_a = actual.get(param_id);
             let value_b = expected.get(param_id);
 
+            let string_a = value_a.and_then(|&value| params.value_to_text(*param_id, value).ok().flatten());
+            let string_b = value_b.and_then(|&value| params.value_to_text(*param_id, value).ok().flatten());
+
+            // If we have strings, and they're equal, then we consider the parameters to be equal, even if the values are not exactly equal.
+            // This is because some plugins may round parameter values when converting them to strings, and we want to allow for that.
+            if let (Some(string_a), Some(string_b)) = (string_a.as_ref(), string_b.as_ref())
+                && string_a == string_b
+            {
+                return None;
+            }
+
             if let (Some(value_a), Some(value_b)) = (value_a, value_b)
                 && param_compare_approx(info, *value_a, *value_b)
             {
                 return None;
             }
-
-            let string_a = value_a.and_then(|&value| params.value_to_text(*param_id, value).ok().flatten());
-            let string_b = value_b.and_then(|&value| params.value_to_text(*param_id, value).ok().flatten());
 
             let print_a = match (string_a, value_a) {
                 (Some(string_a), Some(value_a)) => format!("{} ({:.4})", string_a, value_a),

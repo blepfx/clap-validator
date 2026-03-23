@@ -55,7 +55,6 @@ pub struct AudioPort {
     pub prefers_double_sample_size: bool,
 
     /// All ports with this flag require common sample size
-    #[allow(unused)] // TODO: use for future mixed precision processing tests
     pub requires_common_sample_size: bool,
 }
 

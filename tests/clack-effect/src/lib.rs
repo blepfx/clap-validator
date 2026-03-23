@@ -109,7 +109,7 @@ impl PluginAudioPortsImpl for GainPluginMainThread<'_> {
                 channel_count: 2,
                 flags: AudioPortFlags::IS_MAIN,
                 port_type: Some(AudioPortType::STEREO),
-                in_place_pair: None,
+                in_place_pair: Some(ClapId::new(0)),
             });
         } else if index == 1 && is_input {
             writer.set(&AudioPortInfo {

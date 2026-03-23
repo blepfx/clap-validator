@@ -4,7 +4,7 @@ use super::PluginTestCase;
 use crate::plugin::ext::params::Params;
 use crate::plugin::ext::state::State;
 use crate::plugin::library::PluginLibrary;
-use crate::plugin::process::{Event, InputEventQueue, OutputEventQueue};
+use crate::plugin::process::{InputEventQueue, OutputEventQueue};
 use crate::tests::plugin::params::{param_generate_diff, param_get_values};
 use crate::tests::rng::{ParamFuzzer, new_prng};
 use crate::tests::{TestCase, TestStatus};
@@ -99,7 +99,6 @@ pub fn test_state_invalid_random(library: &PluginLibrary, plugin_id: &str) -> Re
 pub fn test_state_reproducibility(
     library: &PluginLibrary,
     plugin_id: &str,
-    zero_out_cookies: bool,
     buffered_streams: bool,
     binary_equality: bool,
 ) -> Result<TestStatus> {
@@ -140,27 +139,12 @@ pub fn test_state_reproducibility(
         // We can't compare the values from these events direclty as the plugin
         // may round the values during the parameter set
         let param_fuzzer = ParamFuzzer::new(&param_info);
-        let mut random_param_set_events: Vec<_> = param_fuzzer.randomize_params_at(&mut prng, 0).collect();
-
-        // This is a variation on the test that checks whether the plugin handles null
-        // pointer cookies correctly
-        if zero_out_cookies {
-            for event in &mut random_param_set_events {
-                match event {
-                    Event::ParamValue(event) => {
-                        event.cookie = std::ptr::null_mut();
-                    }
-                    event => {
-                        panic!("Unexpected event {event:?}")
-                    }
-                }
-            }
-        }
+        let param_events: Vec<_> = param_fuzzer.randomize_params_at(&mut prng, 0).collect();
 
         {
             let input_queue = InputEventQueue::new();
             let output_queue = OutputEventQueue::new();
-            input_queue.add_events(random_param_set_events);
+            input_queue.add_events(param_events);
             params.flush(&input_queue, &output_queue);
         }
 

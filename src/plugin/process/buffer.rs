@@ -1,4 +1,4 @@
-use crate::plugin::ext::audio_ports::AudioPortConfig;
+use crate::plugin::ext::audio_ports::{AudioPort, AudioPortConfig};
 use crate::plugin::process::ConstantMask;
 use anyhow::Result;
 use clap_sys::audio_buffer::*;
@@ -464,6 +464,15 @@ impl DerefMut for AudioBuffers {
 /// Returns an error if there are any inconsistencies, such as an input or output port
 /// referencing a non-existent in-place pair.
 fn resolve_in_place_pairs(config: &AudioPortConfig) -> Result<Vec<AudioBufferPort>> {
+    fn is_same_layout(port: &AudioPort, other: &AudioPort) -> bool {
+        port.channel_count == other.channel_count
+            && port.port_type == other.port_type
+            && port.is_main == other.is_main
+            && port.supports_double_sample_size == other.supports_double_sample_size
+            && port.requires_common_sample_size == other.requires_common_sample_size
+            && port.prefers_double_sample_size == other.prefers_double_sample_size
+    }
+
     let mut ports = vec![];
     let mut in_place: HashMap<(u32, u32), (Option<usize>, Option<usize>)> = HashMap::new();
 
@@ -494,18 +503,11 @@ fn resolve_in_place_pairs(config: &AudioPortConfig) -> Result<Vec<AudioBufferPor
                  exist."
             ),
             (Some(input), Some(output)) => {
-                if config.inputs[input].channel_count != config.outputs[output].channel_count {
-                    // TODO: is this allowed?
-                    // anyhow::bail!(
-                    //     "Input port {input} and output port {output} are configured as an in-place pair, but they \
-                    //      have different channel counts ({} vs {}).",
-                    //     config.inputs[input].channel_count,
-                    //     config.outputs[output].channel_count
-                    // );
-
-                    ports.push(AudioBufferPort::Input(input));
-                    ports.push(AudioBufferPort::Output(output));
-                    continue;
+                if !is_same_layout(&config.inputs[input], &config.outputs[output]) {
+                    anyhow::bail!(
+                        "Input port {input} and output port {output} are configured as an in-place pair, but they \
+                         have different flags/layouts.",
+                    );
                 }
 
                 ports.push(AudioBufferPort::Inplace(input, output));

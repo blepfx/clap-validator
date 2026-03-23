@@ -68,8 +68,6 @@ pub enum PluginTestCase {
     ProcessResetReactivate,
     #[strum(serialize = "param-conversions")]
     ParamConversions,
-    #[strum(serialize = "param-change-events")]
-    ParamChangeEvents,
     #[strum(serialize = "param-fuzz-basic")]
     ParamFuzzBasic,
     #[strum(serialize = "param-fuzz-bounds")]
@@ -78,6 +76,10 @@ pub enum PluginTestCase {
     ParamFuzzSampleAccurate,
     #[strum(serialize = "param-fuzz-modulation")]
     ParamFuzzModulation,
+    #[strum(serialize = "param-set-events")]
+    ParamSetEvents,
+    #[strum(serialize = "param-set-no-cookies")]
+    ParamSetNoCookies,
     #[strum(serialize = "param-set-wrong-namespace")]
     ParamSetWrongNamespace,
     #[strum(serialize = "param-default-values")]
@@ -90,10 +92,8 @@ pub enum PluginTestCase {
     StateReproducibilityBasic,
     #[strum(serialize = "state-reproducibility-binary")]
     StateReproducibilityBinary,
-    #[strum(serialize = "state-reproducibility-null-cookies")]
-    StateReproducibilityNullCookies,
-    #[strum(serialize = "state-reproducibility-buffered-streams")]
-    StateReproducibilityBufferedStreams,
+    #[strum(serialize = "state-reproducibility-buffered")]
+    StateReproducibilityBuffered,
     #[strum(serialize = "transport-null")]
     TransportNull,
     #[strum(serialize = "transport-fuzz")]
@@ -203,9 +203,14 @@ impl<'a> TestCase<'a> for PluginTestCase {
                 "Asserts that value to string and string to value conversions are supported for ether all or none of \
                  the plugin's parameters, and that conversions between values and strings roundtrip consistently.",
             ),
-            PluginTestCase::ParamChangeEvents => String::from(
+            PluginTestCase::ParamSetEvents => String::from(
                 "Asserts that the resulting parameter values after a flush are the same as if the parameter changes \
                  were sent via a process call.",
+            ),
+            PluginTestCase::ParamSetNoCookies => format!(
+                "Same as '{}', but this time the parameter change events are sent with null cookies. The plugin \
+                 should behave identically to when the cookies are set to non-null values.",
+                PluginTestCase::ParamSetEvents,
             ),
             PluginTestCase::ParamFuzzBasic => format!(
                 "Generates {} sets of random parameter values, sets those on the plugin, and has the plugin process \
@@ -250,12 +255,7 @@ impl<'a> TestCase<'a> for PluginTestCase {
                  results in the same parameters as before. The parameter values are updated using the process \
                  function.",
             ),
-            PluginTestCase::StateReproducibilityNullCookies => format!(
-                "The exact same test as '{}', but with all cookies in the parameter events set to null pointers. The \
-                 plugin should handle this in the same way as the other test case.",
-                PluginTestCase::StateReproducibilityBasic
-            ),
-            PluginTestCase::StateReproducibilityBufferedStreams => format!(
+            PluginTestCase::StateReproducibilityBuffered => format!(
                 "Performs the same parameter reproducibility check as in '{}', but this time the plugin is only \
                  allowed to read a small prime number of bytes at a time when reloading and resaving the state.",
                 PluginTestCase::StateReproducibilityBasic
@@ -342,26 +342,24 @@ impl<'a> TestCase<'a> for PluginTestCase {
             PluginTestCase::ProcessRandomBlockSizes => processing::test_process_random_block_sizes(library, plugin_id),
             PluginTestCase::ProcessResetReactivate => processing::test_process_reset_reactivate(library, plugin_id),
             PluginTestCase::ParamConversions => params::test_param_conversions(library, plugin_id),
-            PluginTestCase::ParamChangeEvents => params::test_param_change_events(library, plugin_id),
+            PluginTestCase::ParamSetEvents => params::test_param_set_events(library, plugin_id, false),
+            PluginTestCase::ParamSetNoCookies => params::test_param_set_events(library, plugin_id, true),
+            PluginTestCase::ParamSetWrongNamespace => params::test_param_set_wrong_namespace(library, plugin_id),
             PluginTestCase::ParamFuzzBasic => params::test_param_fuzz_basic(library, plugin_id, false),
             PluginTestCase::ParamFuzzBounds => params::test_param_fuzz_basic(library, plugin_id, true),
             PluginTestCase::ParamFuzzSampleAccurate => params::test_param_fuzz_sample_accurate(library, plugin_id),
             PluginTestCase::ParamFuzzModulation => params::test_param_fuzz_modulation(library, plugin_id),
-            PluginTestCase::ParamSetWrongNamespace => params::test_param_set_wrong_namespace(library, plugin_id),
             PluginTestCase::ParamDefaultValues => params::test_param_default_values(library, plugin_id),
             PluginTestCase::StateInvalidEmpty => state::test_state_invalid_empty(library, plugin_id),
             PluginTestCase::StateInvalidRandom => state::test_state_invalid_random(library, plugin_id),
             PluginTestCase::StateReproducibilityBasic => {
-                state::test_state_reproducibility(library, plugin_id, false, false, false)
+                state::test_state_reproducibility(library, plugin_id, false, false)
             }
-            PluginTestCase::StateReproducibilityNullCookies => {
-                state::test_state_reproducibility(library, plugin_id, true, false, false)
-            }
-            PluginTestCase::StateReproducibilityBufferedStreams => {
-                state::test_state_reproducibility(library, plugin_id, false, true, false)
+            PluginTestCase::StateReproducibilityBuffered => {
+                state::test_state_reproducibility(library, plugin_id, true, false)
             }
             PluginTestCase::StateReproducibilityBinary => {
-                state::test_state_reproducibility(library, plugin_id, false, false, true)
+                state::test_state_reproducibility(library, plugin_id, false, true)
             }
 
             PluginTestCase::TransportNull => transport::test_transport_null(library, plugin_id),

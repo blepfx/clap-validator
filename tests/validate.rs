@@ -32,10 +32,10 @@ fn validate(package: &str, should_fail: bool) {
     };
 
     let plugin_path = if cfg!(target_os = "macos") {
-        let target_out = format!("target/debug/{}.clap", package.replace('-', "_"));
+        let target_out = format!("target/debug/{}.clap", package);
 
         create_dir_all(format!("{}/Contents/MacOS", target_out)).unwrap();
-        copy(&dylib_path, format!("{}/Contents/MacOS/{}", target_out, dylib_path)).unwrap();
+        copy(&dylib_path, format!("{}/Contents/MacOS/{}", target_out, package)).unwrap();
         write(format!("{}/Contents/PkgInfo", target_out), "BNDL????").unwrap();
         write(
             format!("{}/Contents/Info.plist", target_out),
@@ -48,7 +48,7 @@ fn validate(package: &str, should_fail: bool) {
                 <key>CFBundleName</key>
                 <string>{package}</string>
                 <key>CFBundleExecutable</key>
-                <string>{dylib_path}</string>
+                <string>{package}</string>
                 <key>CFBundleIdentifier</key>
                 <string>com.example.{package}</string>
                 <key>CFBundleVersion</key>

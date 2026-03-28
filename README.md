@@ -48,7 +48,7 @@ By default, all tests are run during validation, including pedantic ones. You ca
 ```toml
 # clap-validator.toml
 [test]
-state-buffered-streams = false
+state-reproducibility-binary = false
 ```
 
 ## Building

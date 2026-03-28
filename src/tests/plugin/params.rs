@@ -524,12 +524,16 @@ pub fn test_param_fuzz_modulation(library: &PluginLibrary, plugin_id: &str) -> R
     let mut note_rng = NoteGenerator::new(&note_ports).with_params(&param_info);
     let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports, BUFFER_SIZE);
 
+    plugin.poll_callback(|_| Ok(()))?;
+
     plugin.on_audio_thread(|plugin| -> Result<()> {
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         process.audio_buffers().fill_white_noise(&mut prng);
         process.add_events(param_fuzzer.generate_events(&mut prng, process.max_block_size()));
         process.add_events(note_rng.generate_events(&mut prng, process.max_block_size()));
+        process.run()?;
+
         Ok(())
     })?;
 

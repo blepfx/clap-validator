@@ -66,7 +66,15 @@ fn validate(package: &str, should_fail: bool) {
     };
 
     let output = Command::new("cargo")
-        .args(["run", "--package", "clap-validator", "--", "validate", &plugin_path])
+        .args([
+            "run",
+            "--package",
+            "clap-validator",
+            "--",
+            "validate",
+            "--only-failed",
+            &plugin_path,
+        ])
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .output()

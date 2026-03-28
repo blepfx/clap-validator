@@ -279,14 +279,10 @@ impl PluginAudioPortsConfigInfoImpl for PolySynthPluginMainThread<'_> {
 
 impl PluginConfigurableAudioPortsImpl for PolySynthPluginMainThread<'_> {
     fn can_apply_configuration(&mut self, requests: &[AudioPortRequest]) -> bool {
-        dbg!(requests);
-
         matches!(requests.first(), Some(request) if !request.is_input() && request.port_index() == 0 && request.details().channel_count() > 0 && request.details().channel_count() <= 8)
     }
 
     fn apply_configuration(&mut self, requests: &[AudioPortRequest]) -> bool {
-        dbg!(requests);
-
         match requests.first() {
             Some(request)
                 if !request.is_input()

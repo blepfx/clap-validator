@@ -11,12 +11,9 @@ use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::events::clap_event_transport;
 use clap_sys::plugin::clap_plugin;
 use clap_sys::process::*;
-use std::any::Any;
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::mem::MaybeUninit;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::mpsc::SyncSender;
 
 /// An audio thread equivalent to [`Plugin`]. This version only allows audio thread functions to be
 /// called. It can be constructed using [`Plugin::on_audio_thread()`].
@@ -94,34 +91,37 @@ impl<'a> PluginAudioThread<'a> {
 
     /// Dispatch a task to be executed on the main thread. This is a blocking call that will wait
     /// for the task to complete and return its result.
-    ///
-    /// TODO: this could be optimized and the 'static requirement dropped.
-    pub fn on_main_thread<F: FnOnce(&Plugin) -> T + Send, T: Send + 'static>(&self, callback: F) -> T {
-        struct Context<F, T> {
-            sender: SyncSender<Result<T, Box<dyn Any + Send>>>,
-            callback: F,
-        }
-
+    pub fn on_main_thread<F: FnOnce(&Plugin) -> T + Send, T: Send>(&self, callback: F) -> T {
         let (sender, recv) = std::sync::mpsc::sync_channel(0);
-        let context = MaybeUninit::new(Context { sender, callback });
+
+        let callback: Box<dyn FnOnce(&Plugin) + Send> = Box::new(move |plugin| {
+            let result = catch_unwind(AssertUnwindSafe(|| callback(plugin)));
+            sender.send(result).unwrap();
+        });
 
         self.shared
             .task_sender
-            .send(MainThreadTask::Dispatch {
-                data: context.as_ptr() as *mut (),
-                call: |plugin, data| {
-                    // Safety: we are the only ones with access to this pointer right now.
-                    let context = unsafe { (data as *mut Context<F, T>).read() };
-                    let result = catch_unwind(AssertUnwindSafe(|| (context.callback)(plugin)));
-                    context.sender.send(result).unwrap();
-                },
-            })
+            .send(MainThreadTask::Dispatch(unsafe {
+                // SAFETY: we just erase the lifetime here, as we guarantee that the callback is valid until Receiver is dropped, at that point the callback has been dropped already.
+                std::mem::transmute::<Box<dyn FnOnce(&Plugin) + Send>, Box<dyn FnOnce(&Plugin) + Send + 'static>>(
+                    callback,
+                )
+            }))
             .unwrap();
 
         match recv.recv().unwrap() {
             Ok(value) => value,
             Err(panic) => std::panic::resume_unwind(panic),
         }
+    }
+
+    /// Same as [`Self::on_main_thread`], but does not wait for the result and does not block.
+    #[allow(unused)]
+    pub fn send_main_thread<F: FnOnce(&Plugin) + Send + 'static>(&self, callback: F) {
+        self.shared
+            .task_sender
+            .send(MainThreadTask::Dispatch(Box::new(callback)))
+            .unwrap();
     }
 
     pub fn poll_callback(&self, mut f: impl FnMut(&Plugin, CallbackEvent) -> Result<()> + Send) -> Result<()> {

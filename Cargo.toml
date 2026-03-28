@@ -14,6 +14,10 @@ rust-version = "1.89.0"  # MSRV
 description = "A validator and automatic test suite for CLAP plugins"
 readme = "README.md"
 repository = "https://github.com/free-audio/clap-validator"
+authors = [
+    "Robbert van der Helm <mail@robbertvanderhelm.nl>",
+    "Quant1um <blep@amee.ee>"
+]
 
 [dependencies]
 anyhow = "1.0.58"

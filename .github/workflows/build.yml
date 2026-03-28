@@ -31,11 +31,11 @@ jobs:
     name: Build binary
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Fetch all git history
         run: git fetch --force --prune --tags --unshallow
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/
@@ -43,7 +43,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ matrix.name }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: build-${{ matrix.name }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable

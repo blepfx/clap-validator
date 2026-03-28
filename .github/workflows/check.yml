@@ -20,7 +20,17 @@ jobs:
     name: Check on ${{ matrix.os }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: check-${{ matrix.name }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run clippy
         run: cargo clippy --all -- -D warnings

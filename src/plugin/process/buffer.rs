@@ -3,8 +3,7 @@ use crate::plugin::process::ConstantMask;
 use anyhow::Result;
 use clap_sys::audio_buffer::*;
 use either::Either;
-use rand::RngExt;
-use rand_pcg::Pcg32;
+use rand::{Rng, RngExt};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::mem::zeroed;
@@ -245,7 +244,7 @@ impl AudioBuffers {
         self.samples
     }
 
-    pub fn fill_white_noise(&mut self, prng: &mut Pcg32) {
+    pub fn fill_white_noise(&mut self, prng: &mut impl Rng) {
         for buffer in self.buffers.iter_mut() {
             if buffer.port().input().is_some() {
                 buffer.fill_white_noise(prng);
@@ -303,7 +302,7 @@ impl AudioBuffer {
         self.output_latency
     }
 
-    pub fn fill_white_noise(&mut self, prng: &mut Pcg32) {
+    pub fn fill_white_noise(&mut self, prng: &mut impl Rng) {
         for channel in 0..self.channels() {
             match self.channel_mut(channel) {
                 Either::Left(data) => data.fill_with(|| prng.random_range(-1.0..1.0)),

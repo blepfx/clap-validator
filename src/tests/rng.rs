@@ -8,14 +8,13 @@ use crate::plugin::process::{Event, TransportState};
 use clap_sys::events::*;
 use clap_sys::ext::ambisonic::*;
 use midi_consts::channel_event as midi;
-use rand::RngExt;
 use rand::seq::{IndexedRandom, IteratorRandom};
-use rand_pcg::Pcg32;
+use rand::{Rng, RngExt, SeedableRng};
 use std::ops::RangeInclusive;
 
 /// Create a new pseudo-random number generator with a fixed seed.
-pub fn new_prng() -> Pcg32 {
-    Pcg32::new(1337, 420)
+pub fn new_prng() -> rand::rngs::Xoshiro128PlusPlus {
+    rand::rngs::Xoshiro128PlusPlus::seed_from_u64(0x1337_6767)
 }
 
 /// A random note and MIDI event generator that generates consistent events based on the
@@ -131,7 +130,7 @@ impl NoteEventType {
 }
 
 impl Note {
-    fn random(prng: &mut Pcg32) -> Self {
+    fn random(prng: &mut impl Rng) -> Self {
         Note {
             key: prng.random_range(0..128),
             channel: prng.random_range(0..16),
@@ -187,7 +186,7 @@ impl<'a> NoteGenerator<'a> {
     /// Fill an event queue with random events for the next `num_samples` samples. This does not
     /// clear the event queue. If the queue was not empty, then this will do a stable sort after
     /// inserting _all_ events.
-    pub fn generate_events(&mut self, prng: &mut Pcg32, num_samples: u32) -> Vec<Event> {
+    pub fn generate_events(&mut self, prng: &mut impl Rng, num_samples: u32) -> Vec<Event> {
         let mut events = vec![];
         let mut sample = prng.random_range(self.sample_offset_range.clone()).max(0) as u32;
 
@@ -206,7 +205,7 @@ impl<'a> NoteGenerator<'a> {
     /// Generate a random note event for one of the plugin's note ports depending on the port's
     /// capabilities. Returns an error if the plugin doesn't have any note ports or if the note
     /// ports don't support either MIDI or CLAP note events.
-    pub fn generate_event(&mut self, prng: &mut Pcg32, time_offset: u32) -> Option<Event> {
+    pub fn generate_event(&mut self, prng: &mut impl Rng, time_offset: u32) -> Option<Event> {
         if self.config.inputs.is_empty() {
             return None;
         }
@@ -674,7 +673,7 @@ impl<'a> ParamFuzzer<'a> {
     ///
     /// Unlike [`ParamFuzzer::randomize_params_at`], this generates [`Event::ParamMod`] events as well as
     /// generating events at random irregular unsynchronized (between different parameters) intervals.
-    pub fn generate_events(&self, prng: &mut Pcg32, num_samples: u32) -> Vec<Event> {
+    pub fn generate_events(&self, prng: &mut impl Rng, num_samples: u32) -> Vec<Event> {
         let mut events = vec![];
         let mut sample = prng.random_range(self.sample_offset_range.clone()).max(0) as u32;
         while sample < num_samples {
@@ -690,7 +689,7 @@ impl<'a> ParamFuzzer<'a> {
     }
 
     /// Generate a single random parameter change event for one of the plugin's parameters.
-    pub fn generate_event(&self, prng: &mut Pcg32) -> Option<Event> {
+    pub fn generate_event(&self, prng: &mut impl Rng) -> Option<Event> {
         let (param_id, param_info) = self
             .params
             .iter()
@@ -740,7 +739,7 @@ impl<'a> ParamFuzzer<'a> {
 
     /// Randomize _all_ parameters at a certain sample index using **automation**, returning an
     /// iterator yielding automation events for all parameters.
-    pub fn randomize_params_at(&'a self, prng: &'a mut Pcg32, time_offset: u32) -> impl Iterator<Item = Event> + 'a {
+    pub fn randomize_params_at(&'a self, prng: &'a mut impl Rng, time_offset: u32) -> impl Iterator<Item = Event> + 'a {
         self.params.iter().filter_map(move |(param_id, param_info)| {
             // We can send parameter changes for parameters that are not automatable:
             //
@@ -782,7 +781,7 @@ impl<'a> ParamFuzzer<'a> {
         })
     }
 
-    pub fn random_value(param: &Param, prng: &mut Pcg32) -> f64 {
+    pub fn random_value(param: &Param, prng: &mut impl Rng) -> f64 {
         if param.stepped() {
             // We already confirmed that the range starts and ends in an integer when
             // constructing the parameter info
@@ -792,7 +791,7 @@ impl<'a> ParamFuzzer<'a> {
         }
     }
 
-    pub fn random_modulation(param: &Param, prng: &mut Pcg32) -> f64 {
+    pub fn random_modulation(param: &Param, prng: &mut impl Rng) -> f64 {
         let range = (param.range.end() - param.range.start()).abs() * 0.5;
 
         if param.stepped() {
@@ -812,7 +811,7 @@ impl TransportFuzzer {
     }
 
     /// Mutates an existing transport state.
-    pub fn mutate(&mut self, prng: &mut Pcg32, transport: &mut TransportState) {
+    pub fn mutate(&mut self, prng: &mut impl Rng, transport: &mut TransportState) {
         // toggle playback state with 20% probability
         if prng.random_bool(self.probability_change) {
             transport.is_playing = !transport.is_playing;
@@ -888,8 +887,8 @@ impl TransportFuzzer {
     }
 }
 
-pub fn random_layout_requests(config: &AudioPortConfig, prng: &mut Pcg32) -> Vec<AudioPortsRequest<'static>> {
-    fn random_request_info(prng: &mut Pcg32) -> AudioPortsRequestInfo<'static> {
+pub fn random_layout_requests(config: &AudioPortConfig, prng: &mut impl Rng) -> Vec<AudioPortsRequest<'static>> {
+    fn random_request_info(prng: &mut impl Rng) -> AudioPortsRequestInfo<'static> {
         match prng.random_range(0..=4) {
             0 => AudioPortsRequestInfo::Mono,
             1 => AudioPortsRequestInfo::Stereo,

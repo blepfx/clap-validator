@@ -1,6 +1,6 @@
 //! Tests that focus on parameters.
 
-use super::PluginTestCase;
+use super::PluginInstanceTestCase;
 use crate::cli::tracing::{Span, record};
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
@@ -8,7 +8,7 @@ use crate::plugin::ext::params::{Param, ParamInfo, Params};
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::process::{AudioBuffers, Event, InputEventQueue, OutputEventQueue, ProcessScope};
 use crate::tests::rng::{NoteGenerator, ParamFuzzer, new_prng};
-use crate::tests::{TestCase, TestStatus};
+use crate::tests::{TestStatus, temporary_file};
 use anyhow::{Context, Result};
 use clap_sys::events::CLAP_EVENT_PARAM_VALUE;
 use clap_sys::id::clap_id;
@@ -375,10 +375,17 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str, snap_to_b
 
         // If the run failed we'll want to write the parameter values to a file first
         if run_result.is_err() {
-            let (previous_param_values_file_path, previous_param_values_file) =
-                PluginTestCase::ParamFuzzBasic.temporary_file(plugin_id, PREVIOUS_PARAM_VALUES_FILE_NAME)?;
-            let (current_param_values_file_path, current_param_values_file) =
-                PluginTestCase::ParamFuzzBasic.temporary_file(plugin_id, CURRENT_PARAM_VALUES_FILE_NAME)?;
+            let (previous_param_values_file_path, previous_param_values_file) = temporary_file(
+                &PluginInstanceTestCase::ParamFuzzBasic.to_string(),
+                plugin_id,
+                PREVIOUS_PARAM_VALUES_FILE_NAME,
+            )?;
+
+            let (current_param_values_file_path, current_param_values_file) = temporary_file(
+                &PluginInstanceTestCase::ParamFuzzBasic.to_string(),
+                plugin_id,
+                CURRENT_PARAM_VALUES_FILE_NAME,
+            )?;
 
             serde_json::to_writer_pretty(
                 previous_param_values_file,

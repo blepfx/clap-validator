@@ -124,12 +124,11 @@ impl<'lib> Plugin<'lib> {
             panic!("An audio thread is already running for this plugin instance.");
         }
 
-        let result = crossbeam::scope(|s| {
+        let result = std::thread::scope(|s| {
             let shared = self.shared.clone();
-            let audio_thread = s
-                .builder()
+            let audio_thread = std::thread::Builder::new()
                 .name("audio".into())
-                .spawn(|_| f(PluginAudioThread::new(shared)))
+                .spawn_scoped(s, || f(PluginAudioThread::new(shared)))
                 .unwrap();
 
             while let Ok(task) = self.task_receiver.recv() {
@@ -144,7 +143,7 @@ impl<'lib> Plugin<'lib> {
         });
 
         self.poll_callback_unchecked();
-        result.unwrap_or_else(|e| resume_unwind(e))
+        result
     }
 
     /// Initialize the plugin. This needs to be called before doing anything else.

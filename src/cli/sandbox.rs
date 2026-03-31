@@ -1,5 +1,6 @@
 use crate::cli::timebase;
 use crate::commands::Verbosity;
+use crate::fuzz::SandboxedFuzzerChunk;
 use crate::plugin::index::SandboxedScanLibrary;
 use crate::validator::SandboxedValidation;
 use anyhow::{Context, Result};
@@ -95,6 +96,7 @@ impl SandboxPayload {
         match self.sandbox_id.as_str() {
             SandboxedScanLibrary::ID => dispatch::<SandboxedScanLibrary>(&self)?,
             SandboxedValidation::ID => dispatch::<SandboxedValidation>(&self)?,
+            SandboxedFuzzerChunk::ID => dispatch::<SandboxedFuzzerChunk>(&self)?,
             _ => anyhow::bail!("Unknown sandbox ID"),
         };
 

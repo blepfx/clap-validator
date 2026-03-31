@@ -13,7 +13,9 @@ use crate::plugin::ext::thread_pool::ThreadPool;
 use crate::plugin::ext::voice_info::VoiceInfo;
 use crate::plugin::instance::{CallbackEvent, MainThreadTask, Plugin, PluginStatus};
 use crate::plugin::preset_discovery::LocationValue;
-use crate::plugin::util::{self, CHECK_POINTER, Proxy, Proxyable, clap_call, cstr_ptr_to_string, validator_version};
+use crate::plugin::util::{
+    self, CHECK_POINTER, IteratorExt, Proxy, Proxyable, clap_call, cstr_ptr_to_string, validator_version,
+};
 use anyhow::{Context, Result};
 use clap_sys::ext::audio_ports::*;
 use clap_sys::ext::audio_ports_config::{CLAP_EXT_AUDIO_PORTS_CONFIG, clap_host_audio_ports_config};
@@ -33,8 +35,7 @@ use clap_sys::host::clap_host;
 use clap_sys::id::clap_id;
 use clap_sys::plugin::clap_plugin;
 use clap_sys::version::CLAP_VERSION;
-use crossbeam::atomic::AtomicCell;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use crossbeam_utils::atomic::AtomicCell;
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr::NonNull;
 use std::sync::Mutex;
@@ -767,11 +768,11 @@ impl PluginShared {
             // We already checked that we're on the audio thread, so this is sufficient
             anyhow::ensure!(
                 this.is_currently_in_process_call.load(),
-                "May only be called from within the audio thread's 'clap_plugin::process' function."
+                "Must only be called from within the 'clap_plugin::process' function."
             );
 
             let extension = this.get_extension::<ThreadPool>().unwrap();
-            (0..num_tasks).into_par_iter().for_each(|index| extension.exec(index));
+            (0..num_tasks).parallelize(None, |index| extension.exec(index));
             Ok(true)
         })
         .unwrap_or(false)

@@ -6,6 +6,7 @@ use clap_sys::ext::thread_pool::{CLAP_EXT_THREAD_POOL, clap_plugin_thread_pool};
 use std::ffi::CStr;
 use std::ptr::NonNull;
 
+#[derive(Clone, Copy)]
 pub struct ThreadPool<'a> {
     plugin: &'a PluginShared,
     tail: NonNull<clap_plugin_thread_pool>,

@@ -10,8 +10,8 @@ use clap_sys::entry::clap_plugin_entry;
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
 use clap_sys::factory::preset_discovery::{CLAP_PRESET_DISCOVERY_FACTORY_ID, clap_preset_discovery_factory};
 use clap_sys::plugin::clap_plugin_descriptor;
-use clap_sys::version::clap_version;
-use crossbeam::atomic::AtomicCell;
+use clap_sys::version::{clap_version, clap_version_is_compatible};
+use crossbeam_utils::atomic::AtomicCell;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::ffi::CString;
@@ -157,6 +157,16 @@ impl PluginLibrary {
         // The entry point needs to be initialized before it can be used. It will be deinitialized
         // when the `Plugin` object is dropped.
         let entry_point = get_clap_entry_point(&library)?;
+
+        if !clap_version_is_compatible(entry_point.clap_version) {
+            anyhow::bail!(
+                "Unsupported CLAP version ({}.{}.{})",
+                entry_point.clap_version.major,
+                entry_point.clap_version.minor,
+                entry_point.clap_version.revision
+            );
+        }
+
         let result = unsafe {
             clap_call! { entry_point=>init(path_cstring.as_ptr()) }
         };

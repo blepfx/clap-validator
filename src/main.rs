@@ -4,6 +4,7 @@ use yansi::Paint;
 
 mod cli;
 mod commands;
+mod fuzz;
 mod plugin;
 mod tests;
 mod validator;
@@ -11,18 +12,25 @@ mod validator;
 fn main() -> ExitCode {
     let args = <Arguments as clap::Parser>::parse();
 
-    // Before doing anything, we need to make sure any temporary artifact files from the previous
-    // run are cleaned up. These are used for things like state dumps when one of the state tests
-    // fail. This is allowed to fail since the directory may not exist and even if it does and we
-    // cannot remove it, then that may not be a problem.
-    let _ = std::fs::remove_dir_all(cli::validator_temp_dir());
-    let _ = std::fs::create_dir_all(cli::validator_temp_dir());
+    if !matches!(args.command, Command::Sandbox(_)) {
+        // Before doing anything, we need to make sure any temporary artifact files from the previous
+        // run are cleaned up. These are used for things like state dumps when one of the state tests
+        // fail. This is allowed to fail since the directory may not exist and even if it does and we
+        // cannot remove it, then that may not be a problem.
+        let _ = std::fs::remove_dir_all(cli::validator_temp_dir());
+        let _ = std::fs::create_dir_all(cli::validator_temp_dir());
+    }
 
     // begin instrumentation if enabled
     let trace_path = cli::validator_temp_dir().join("trace.json");
-    let trace_enabled = matches!(&args.command, Command::Validate(settings) if settings.trace);
+    let trace_enabled = match &args.command {
+        Command::Validate(settings) => settings.trace,
+        Command::Fuzz(settings) => settings.trace,
+        _ => false,
+    };
+
     if trace_enabled {
-        cli::tracing::install(trace_path.to_str().unwrap());
+        cli::tracing::install(&trace_path);
     }
 
     // setup logging
@@ -45,7 +53,8 @@ fn main() -> ExitCode {
     }
 
     let result = match args.command {
-        Command::Validate(settings) => commands::validate::validate(args.verbosity, &settings),
+        Command::Validate(settings) => commands::validate::validate(args.verbosity, settings),
+        Command::Fuzz(settings) => commands::fuzz::fuzz(args.verbosity, settings),
         Command::List(command) => commands::list::list(args.verbosity, command),
         Command::Sandbox(payload) => payload.dispatch().map(|_| ExitCode::SUCCESS),
     };

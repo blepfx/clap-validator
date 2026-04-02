@@ -278,6 +278,7 @@ pub fn test_param_set_events(library: &PluginLibrary, plugin_id: &str, null_cook
             let mut buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
             let mut process = ProcessScope::new(&plugin, &mut buffers)?;
 
+            plugin.poll_callback();
             process.add_events(param_events);
             process.run()
         })?;
@@ -365,6 +366,7 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str, snap_to_b
             process.add_events(current_events.clone().unwrap());
 
             for _ in 0..FUZZ_RUNS_PER_PERMUTATION {
+                plugin.poll_callback();
                 process.audio_buffers().fill_white_noise(&mut prng);
                 process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
                 process.run()?;
@@ -485,6 +487,7 @@ pub fn test_param_fuzz_sample_accurate(library: &PluginLibrary, plugin_id: &str)
 
                 // Audio and MIDI/note events are randomized in accordance to what the plugin
                 // supports
+                plugin.poll_callback();
                 process.audio_buffers().fill_white_noise(&mut prng);
                 process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
                 process.run()?;
@@ -536,6 +539,7 @@ pub fn test_param_fuzz_modulation(library: &PluginLibrary, plugin_id: &str) -> R
     plugin.on_audio_thread(|plugin| -> Result<()> {
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
+        plugin.poll_callback();
         process.audio_buffers().fill_white_noise(&mut prng);
         process.add_events(param_fuzzer.generate_events(&mut prng, process.max_block_size()));
         process.add_events(note_rng.generate_events(&mut prng, process.max_block_size()));
@@ -594,6 +598,7 @@ pub fn test_param_set_wrong_namespace(library: &PluginLibrary, plugin_id: &str) 
         let mut buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
         let mut process = ProcessScope::new(&plugin, &mut buffers)?;
 
+        plugin.poll_callback();
         process.audio_buffers().fill_white_noise(&mut prng);
         process.add_events(random_param_set_events);
         process.run()

@@ -662,6 +662,11 @@ impl<'a> ParamFuzzer<'a> {
         }
     }
 
+    pub fn with_sample_offset_range(mut self, range: RangeInclusive<i32>) -> Self {
+        self.sample_offset_range = range;
+        self
+    }
+
     pub fn snap_to_bounds(mut self) -> Self {
         self.snap_to_bounds = true;
         self

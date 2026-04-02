@@ -224,6 +224,7 @@ pub fn test_layout_audio_ports_config(library: &PluginLibrary, plugin_id: &str) 
                 let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
                 for _ in 0..5 {
+                    plugin.poll_callback();
                     process.audio_buffers().fill_white_noise(&mut prng);
                     process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
                     process.run()?;
@@ -409,6 +410,7 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
                 let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
                 for _ in 0..5 {
+                    plugin.poll_callback();
                     process.audio_buffers().fill_white_noise(&mut prng);
                     process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
                     process.run()?;
@@ -572,6 +574,7 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
                         }
                     }
 
+                    plugin.poll_callback();
                     process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
                     process.run_with(ProcessRun {
                         block_size: BUFFER_SIZE,

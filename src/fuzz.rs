@@ -1,62 +1,134 @@
 mod runner;
 
 use crate::cli::sandbox::{SandboxConfig, SandboxOperation};
+use crate::cli::{IteratorExt, panic_message};
 use crate::commands::Verbosity;
 use crate::commands::fuzz::FuzzSettings;
-use crate::plugin::util::IteratorExt;
 use anyhow::{Context, Result};
-use rand::Rng;
+use radix_fmt::radix;
+use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-pub trait FuzzerCli {
-    fn verbosity(&self) -> Verbosity;
-    fn settings(&self) -> &FuzzSettings;
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[serde(tag = "type")]
+pub enum FuzzStatus {
+    Success,
+    Failed { details: String },
+    Crashed { details: String },
 }
 
-pub fn fuzz(cli: impl FuzzerCli) -> Result<()> {
-    let settings = cli.settings();
-    let verbosity = cli.verbosity();
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct FuzzResult {
+    pub status: FuzzStatus,
+    pub library: PathBuf,
+    pub plugin_id: String,
+    pub seed: u64,
+}
 
+impl FuzzStatus {
+    pub fn details(&self) -> Option<&str> {
+        match self {
+            FuzzStatus::Success => None,
+            FuzzStatus::Failed { details } | FuzzStatus::Crashed { details } => Some(details),
+        }
+    }
+}
+
+pub fn fuzz(verbosity: Verbosity, settings: &FuzzSettings) -> Result<Vec<FuzzResult>> {
     let plugins = discover(&settings.paths, settings.plugin_id.as_deref())?;
-
     if plugins.is_empty() {
         anyhow::bail!("No plugins selected");
     }
 
     if let Some(seed) = settings.reproduce {
         if plugins.len() > 1 {
-            anyhow::bail!("Choose a single plugin when using --reproduce");
+            let plugins = plugins
+                .iter()
+                .map(|(library, plugin_id)| format!("\n - {} ({})", library.display(), plugin_id))
+                .collect::<Vec<_>>()
+                .join("");
+
+            anyhow::bail!("Choose one out of: {}", plugins);
         }
 
         let (library, plugin_id) = &plugins[0];
-        runner::run_fuzzer(library, plugin_id, seed)?;
-        return Ok(());
+        let status = SandboxedFuzzChunk {
+            library: library.clone(),
+            plugin_id: plugin_id.clone(),
+            seed,
+        }
+        .run();
+
+        return Ok(vec![FuzzResult {
+            status,
+            library: library.clone(),
+            plugin_id: plugin_id.clone(),
+            seed,
+        }]);
     }
 
     // round robin over the plugins until we run out of time
     let start = Instant::now();
-    let mut prng = runner::new_seeded_prng();
+    let running = AtomicBool::new(true);
+    let mut results = vec![];
+    let mut prng = new_orchestrator_prng();
 
-    std::iter::repeat(plugins)
+    std::iter::repeat(&plugins)
         .flatten()
-        .map(|(library, plugin_id)| (library, plugin_id, prng.next_u64())) // this is also kinda goofy
-        .take_while(|_| settings.duration.is_none_or(|duration| start.elapsed() < duration))
-        .parallelize(settings.jobs, |(library, plugin_id, seed)| {
-            SandboxedFuzzerChunk {
-                library: library.clone(),
-                plugin_id: plugin_id.clone(),
-                seed,
-            }
-            .invoke(Some(SandboxConfig {
-                verbosity,
-                hide_output: settings.hide_output,
-                timeout: None,
-            }))
-        });
+        .map(|(library, plugin_id)| (library, plugin_id, prng.next_u64()))
+        .take_while(|_| settings.duration.is_none_or(|duration| start.elapsed() < duration)) // run while we have time
+        .take_while(|_| running.load(Ordering::Relaxed)) // stop if we found a result
+        .parallel_fold(
+            settings.jobs,
+            |(library, plugin_id, seed)| {
+                let status = SandboxedFuzzChunk {
+                    library: library.clone(),
+                    plugin_id: plugin_id.clone(),
+                    seed,
+                }
+                .run_sandboxed(SandboxConfig {
+                    verbosity,
+                    hide_output: true,
+                    timeout: Some(std::time::Duration::from_secs(30)),
+                })
+                .unwrap_or_else(|err| FuzzStatus::Crashed {
+                    details: err.to_string(),
+                });
 
-    Ok(())
+                FuzzResult {
+                    status,
+                    library: library.clone(),
+                    plugin_id: plugin_id.clone(),
+                    seed,
+                }
+            },
+            |chunk| {
+                if chunk.status != FuzzStatus::Success {
+                    log::error!(
+                        "{} ({}, seed {})",
+                        chunk.status.details().unwrap_or_default(),
+                        chunk.plugin_id,
+                        radix(chunk.seed, 36),
+                    );
+
+                    results.push(chunk);
+
+                    if results.len() >= settings.limit {
+                        running.store(false, Ordering::Relaxed);
+                    }
+                } else {
+                    log::debug!("OK '{}' (seed {})", chunk.plugin_id, radix(chunk.seed, 36));
+                }
+            },
+        );
+
+    Ok(results)
 }
 
 /// Scan the paths for plugins and return the paths and plugin IDs of the plugins that should be fuzzed.
@@ -64,8 +136,7 @@ fn discover(paths: &[PathBuf], plugin_id: Option<&str>) -> Result<Vec<(PathBuf, 
     let mut result = Vec::new();
 
     for path in paths {
-        let library = crate::plugin::library::PluginLibrary::load(path)
-            .with_context(|| format!("Could not load the plugin library at '{}'", path.display()))?;
+        let library = crate::plugin::library::PluginLibrary::load(path)?;
 
         let metadata = library
             .metadata()
@@ -81,22 +152,40 @@ fn discover(paths: &[PathBuf], plugin_id: Option<&str>) -> Result<Vec<(PathBuf, 
     Ok(result)
 }
 
+/// Creates a new PRNG that is seeded with the current time.
+///
+/// Used for generating the seeds for child PRNGs
+fn new_orchestrator_prng() -> rand::rngs::Xoshiro128PlusPlus {
+    let time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+
+    rand::rngs::Xoshiro128PlusPlus::from_seed(time.to_le_bytes())
+}
+
 #[derive(Serialize, Deserialize)]
-pub struct SandboxedFuzzerChunk {
+pub struct SandboxedFuzzChunk {
     library: PathBuf,
     plugin_id: String,
     seed: u64,
 }
 
-impl SandboxOperation for SandboxedFuzzerChunk {
+impl SandboxOperation for SandboxedFuzzChunk {
     const ID: &'static str = "fuzz";
-    type Result = runner::FuzzResult;
+    type Result = FuzzStatus;
 
     fn run(&self) -> Self::Result {
-        match runner::run_fuzzer(&self.library, &self.plugin_id, self.seed) {
-            Ok(result) => result,
-            Err(err) => runner::FuzzResult::Error {
-                details: format!("{:#}", err),
+        match catch_unwind(AssertUnwindSafe(|| {
+            runner::run_fuzzer(&self.library, &self.plugin_id, self.seed)
+        })) {
+            Ok(Ok(result)) => result,
+            Ok(Err(err)) => {
+                let err = err.chain().map(|x| x.to_string()).collect::<Vec<_>>().join("\n");
+                FuzzStatus::Failed { details: err }
+            }
+            Err(panic) => FuzzStatus::Crashed {
+                details: panic_message(&*panic),
             },
         }
     }

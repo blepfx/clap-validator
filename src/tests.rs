@@ -15,7 +15,7 @@ use std::time::Duration;
 
 mod plugin_instance;
 mod plugin_library;
-mod rng;
+pub mod rng;
 
 pub use plugin_instance::PluginInstanceTestCase;
 pub use plugin_library::PluginLibraryTestCase;

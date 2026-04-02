@@ -1,9 +1,18 @@
+use crate::cli::{Report, ReportItem};
 use crate::commands::Verbosity;
+use crate::fuzz::{FuzzResult, FuzzStatus};
 use anyhow::Result;
 use clap::Args;
+use radix_fmt::radix;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
+use std::vec;
+use yansi::Paint;
+
+fn parse_seed(str: &str) -> Result<u64, &'static str> {
+    u64::from_str_radix(str, 36).map_err(|_| "invalid seed format")
+}
 
 fn parse_duration(mut str: &str) -> Result<Duration, &'static str> {
     if str.is_empty() {
@@ -12,9 +21,9 @@ fn parse_duration(mut str: &str) -> Result<Duration, &'static str> {
 
     let mut duration = Duration::from_secs(0);
     while !str.is_empty() {
-        str = str.trim_ascii_start();
-
-        let (num, rest) = str.split_at(str.find(|c: char| !c.is_ascii_digit()).unwrap_or(str.len()));
+        let (num, rest) = str
+            .trim_ascii_start()
+            .split_at(str.find(|c: char| !c.is_ascii_digit()).unwrap_or(str.len()));
         let (unit, rest) = rest
             .trim_ascii_start()
             .split_at(rest.find(|c: char| c.is_ascii_digit()).unwrap_or(rest.len()));
@@ -41,6 +50,7 @@ pub struct FuzzSettings {
     /// Paths to one or more plugins that should be fuzzed.
     #[arg(required = true)]
     pub paths: Vec<PathBuf>,
+
     /// Only fuzz plugins with this ID.
     ///
     /// If the plugin library contains multiple plugins, then you can pass a single plugin's ID
@@ -48,14 +58,10 @@ pub struct FuzzSettings {
     /// fuzzed.
     #[arg(short = 'p', long)]
     pub plugin_id: Option<String>,
+
     /// Print the test output as JSON instead of human readable text.
     #[arg(long)]
     pub json: bool,
-    /// When running the validation out-of-process, hide the plugin's output.
-    ///
-    /// This can be useful for validating noisy plugins.
-    #[arg(long)]
-    pub hide_output: bool,
 
     /// Run the fuzzer for this long before stopping.
     /// By default it will run until stopped manually via Ctrl+C.
@@ -68,11 +74,11 @@ pub struct FuzzSettings {
     #[arg(long, short = 'j')]
     pub jobs: Option<usize>,
 
-    /// Run the fuzzer with this random seed _in-process_.
+    /// Run the fuzzer with this random seed in-process.
     ///
     /// This will run a single deterministic fuzzing chunk that will execute the same sequence of calls every time.
-    /// Useful for reproducing an error/crash produced by the fuzzer.
-    #[arg(long, conflicts_with = "jobs", conflicts_with = "duration")]
+    /// Useful for reproducing an error/crash produced by the out-of-process fuzzer.
+    #[arg(long, short = 'r', value_parser = parse_seed, conflicts_with = "jobs", conflicts_with = "duration")]
     pub reproduce: Option<u64>,
 
     /// When running the validation in-process, emit a JSON trace file that can be viewed with
@@ -81,26 +87,55 @@ pub struct FuzzSettings {
     /// This has a non-negligible performance impact.
     #[arg(long, requires = "reproduce")]
     pub trace: bool,
+
+    /// How many errors to collect before stopping the fuzzer.
+    #[arg(long, short = 'l', default_value = "1")]
+    pub limit: usize,
 }
 
 /// The main fuzzer command. This will fuzz one or more plugins and print the results.
 pub fn fuzz(verbosity: Verbosity, settings: FuzzSettings) -> Result<ExitCode> {
-    crate::fuzz::fuzz(FuzzerCli { verbosity, settings })?;
+    let result = crate::fuzz::fuzz(verbosity, &settings)?;
 
-    Ok(ExitCode::SUCCESS)
-}
-
-struct FuzzerCli {
-    verbosity: Verbosity,
-    settings: FuzzSettings,
-}
-
-impl crate::fuzz::FuzzerCli for FuzzerCli {
-    fn verbosity(&self) -> Verbosity {
-        self.verbosity
+    if settings.json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else if result.is_empty() {
+        eprintln!("{}: fuzzing finished successfully", "OK".green().bold());
+    } else {
+        pretty_print(&result);
     }
 
-    fn settings(&self) -> &FuzzSettings {
-        &self.settings
+    if result.iter().all(|result| result.status == FuzzStatus::Success) {
+        Ok(ExitCode::SUCCESS)
+    } else {
+        Ok(ExitCode::FAILURE)
+    }
+}
+
+pub fn pretty_print(result: &[FuzzResult]) {
+    for result in result {
+        let status_text = match result.status {
+            FuzzStatus::Success => "OK".green(),
+            FuzzStatus::Failed { .. } => "FAILED".red(),
+            FuzzStatus::Crashed { .. } => "CRASHED".red().bold(),
+        };
+
+        let details = match &result.status {
+            FuzzStatus::Success => None,
+            FuzzStatus::Failed { details } => Some(details),
+            FuzzStatus::Crashed { details } => Some(details),
+        };
+
+        let mut report = Report {
+            header: result.plugin_id.to_string(),
+            footer: vec![status_text.to_string(), radix(result.seed, 36).dim().to_string()],
+            items: vec![],
+        };
+
+        if let Some(details) = details {
+            report.items.push(ReportItem::Text(details.to_string()));
+        }
+
+        eprintln!("\n{}", report);
     }
 }

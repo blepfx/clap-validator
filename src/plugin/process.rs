@@ -8,6 +8,7 @@ mod events;
 mod transport;
 
 pub use buffer::*;
+use either::Either;
 pub use events::*;
 pub use transport::*;
 
@@ -20,6 +21,7 @@ pub struct ProcessScope<'a> {
 
     transport: TransportState,
     sample_rate: f64,
+    min_buffer_size: u32,
 }
 
 #[derive(Debug)]
@@ -36,13 +38,14 @@ pub struct ProcessRun {
 
 impl<'a> ProcessScope<'a> {
     pub fn new(plugin: &'a PluginAudioThread, buffer: &'a mut AudioBuffers) -> Result<Self> {
-        Self::with_sample_rate(plugin, buffer, 44100.0)
+        Self::with_config(plugin, buffer, 44100.0, 1)
     }
 
-    pub fn with_sample_rate(
+    pub fn with_config(
         plugin: &'a PluginAudioThread,
         buffer: &'a mut AudioBuffers,
         sample_rate: f64,
+        min_buffer_size: u32,
     ) -> Result<Self> {
         plugin.status().assert_is(PluginStatus::Deactivated);
 
@@ -53,6 +56,7 @@ impl<'a> ProcessScope<'a> {
             events_output: OutputEventQueue::new(),
             transport: TransportState::dummy(),
             sample_rate,
+            min_buffer_size,
         })
     }
 
@@ -62,6 +66,10 @@ impl<'a> ProcessScope<'a> {
 
     pub fn max_block_size(&self) -> u32 {
         self.buffer.samples()
+    }
+
+    pub fn wants_restart(&self) -> bool {
+        self.plugin.shared().requested_restart.load()
     }
 
     pub fn add_events(&mut self, events: impl IntoIterator<Item = Event>) {
@@ -108,11 +116,12 @@ impl<'a> ProcessScope<'a> {
         if self.plugin.status() == PluginStatus::Deactivated {
             self.plugin.shared().requested_restart.store(false);
 
+            let min_buffer_size = self.min_buffer_size;
             let sample_rate = self.sample_rate;
             let buffer_size = self.buffer.samples();
 
             self.plugin
-                .on_main_thread(move |plugin| plugin.activate(sample_rate, 1, buffer_size))?;
+                .on_main_thread(move |plugin| plugin.activate(sample_rate, min_buffer_size, buffer_size))?;
         }
 
         // start processing if needed
@@ -165,6 +174,8 @@ impl<'a> ProcessScope<'a> {
     }
 
     pub fn restart(&mut self) {
+        self.plugin.shared().requested_restart.store(false);
+
         if self.plugin.status() == PluginStatus::Processing {
             self.plugin.stop_processing();
         }
@@ -212,6 +223,17 @@ fn check_process_call_consistency(
             AudioBufferPort::Output(port_idx) | AudioBufferPort::Inplace(_, port_idx) => {
                 if run.output_ignore_mask & (1 << port_idx) != 0 {
                     continue;
+                }
+
+                for i in 0..buffer.channels() {
+                    if buffer.get_output_constant_mask().is_channel_constant(i)
+                        && let Err(e) = check_channel_quiet(buffer.channel(i), true)
+                    {
+                        anyhow::bail!(
+                            "The output channel {i} of port {port_idx} is not constant despite the constant flag \
+                             being set ({e:.2} dBFS)."
+                        );
+                    }
                 }
 
                 let maybe_non_finite = (0..buffer.channels())
@@ -279,4 +301,34 @@ fn check_process_call_consistency(
     }
 
     Ok(())
+}
+
+/// A channel is considered quiet if the signal is below -60 dbfs, ignoring DC.
+///
+/// This function is designed to be very lenient in what it considers "quiet", to avoid false positives.
+/// Returns `Ok(())` if the channel is quiet, or `Err(max_amplitude_in_db)` if not.
+pub fn check_channel_quiet(channel: Either<&[f32], &[f64]>, ignore_dc: bool) -> Result<(), f64> {
+    /// -60 dbfs
+    const QUIET_THRESHOLD: f64 = 0.001;
+
+    let (min, max) = match channel {
+        Either::Right(x) => x.iter().fold((f64::MAX, f64::MIN), |(min, max), &sample| {
+            (min.min(sample.abs()), max.max(sample.abs()))
+        }),
+        Either::Left(x) => {
+            let (min, max) = x.iter().fold((f32::MAX, f32::MIN), |(min, max), &sample| {
+                (min.min(sample.abs()), max.max(sample.abs()))
+            });
+
+            (min as f64, max as f64)
+        }
+    };
+
+    let range = if ignore_dc { (max - min) * 0.5 } else { max.max(-min) };
+
+    if range < QUIET_THRESHOLD {
+        Ok(())
+    } else {
+        Err(20.0 * range.log10())
+    }
 }

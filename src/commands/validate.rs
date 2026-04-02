@@ -37,7 +37,7 @@ pub struct ValidatorSettings {
     /// When running the validation out-of-process, hide the plugin's output.
     ///
     /// This can be useful for validating noisy plugins.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "in_process")]
     pub hide_output: bool,
     /// Only show failed tests.
     ///
@@ -136,7 +136,7 @@ fn pretty_print(result: &ValidationResult, tally: &ValidationTally) {
                 );
             }
 
-            TestGroup::PluginInstance(library_path, plugin_id) => {
+            TestGroup::PluginInstance(_, plugin_id) => {
                 let mut items = vec![ReportItem::Text(plugin_id.clone())];
 
                 for test in &tests {

@@ -29,13 +29,13 @@ mod scanning;
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
 pub enum PluginLibraryTestCase {
+    QueryNonexistentFactory,
+    CreateIdWithTrailingGarbage,
+    ScanRtldNow,
+    ScanTime,
     PresetDiscoveryCrawl,
     PresetDiscoveryDescriptorConsistency,
     PresetDiscoveryLoad,
-    ScanTime,
-    ScanRtldNow,
-    QueryNonexistentFactory,
-    CreateIdWithTrailingGarbage,
 }
 
 impl PluginLibraryTestCase {

@@ -469,7 +469,6 @@ fn resolve_in_place_pairs(config: &AudioPortConfig) -> Result<Vec<AudioBufferPor
     fn is_same_layout(port: &AudioPort, other: &AudioPort) -> bool {
         port.channel_count == other.channel_count
             && port.port_type == other.port_type
-            && port.is_main == other.is_main
             && port.supports_double_sample_size == other.supports_double_sample_size
             && port.requires_common_sample_size == other.requires_common_sample_size
             && port.prefers_double_sample_size == other.prefers_double_sample_size

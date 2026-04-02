@@ -1,9 +1,9 @@
 //! Commands for listing information about the validator or installed plugins.
 
 use crate::Verbosity;
+use crate::cli::IteratorExt;
 use crate::cli::sandbox::{SandboxConfig, SandboxOperation};
 use crate::plugin::index::{SandboxedScanLibrary, ScanStatus, index_plugins};
-use crate::plugin::util::IteratorExt;
 use anyhow::{Context, Result};
 use clap::Subcommand;
 use serde::Serialize;
@@ -24,7 +24,7 @@ pub enum ListCommand {
         #[arg(long)]
         in_process: bool,
         /// When running the scans out-of-process, hide the plugin's output.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "in_process")]
         hide_output: bool,
         /// Paths to one or more plugins that should be loaded and scanned, optional.
         ///
@@ -40,7 +40,7 @@ pub enum ListCommand {
         #[arg(long)]
         in_process: bool,
         /// When running the scans out-of-process, hide the plugin's output.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "in_process")]
         hide_output: bool,
         /// Paths to one or more plugins that should be indexed for presets, optional.
         ///
@@ -100,7 +100,7 @@ fn list_presets(
 
     let results = plugins
         .into_iter()
-        .parallelize(in_process.then_some(1), |path| {
+        .parallel_map(in_process.then_some(1), |path| {
             scan_single(path, in_process, true, hide_output, verbosity)
         })
         .collect::<Result<BTreeMap<_, _>>>()?;
@@ -132,7 +132,7 @@ fn list_plugins(
 
     let results = plugins
         .into_iter()
-        .parallelize(in_process.then_some(1), |path| {
+        .parallel_map(in_process.then_some(1), |path| {
             scan_single(path, in_process, false, hide_output, verbosity)
         })
         .collect::<Result<BTreeMap<_, _>>>()?;
@@ -199,19 +199,18 @@ fn scan_single(
         scan_presets,
     };
 
-    let result = request
-        .invoke(if in_process {
-            None
-        } else {
-            Some(SandboxConfig {
+    let result = match in_process {
+        true => request.run(),
+        false => request
+            .run_sandboxed(SandboxConfig {
                 verbosity,
                 hide_output,
                 timeout: Some(std::time::Duration::from_secs(10)),
             })
-        })
-        .unwrap_or_else(|err| ScanStatus::Crashed {
-            details: err.to_string(),
-        });
+            .unwrap_or_else(|err| ScanStatus::Crashed {
+                details: err.to_string(),
+            }),
+    };
 
     Ok((path, result))
 }

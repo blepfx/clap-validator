@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use std::ffi::{CStr, CString, c_char, c_void};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 /// Call a CLAP function. This is needed because even though none of CLAP's functions are allowed to
 /// be null pointers, people will still use null pointers for some of the function arguments. This
@@ -257,48 +257,5 @@ mod proxy {
         fn drop(&mut self) {
             untrack(&self.vtable);
         }
-    }
-}
-
-impl<T: ?Sized> IteratorExt for T where T: Iterator {}
-pub trait IteratorExt: Iterator {
-    /// Map this iterator in parallel using the given number of worker threads.
-    fn parallelize<R: Send>(
-        self,
-        workers: Option<usize>,
-        f: impl Fn(Self::Item) -> R + Send + Sync,
-    ) -> std::vec::IntoIter<R>
-    where
-        Self: Sized + Send,
-        Self::Item: Send,
-    {
-        let workers = match workers {
-            Some(n) => n,
-            None => std::thread::available_parallelism().map_or(1, |n| n.get()),
-        };
-
-        if workers <= 1 {
-            return self.map(f).collect::<Vec<_>>().into_iter();
-        }
-
-        let (min, max) = self.size_hint();
-        let threads = max.map_or(workers, |max| max.min(workers));
-        let outputs = Mutex::new(Vec::with_capacity(min));
-        let inputs = Mutex::new(self);
-
-        std::thread::scope(|scope| {
-            for _ in 0..threads {
-                scope.spawn(|| {
-                    loop {
-                        let item = inputs.lock().unwrap().next();
-                        let Some(item) = item else { break };
-                        let output = f(item);
-                        outputs.lock().unwrap().push(output);
-                    }
-                });
-            }
-        });
-
-        outputs.into_inner().unwrap().into_iter()
     }
 }

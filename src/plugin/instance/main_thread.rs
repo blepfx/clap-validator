@@ -9,12 +9,6 @@ use std::marker::PhantomData;
 use std::panic::resume_unwind;
 use std::sync::mpsc::Receiver;
 
-pub enum MainThreadTask {
-    Dispatch(Box<dyn FnOnce(&Plugin) + Send>),
-    CallbackRequest,
-    StopAudioThread,
-}
-
 /// A CLAP plugin instance. The plugin will be deinitialized when this object is dropped. All
 /// functions here are callable only from the main thread. Use the
 /// [`on_audio_thread()`][Self::on_audio_thread()] method to spawn an audio thread.
@@ -23,7 +17,6 @@ pub enum MainThreadTask {
 /// correct state.
 pub struct Plugin<'lib> {
     pub(super) callback_receiver: Receiver<CallbackEvent>,
-    pub(super) task_receiver: Receiver<MainThreadTask>,
 
     /// Information about this plugin instance stored on the host. This keeps track of things like
     /// audio thread IDs, whether the plugin has pending callbacks, and what state it is in.
@@ -124,19 +117,17 @@ impl<'lib> Plugin<'lib> {
             panic!("An audio thread is already running for this plugin instance.");
         }
 
+        let (sender, receiver) = std::sync::mpsc::channel();
+
         let result = std::thread::scope(|s| {
             let shared = self.shared.clone();
             let audio_thread = std::thread::Builder::new()
                 .name("audio".into())
-                .spawn_scoped(s, || f(PluginAudioThread::new(shared)))
+                .spawn_scoped(s, || f(PluginAudioThread::new(shared, sender)))
                 .unwrap();
 
-            while let Ok(task) = self.task_receiver.recv() {
-                match task {
-                    MainThreadTask::Dispatch(callback) => callback(self),
-                    MainThreadTask::CallbackRequest => self.poll_callback_unchecked(),
-                    MainThreadTask::StopAudioThread => break,
-                }
+            while let Ok(task) = receiver.recv() {
+                task(self)?;
             }
 
             audio_thread.join().unwrap_or_else(|e| resume_unwind(e))
@@ -236,7 +227,8 @@ impl<'lib> Plugin<'lib> {
         self.shared.set_status(PluginStatus::Deactivated);
     }
 
-    fn poll_callback_unchecked(&self) {
+    /// Same as [`poll_callback()`][Self::poll_callback()] but does not check for callback errors, and does not process callback events.
+    pub fn poll_callback_unchecked(&self) {
         // 10 iterations, then bail
         for _ in 0..10 {
             if !self.shared.requested_callback.swap(false) {

@@ -3,10 +3,9 @@
 
 use crate::Verbosity;
 use crate::cli::sandbox::{SandboxConfig, SandboxOperation};
-use crate::cli::{Config, panic_message};
+use crate::cli::{Config, IteratorExt, panic_message};
 use crate::commands::validate::ValidatorSettings;
 use crate::plugin::library::PluginLibrary;
-use crate::plugin::util::IteratorExt;
 use crate::tests::{PluginInstanceTestCase, PluginLibraryTestCase, TestCase, TestGroup, TestResult, TestStatus};
 use anyhow::{Context, Result};
 use regex_lite::Regex;
@@ -124,7 +123,7 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings, config: &Con
 
     let mut results = tests
         .into_iter()
-        .parallelize(workers, |test| run_test(verbosity, settings, test))
+        .parallel_map(workers, |test| run_test(verbosity, settings, test))
         .collect::<Result<Vec<_>>>()?;
 
     results.sort_unstable_by(|a, b| a.test.cmp(&b.test));
@@ -139,20 +138,24 @@ pub fn validate(verbosity: Verbosity, settings: &ValidatorSettings, config: &Con
 /// Run a single test case with the specified settings.
 fn run_test(verbosity: Verbosity, settings: &ValidatorSettings, test: TestCase) -> Result<TestResult> {
     let start = Instant::now();
-    let (status, duration) = SandboxedValidation(test.clone())
-        .invoke((!settings.in_process).then_some(SandboxConfig {
-            verbosity,
-            hide_output: settings.hide_output,
-            timeout: Some(Duration::from_secs(45)),
-        }))
-        .unwrap_or_else(|err| {
-            (
-                TestStatus::Crashed {
-                    details: err.to_string(),
-                },
-                start.elapsed(),
-            )
-        });
+    let validation = SandboxedValidation(test.clone());
+    let (status, duration) = match settings.in_process {
+        true => validation.run(),
+        false => validation
+            .run_sandboxed(SandboxConfig {
+                hide_output: settings.hide_output,
+                verbosity,
+                timeout: Some(Duration::from_secs(45)),
+            })
+            .unwrap_or_else(|err| {
+                (
+                    TestStatus::Crashed {
+                        details: err.to_string(),
+                    },
+                    start.elapsed(),
+                )
+            }),
+    };
 
     match &status {
         TestStatus::Success { .. } => {
@@ -178,8 +181,7 @@ fn discover(paths: &[PathBuf], plugin_id: Option<&str>, filter_test: impl Fn(&st
     let mut result = Vec::new();
 
     for path in paths {
-        let library = PluginLibrary::load(path)
-            .with_context(|| format!("Could not load the plugin library at '{}'", path.display()))?;
+        let library = PluginLibrary::load(path)?;
 
         let metadata = library
             .metadata()

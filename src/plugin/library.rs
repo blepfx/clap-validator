@@ -62,27 +62,29 @@ pub struct PluginMetadata {
 
 impl PluginMetadata {
     pub fn from_descriptor(descriptor: &clap_plugin_descriptor) -> Result<Self> {
-        Ok(PluginMetadata {
-            id: unsafe { util::cstr_ptr_to_mandatory_string(descriptor.id) }
-                .context("Error parsing the plugin descriptor's 'id' field")?,
-            name: unsafe { util::cstr_ptr_to_mandatory_string(descriptor.name) }
-                .context("Error parsing the plugin descriptor's 'name' field")?,
-            // Empty strings should be treated as missing values in some cases
-            version: unsafe { util::cstr_ptr_to_optional_string(descriptor.version) }
-                .context("Error parsing the plugin descriptor's 'version' field")?,
-            vendor: unsafe { util::cstr_ptr_to_optional_string(descriptor.vendor) }
-                .context("Error parsing the plugin descriptor's 'vendor' field")?,
-            description: unsafe { util::cstr_ptr_to_optional_string(descriptor.description) }
-                .context("Error parsing the plugin descriptor's 'description' field")?,
-            url: unsafe { util::cstr_ptr_to_optional_string(descriptor.url) }
-                .context("Error parsing the plugin descriptor's 'url' field")?,
-            manual_url: unsafe { util::cstr_ptr_to_optional_string(descriptor.manual_url) }
-                .context("Error parsing the plugin descriptor's 'manual_url' field")?,
-            support_url: unsafe { util::cstr_ptr_to_optional_string(descriptor.support_url) }
-                .context("Error parsing the plugin descriptor's 'support_url' field")?,
-            features: unsafe { util::cstr_array_to_vec(descriptor.features)? }
-                .context("The plugin descriptor's 'features' array is malformed")?,
-        })
+        unsafe {
+            Ok(PluginMetadata {
+                id: util::cstr_ptr_to_mandatory_string(descriptor.id)
+                    .context("Error parsing the plugin descriptor's 'id' field")?,
+                name: util::cstr_ptr_to_mandatory_string(descriptor.name)
+                    .context("Error parsing the plugin descriptor's 'name' field")?,
+                // Empty strings should be treated as missing values in some cases
+                version: util::cstr_ptr_to_optional_string(descriptor.version)
+                    .context("Error parsing the plugin descriptor's 'version' field")?,
+                vendor: util::cstr_ptr_to_optional_string(descriptor.vendor)
+                    .context("Error parsing the plugin descriptor's 'vendor' field")?,
+                description: util::cstr_ptr_to_optional_string(descriptor.description)
+                    .context("Error parsing the plugin descriptor's 'description' field")?,
+                url: util::cstr_ptr_to_optional_string(descriptor.url)
+                    .context("Error parsing the plugin descriptor's 'url' field")?,
+                manual_url: util::cstr_ptr_to_optional_string(descriptor.manual_url)
+                    .context("Error parsing the plugin descriptor's 'manual_url' field")?,
+                support_url: util::cstr_ptr_to_optional_string(descriptor.support_url)
+                    .context("Error parsing the plugin descriptor's 'support_url' field")?,
+                features: util::cstr_array_to_vec(descriptor.features)?
+                    .context("The plugin descriptor's 'features' array is malformed")?,
+            })
+        }
     }
 }
 
@@ -93,6 +95,8 @@ impl Drop for PluginLibrary {
         let entry_point =
             get_clap_entry_point(&self.library).expect("A Plugin was constructed for a plugin with no entry point");
 
+        let _span = Span::begin("clap_plugin_entry::deinit", ());
+
         unsafe {
             clap_call! { entry_point=>deinit() };
         }
@@ -102,8 +106,6 @@ impl Drop for PluginLibrary {
 impl PluginLibrary {
     /// Load a CLAP plugin from a path to a `.clap` file or bundle. This will return an error if the
     /// plugin could not be loaded.
-    ///
-    /// This MUST be called on the OS main thread (if applicable).
     pub fn load(path: impl AsRef<Path>) -> Result<PluginLibrary> {
         unsafe {
             Self::load_with(path, |path| {
@@ -167,9 +169,18 @@ impl PluginLibrary {
             );
         }
 
+        let span = Span::begin(
+            "clap_plugin_entry::init",
+            record! {
+                path: path_cstring.to_string_lossy().to_string()
+            },
+        );
+
         let result = unsafe {
             clap_call! { entry_point=>init(path_cstring.as_ptr()) }
         };
+
+        span.finish(record! { result: result });
 
         if !result {
             anyhow::bail!("'clap_plugin_entry::init({path_cstring:?})' returned false.");

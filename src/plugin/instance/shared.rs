@@ -11,11 +11,9 @@ use crate::plugin::ext::state::State;
 use crate::plugin::ext::tail::Tail;
 use crate::plugin::ext::thread_pool::ThreadPool;
 use crate::plugin::ext::voice_info::VoiceInfo;
-use crate::plugin::instance::{CallbackEvent, MainThreadTask, Plugin, PluginStatus};
+use crate::plugin::instance::{CallbackEvent, Plugin, PluginStatus};
 use crate::plugin::preset_discovery::LocationValue;
-use crate::plugin::util::{
-    self, CHECK_POINTER, IteratorExt, Proxy, Proxyable, clap_call, cstr_ptr_to_string, validator_version,
-};
+use crate::plugin::util::{self, CHECK_POINTER, Proxy, Proxyable, clap_call, cstr_ptr_to_string, validator_version};
 use anyhow::{Context, Result};
 use clap_sys::ext::audio_ports::*;
 use clap_sys::ext::audio_ports_config::{CLAP_EXT_AUDIO_PORTS_CONFIG, clap_host_audio_ports_config};
@@ -45,7 +43,6 @@ use std::thread::ThreadId;
 /// Plugin instance state that is shared between the main thread, audio thread and any external unmanaged threads.
 /// This struct also acts as the `clap_host` implementation for the plugin instance.
 pub struct PluginShared {
-    pub task_sender: Sender<MainThreadTask>,
     pub callback_sender: Sender<CallbackEvent>,
     pub callback_error: Mutex<Option<anyhow::Error>>,
 
@@ -105,10 +102,8 @@ impl PluginShared {
     /// The caller must ensure that this is called from the OS main thread.
     pub unsafe fn create_plugin<'a>(factory: *const clap_plugin_factory, plugin_id: &CStr) -> Result<Plugin<'a>> {
         let (callback_sender, callback_receiver) = channel();
-        let (task_sender, task_receiver) = channel();
 
         let shared = Proxy::new(PluginShared {
-            task_sender,
             callback_sender,
             callback_error: Mutex::new(None),
 
@@ -148,7 +143,6 @@ impl PluginShared {
         Ok(Plugin {
             shared,
             callback_receiver,
-            task_receiver,
 
             _library: std::marker::PhantomData,
             _thread: std::marker::PhantomData,
@@ -427,7 +421,6 @@ impl PluginShared {
 
         Self::wrap(host, span.name(), |this| {
             this.requested_callback.store(true);
-            this.task_sender.send(MainThreadTask::CallbackRequest).unwrap();
             Ok(())
         });
     }
@@ -772,7 +765,15 @@ impl PluginShared {
             );
 
             let extension = this.get_extension::<ThreadPool>().unwrap();
-            (0..num_tasks).parallelize(None, |index| extension.exec(index));
+
+            std::thread::scope(|s| {
+                for i in 0..num_tasks {
+                    s.spawn(move || {
+                        extension.exec(i);
+                    });
+                }
+            });
+
             Ok(true)
         })
         .unwrap_or(false)

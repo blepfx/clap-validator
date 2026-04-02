@@ -56,13 +56,16 @@ fn main() -> ExitCode {
         Command::Validate(settings) => commands::validate::validate(args.verbosity, settings),
         Command::Fuzz(settings) => commands::fuzz::fuzz(args.verbosity, settings),
         Command::List(command) => commands::list::list(args.verbosity, command),
-        Command::Sandbox(payload) => payload.dispatch().map(|_| ExitCode::SUCCESS),
+        Command::Sandbox(payload) => {
+            payload.dispatch();
+            Ok(ExitCode::SUCCESS)
+        }
     };
 
     let status = match &result {
         Ok(code) => *code,
         Err(err) => {
-            eprintln!("{} {err:#}", "error:".red().bold());
+            eprintln!("{} {err:#}", "Error:".red().bold());
             ExitCode::FAILURE
         }
     };

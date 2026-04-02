@@ -6,13 +6,12 @@ use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::ext::tail::Tail;
 use crate::plugin::instance::{CallbackEvent, ProcessStatus};
 use crate::plugin::library::PluginLibrary;
-use crate::plugin::process::{AudioBuffers, ConstantMask, ProcessRun, ProcessScope};
+use crate::plugin::process::{AudioBuffers, ConstantMask, ProcessRun, ProcessScope, check_channel_quiet};
 use crate::tests::TestStatus;
 use crate::tests::rng::{NoteGenerator, new_prng};
 use anyhow::{Context, Result};
 use either::Either;
 use rand::RngExt;
-use std::f32;
 use std::time::Instant;
 
 const BUFFER_SIZE: u32 = 512;
@@ -49,6 +48,7 @@ pub fn test_process_audio_basic(library: &PluginLibrary, plugin_id: &str, in_pla
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         for _ in 0..5 {
+            plugin.poll_callback();
             process.audio_buffers().fill_white_noise(&mut prng);
             process.run()?;
         }
@@ -115,6 +115,7 @@ pub fn test_process_audio_double(library: &PluginLibrary, plugin_id: &str, in_pl
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         for _ in 0..5 {
+            plugin.poll_callback();
             process.audio_buffers().fill_white_noise(&mut prng);
             process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
             process.run()?;
@@ -173,6 +174,7 @@ pub fn test_process_audio_denormals(library: &PluginLibrary, plugin_id: &str) ->
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         for _ in 0..50 {
+            plugin.poll_callback();
             process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
             process.audio_buffers().fill_white_noise(&mut prng);
             process.run_with(ProcessRun {
@@ -207,6 +209,7 @@ pub fn test_process_audio_denormals(library: &PluginLibrary, plugin_id: &str) ->
                 }
             }
 
+            plugin.poll_callback();
             process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
             process.run_with(ProcessRun {
                 block_size: BUFFER_SIZE,
@@ -297,6 +300,7 @@ pub fn test_process_note_out_of_place(
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
         for _ in 0..5 {
+            plugin.poll_callback();
             process.audio_buffers().fill_white_noise(&mut prng);
             process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
             process.run()?;
@@ -346,9 +350,10 @@ pub fn test_process_varying_sample_rates(library: &PluginLibrary, plugin_id: &st
         plugin
             .on_audio_thread(|plugin| -> Result<()> {
                 let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-4..=64);
-                let mut process = ProcessScope::with_sample_rate(&plugin, &mut audio_buffers, sample_rate)?;
+                let mut process = ProcessScope::with_config(&plugin, &mut audio_buffers, sample_rate, 1)?;
 
                 for _ in 0..5 {
+                    plugin.poll_callback();
                     process.audio_buffers().fill_white_noise(&mut prng);
                     process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
                     process.run()?;
@@ -400,6 +405,7 @@ pub fn test_process_varying_block_sizes(library: &PluginLibrary, plugin_id: &str
                 let num_iters = (16384 / buffer_size).min(5);
 
                 for _ in 0..num_iters {
+                    plugin.poll_callback();
                     process.audio_buffers().fill_white_noise(&mut prng);
                     process.add_events(note_rng.generate_events(&mut prng, buffer_size));
                     process.run()?;
@@ -452,6 +458,7 @@ pub fn test_process_random_block_sizes(library: &PluginLibrary, plugin_id: &str)
                 1
             };
 
+            plugin.poll_callback();
             process.audio_buffers().fill_white_noise(&mut prng);
             process.add_events(note_rng.generate_events(&mut prng, block_size));
             process
@@ -496,23 +503,17 @@ pub fn test_process_sleep_constant_mask(library: &PluginLibrary, plugin_id: &str
 
     let mut has_received_constant_output = false;
     let mut has_received_constant_flag = false;
-
     let mut check_buffers = |buffers: &AudioBuffers| -> Result<()> {
         for buffer in buffers.iter() {
-            let Some(output) = buffer.port().output() else {
+            if buffer.port().output().is_none() {
                 continue;
-            };
+            }
 
             for channel in 0..buffer.channels() {
                 let is_constant = check_channel_quiet(buffer.channel(channel), true);
                 let marked_constant = buffer.get_output_constant_mask().is_channel_constant(channel);
 
-                if marked_constant && let Err(db) = is_constant {
-                    anyhow::bail!(
-                        "The plugin has marked output port {output}, channel {channel} as constant, but it contains \
-                         non-constant data ({db:.2} dBFS)",
-                    );
-                }
+                // congruency of these two is checked in [`ProcessScope::run`]
 
                 if marked_constant {
                     has_received_constant_flag |= true;
@@ -538,6 +539,8 @@ pub fn test_process_sleep_constant_mask(library: &PluginLibrary, plugin_id: &str
         check_buffers(process.audio_buffers()).context("Block preroll silent")?;
         span.finish(());
 
+        plugin.poll_callback();
+
         // block 2: randomize inputs, see if the plugin tracks constant channels
         let span = Span::begin("BlockActiveInput", ());
         process.audio_buffers().fill_white_noise(&mut prng);
@@ -545,6 +548,8 @@ pub fn test_process_sleep_constant_mask(library: &PluginLibrary, plugin_id: &str
         process.run()?;
         check_buffers(process.audio_buffers()).context("Block random input")?;
         span.finish(());
+
+        plugin.poll_callback();
 
         // block 3-40: silent inputs again, see if the plugin updates the constant mask accordingly
         // 40 blocks to give the output tail to fully decay to silence if there is any reverb/delay
@@ -603,6 +608,7 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
         let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-4..=64);
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
+        // this is an Arc so we can set it from the main thread if needed
         let mut is_sleeping = false;
         let mut quiet_time = 0;
 
@@ -622,7 +628,7 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
                     process.audio_buffers().fill_white_noise(&mut prng);
                 }
 
-                plugin.poll_callback(|_, event| match event {
+                plugin.poll_callback_with(|_, event| match event {
                     CallbackEvent::RequestProcess => {
                         is_sleeping = false;
                         Ok(())
@@ -736,6 +742,7 @@ pub fn test_process_reset_reactivate(library: &PluginLibrary, plugin_id: &str) -
         process.run()?;
         span.finish(());
 
+        plugin.poll_callback();
         process.restart();
         note_rng.reset();
 
@@ -746,6 +753,7 @@ pub fn test_process_reset_reactivate(library: &PluginLibrary, plugin_id: &str) -
         process.run()?;
         span.finish(());
 
+        plugin.poll_callback();
         process.reset();
         note_rng.reset();
 
@@ -756,40 +764,12 @@ pub fn test_process_reset_reactivate(library: &PluginLibrary, plugin_id: &str) -
         process.run()?;
         span.finish(());
 
+        plugin.poll_callback();
+
         Ok(TestStatus::Success { details: None })
     })?;
 
     plugin.poll_callback(|_| Ok(()))?;
 
     Ok(result)
-}
-
-/// A channel is considered quiet if the signal is below -60 dbfs, ignoring DC.
-///
-/// This function is designed to be very lenient in what it considers "quiet", to avoid false positives.
-/// Returns `Ok(())` if the channel is quiet, or `Err(max_amplitude_in_db)` if not.
-fn check_channel_quiet(channel: Either<&[f32], &[f64]>, ignore_dc: bool) -> Result<(), f64> {
-    /// -60 dbfs
-    const QUIET_THRESHOLD: f64 = 0.001;
-
-    let (min, max) = match channel {
-        Either::Right(x) => x.iter().fold((f64::MAX, f64::MIN), |(min, max), &sample| {
-            (min.min(sample.abs()), max.max(sample.abs()))
-        }),
-        Either::Left(x) => {
-            let (min, max) = x.iter().fold((f32::MAX, f32::MIN), |(min, max), &sample| {
-                (min.min(sample.abs()), max.max(sample.abs()))
-            });
-
-            (min as f64, max as f64)
-        }
-    };
-
-    let range = if ignore_dc { (max - min) * 0.5 } else { max.max(-min) };
-
-    if range < QUIET_THRESHOLD {
-        Ok(())
-    } else {
-        Err(20.0 * range.log10())
-    }
 }

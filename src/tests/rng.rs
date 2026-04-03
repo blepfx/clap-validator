@@ -4,10 +4,9 @@ use crate::plugin::ext::audio_ports::AudioPortConfig;
 use crate::plugin::ext::configurable_audio_ports::{AudioPortsRequest, AudioPortsRequestInfo};
 use crate::plugin::ext::note_ports::NotePortConfig;
 use crate::plugin::ext::params::{Param, ParamInfo};
-use crate::plugin::process::{Event, TransportState};
+use crate::plugin::process::{Event, MidiEvent, TransportState};
 use clap_sys::events::*;
 use clap_sys::ext::ambisonic::*;
-use midi_consts::channel_event as midi;
 use rand::seq::{IndexedRandom, IteratorRandom};
 use rand::{Rng, RngExt, SeedableRng};
 use std::ops::RangeInclusive;
@@ -378,7 +377,9 @@ impl<'a> NoteGenerator<'a> {
                         Note::random(prng)
                     };
 
-                    let velocity = prng.random_range(0.0..=1.0);
+                    let velocity = prng.random_range(0.0..=1.0f32);
+                    let velocity = (velocity * 127.0).round().clamp(0.0, 127.0) as u8;
+
                     return Some(Event::Midi(clap_event_midi {
                         header: clap_event_header {
                             size: std::mem::size_of::<clap_event_midi>() as u32,
@@ -388,11 +389,12 @@ impl<'a> NoteGenerator<'a> {
                             flags: 0,
                         },
                         port_index: note_port_idx as u16,
-                        data: [
-                            midi::NOTE_ON | note.channel as u8,
-                            note.key as u8,
-                            (velocity * 127.0f32).round().clamp(0.0, 127.0) as u8,
-                        ],
+                        data: MidiEvent::NoteOn {
+                            key: note.key as u8,
+                            velocity,
+                            channel: note.channel as u8,
+                        }
+                        .into_bytes(),
                     }));
                 }
                 NoteEventType::MidiNoteOff => {
@@ -407,7 +409,9 @@ impl<'a> NoteGenerator<'a> {
                         Note::random(prng)
                     };
 
-                    let velocity = prng.random_range(0.0..=1.0);
+                    let velocity = prng.random_range(0.0..=1.0f32);
+                    let velocity = (velocity * 127.0).round().clamp(0.0, 127.0) as u8;
+
                     return Some(Event::Midi(clap_event_midi {
                         header: clap_event_header {
                             size: std::mem::size_of::<clap_event_midi>() as u32,
@@ -417,11 +421,12 @@ impl<'a> NoteGenerator<'a> {
                             flags: 0,
                         },
                         port_index: note_port_idx as u16,
-                        data: [
-                            midi::NOTE_OFF | note.channel as u8,
-                            note.key as u8,
-                            (velocity * 127.0f32).round().clamp(0.0, 127.0) as u8,
-                        ],
+                        data: MidiEvent::NoteOff {
+                            key: note.key as u8,
+                            velocity,
+                            channel: note.channel as u8,
+                        }
+                        .into_bytes(),
                     }));
                 }
                 NoteEventType::MidiChannelPressure => {
@@ -436,7 +441,11 @@ impl<'a> NoteGenerator<'a> {
                             flags: 0,
                         },
                         port_index: note_port_idx as u16,
-                        data: [midi::CHANNEL_KEY_PRESSURE | channel, pressure, 0],
+                        data: MidiEvent::ChannelPressure {
+                            pressure,
+                            channel: channel as u8,
+                        }
+                        .into_bytes(),
                     }));
                 }
                 NoteEventType::MidiPolyKeyPressure => {
@@ -461,18 +470,17 @@ impl<'a> NoteGenerator<'a> {
                             flags: 0,
                         },
                         port_index: note_port_idx as u16,
-                        data: [
-                            midi::POLYPHONIC_KEY_PRESSURE | note.channel as u8,
-                            note.key as u8,
+                        data: MidiEvent::NotePressure {
+                            key: note.key as u8,
                             pressure,
-                        ],
+                            channel: note.channel as u8,
+                        }
+                        .into_bytes(),
                     }));
                 }
                 NoteEventType::MidiPitchBend => {
-                    // May as well just generate the two bytes directly instead of doing fancy things
                     let channel = prng.random_range(0..16);
-                    let byte1 = prng.random_range(0..128);
-                    let byte2 = prng.random_range(0..128);
+                    let value = prng.random_range(-1.0..=1.0);
                     return Some(Event::Midi(clap_event_midi {
                         header: clap_event_header {
                             size: std::mem::size_of::<clap_event_midi>() as u32,
@@ -482,12 +490,16 @@ impl<'a> NoteGenerator<'a> {
                             flags: 0,
                         },
                         port_index: note_port_idx as u16,
-                        data: [midi::PITCH_BEND_CHANGE | channel, byte1, byte2],
+                        data: MidiEvent::PitchBend {
+                            value,
+                            channel: channel as u8,
+                        }
+                        .into_bytes(),
                     }));
                 }
                 NoteEventType::MidiCc => {
                     let channel = prng.random_range(0..16);
-                    let cc = prng.random_range(0..128);
+                    let param = prng.random_range(0..128);
                     let value = prng.random_range(0..128);
                     return Some(Event::Midi(clap_event_midi {
                         header: clap_event_header {
@@ -498,7 +510,12 @@ impl<'a> NoteGenerator<'a> {
                             flags: 0,
                         },
                         port_index: note_port_idx as u16,
-                        data: [midi::CONTROL_CHANGE | channel, cc, value],
+                        data: MidiEvent::ControlChange {
+                            param,
+                            value,
+                            channel: channel as u8,
+                        }
+                        .into_bytes(),
                     }));
                 }
                 NoteEventType::MidiProgramChange => {
@@ -513,7 +530,11 @@ impl<'a> NoteGenerator<'a> {
                             flags: 0,
                         },
                         port_index: note_port_idx as u16,
-                        data: [midi::PROGRAM_CHANGE | channel, program_number, 0],
+                        data: MidiEvent::ProgramChange {
+                            program: program_number,
+                            channel: channel as u8,
+                        }
+                        .into_bytes(),
                     }));
                 }
                 NoteEventType::ParamValue => {
@@ -635,7 +656,12 @@ impl<'a> NoteGenerator<'a> {
                             flags: 0,
                         },
                         port_index: note_port_idx as u16,
-                        data: [midi::NOTE_OFF | note.channel as u8, note.key as u8, 0],
+                        data: MidiEvent::NoteOff {
+                            key: note.key as u8,
+                            channel: note.channel as u8,
+                            velocity: 0,
+                        }
+                        .into_bytes(),
                     }));
                 }
             }

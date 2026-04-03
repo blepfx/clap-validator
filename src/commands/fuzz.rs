@@ -3,16 +3,11 @@ use crate::commands::Verbosity;
 use crate::fuzz::{FuzzResult, FuzzStatus};
 use anyhow::Result;
 use clap::Args;
-use radix_fmt::radix;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 use std::vec;
 use yansi::Paint;
-
-fn parse_seed(str: &str) -> Result<u64, &'static str> {
-    u64::from_str_radix(str, 36).map_err(|_| "invalid seed format")
-}
 
 fn parse_duration(mut str: &str) -> Result<Duration, &'static str> {
     if str.is_empty() {
@@ -74,13 +69,6 @@ pub struct FuzzSettings {
     #[arg(long, short = 'j')]
     pub jobs: Option<usize>,
 
-    /// Run the fuzzer with this random seed in-process.
-    ///
-    /// This will run a single deterministic fuzzing chunk that will execute the same sequence of calls every time.
-    /// Useful for reproducing an error/crash produced by the out-of-process fuzzer.
-    #[arg(long, short = 'r', value_parser = parse_seed, conflicts_with = "jobs", conflicts_with = "duration")]
-    pub reproduce: Option<u64>,
-
     /// When running the validation in-process, emit a JSON trace file that can be viewed with
     /// Chrome's tracing viewer or <https://ui.perfetto.dev>.
     ///
@@ -91,6 +79,19 @@ pub struct FuzzSettings {
     /// How many errors to collect before stopping the fuzzer.
     #[arg(long, short = 'l', default_value = "1")]
     pub limit: usize,
+
+    /// Run the fuzzer with this random seed in-process.
+    ///
+    /// This will run a single deterministic fuzzing chunk that will execute the same sequence of calls every time.
+    /// Useful for reproducing an error/crash produced by the out-of-process fuzzer.
+    #[arg(
+        long,
+        short = 'r',
+        conflicts_with = "jobs",
+        conflicts_with = "duration",
+        conflicts_with = "limit"
+    )]
+    pub reproduce: Option<u64>,
 }
 
 /// The main fuzzer command. This will fuzz one or more plugins and print the results.
@@ -128,7 +129,7 @@ pub fn pretty_print(result: &[FuzzResult]) {
 
         let mut report = Report {
             header: result.plugin_id.to_string(),
-            footer: vec![status_text.to_string(), radix(result.seed, 36).dim().to_string()],
+            footer: vec![status_text.to_string(), result.seed.dim().to_string()],
             items: vec![],
         };
 

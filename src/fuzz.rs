@@ -5,7 +5,6 @@ use crate::cli::{IteratorExt, panic_message};
 use crate::commands::Verbosity;
 use crate::commands::fuzz::FuzzSettings;
 use anyhow::{Context, Result};
-use radix_fmt::radix;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -95,7 +94,7 @@ pub fn fuzz(verbosity: Verbosity, settings: &FuzzSettings) -> Result<Vec<FuzzRes
                 .run_sandboxed(SandboxConfig {
                     verbosity,
                     hide_output: true,
-                    timeout: Some(std::time::Duration::from_secs(30)),
+                    timeout: Some(std::time::Duration::from_secs(60)),
                 })
                 .unwrap_or_else(|err| FuzzStatus::Crashed {
                     details: err.to_string(),
@@ -114,7 +113,7 @@ pub fn fuzz(verbosity: Verbosity, settings: &FuzzSettings) -> Result<Vec<FuzzRes
                         "{} ({}, seed {})",
                         chunk.status.details().unwrap_or_default(),
                         chunk.plugin_id,
-                        radix(chunk.seed, 36),
+                        chunk.seed,
                     );
 
                     results.push(chunk);
@@ -123,7 +122,7 @@ pub fn fuzz(verbosity: Verbosity, settings: &FuzzSettings) -> Result<Vec<FuzzRes
                         running.store(false, Ordering::Relaxed);
                     }
                 } else {
-                    log::debug!("OK '{}' (seed {})", chunk.plugin_id, radix(chunk.seed, 36));
+                    log::debug!("OK '{}' (seed {})", chunk.plugin_id, chunk.seed);
                 }
             },
         );

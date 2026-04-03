@@ -10,7 +10,7 @@ use crate::plugin::process::{AudioBuffers, Event, InputEventQueue, OutputEventQu
 use crate::tests::rng::{NoteGenerator, ParamFuzzer, TransportFuzzer};
 use anyhow::Result;
 use rand::rngs::Xoshiro128PlusPlus;
-use rand::seq::IndexedRandom;
+use rand::seq::{IndexedRandom, IteratorRandom};
 use rand::{RngExt, SeedableRng};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -107,14 +107,13 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
         } else if prng.random_bool(0.25) {
             1
         } else {
-            prng.random_range(1..max_buffer_size)
+            prng.random_range(1..=max_buffer_size)
         };
 
         let mut blocks_to_process = prng.random_range(20000..100000u32).div_ceil(max_buffer_size);
         let mut audio_config_changed = false;
         let mut note_config_changed = false;
         let mut params_changed = false;
-        let mut is_sleeping = false;
 
         while blocks_to_process > 0 {
             if audio_config_changed {
@@ -165,9 +164,6 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
                     } else {
                         plugin.poll_callback_with(|_, event| {
                             match event {
-                                CallbackEvent::RequestProcess => {
-                                    is_sleeping = false;
-                                }
                                 CallbackEvent::AudioPortsRescanAll => {
                                     audio_config_changed = true;
                                 }
@@ -203,7 +199,7 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
                     }
 
                     // try saving the current state in parallel
-                    if prng.random_bool(0.05) {
+                    if prng.random_bool(0.02) {
                         let last_saved_state = last_saved_state.clone();
                         let buffer_size = match prng.random_bool(0.5) {
                             true => Some(prng.random_range(1..=64)),
@@ -227,7 +223,7 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
                     }
 
                     // try loading the last saved state in parallel
-                    if prng.random_bool(0.05) {
+                    if prng.random_bool(0.02) {
                         let last_saved_state = last_saved_state.clone();
                         let buffer_size = match prng.random_bool(0.5) {
                             true => Some(prng.random_range(1..=64)),
@@ -251,6 +247,60 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
 
                             Ok(())
                         });
+                    }
+
+                    // try a random value to text roundtrip conversion
+                    if prng.random_bool(0.10) {
+                        // choose a random parameter and a random value and do a roundtrip conversion (value -> text -> value -> text) on the main thread _in parallel_.
+                        if let Some((&id, param)) = param_info.iter().choose(&mut prng) {
+                            let value = ParamFuzzer::random_value(param, &mut prng);
+
+                            plugin.send_main_thread(move |plugin| {
+                                let params = match plugin.get_extension::<Params>() {
+                                    Some(params) => params,
+                                    None => return Ok(()), // huh?
+                                };
+
+                                let text_first = match params.value_to_text(id, value)? {
+                                    Some(text) => text,
+                                    None => return Ok(()), // this parameter does not support v2t i guess..
+                                };
+
+                                let value_second = match params.text_to_value(id, &text_first)? {
+                                    Some(value) => value,
+                                    None => anyhow::bail!(
+                                        "Text conversion error for parameter {}: {} -> '{}' -> ?",
+                                        id,
+                                        value,
+                                        text_first
+                                    ),
+                                };
+
+                                let text_second = match params.value_to_text(id, value_second)? {
+                                    Some(text) => text,
+                                    None => anyhow::bail!(
+                                        "Text conversion error for parameter {}: {} -> '{}' -> {} -> ?",
+                                        id,
+                                        value,
+                                        text_first,
+                                        value_second
+                                    ),
+                                };
+
+                                if text_first != text_second {
+                                    anyhow::bail!(
+                                        "Text conversion error for parameter {}: {} -> {:?} -> {} -> {:?}",
+                                        id,
+                                        value,
+                                        text_first,
+                                        value_second,
+                                        text_second
+                                    );
+                                }
+
+                                Ok(())
+                            });
+                        }
                     }
 
                     // random number of samples per block within the requested buffer size range

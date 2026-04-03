@@ -156,18 +156,32 @@ pub fn test_param_conversions(library: &PluginLibrary, plugin_id: &str) -> Resul
     }
 
     if num_supported_value_to_text != expected_conversions {
+        let failed_value_to_text_calls = failed_value_to_text_calls
+            .into_iter()
+            .take(10)
+            .map(|(name, value)| format!("\n - {name}: {value:.4}"))
+            .collect::<Vec<_>>()
+            .join("");
+
         anyhow::bail!(
             "'clap_plugin_params::value_to_text()' returned true for {num_supported_value_to_text} out of \
              {expected_conversions} calls. This function is expected to be supported for either none of the \
-             parameters or for all of them. Examples of failing conversions were: {failed_value_to_text_calls:#?}"
+             parameters or for all of them. Examples of failing conversions were: {failed_value_to_text_calls}"
         );
     }
 
     if num_supported_text_to_value != expected_conversions {
+        let failed_text_to_value_calls = failed_text_to_value_calls
+            .into_iter()
+            .take(10)
+            .map(|(name, text)| format!("\n - {name}: '{text}'"))
+            .collect::<Vec<_>>()
+            .join("");
+
         anyhow::bail!(
             "'clap_plugin_params::text_to_value()' returned true for {num_supported_text_to_value} out of \
              {expected_conversions} calls. This function is expected to be supported for either none of the \
-             parameters or for all of them. Examples of failing conversions were: {failed_text_to_value_calls:#?}"
+             parameters or for all of them. Examples of failing conversions were: {failed_text_to_value_calls}"
         );
     }
 

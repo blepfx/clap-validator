@@ -126,8 +126,15 @@ impl<'lib> Plugin<'lib> {
                 .spawn_scoped(s, || f(PluginAudioThread::new(shared, sender)))
                 .unwrap();
 
+            let mut error = None;
             while let Ok(task) = receiver.recv() {
-                task(self)?;
+                if let Err(e) = task(self) {
+                    error.get_or_insert(e);
+                }
+            }
+
+            if let Some(error) = error {
+                return Err(error);
             }
 
             audio_thread.join().unwrap_or_else(|e| resume_unwind(e))

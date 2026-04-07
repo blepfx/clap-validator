@@ -10,6 +10,7 @@ use clap_sys::ext::ambisonic::*;
 use rand::seq::{IndexedRandom, IteratorRandom};
 use rand::{Rng, RngExt, SeedableRng};
 use std::ops::RangeInclusive;
+use std::ptr::null_mut;
 
 /// Create a new pseudo-random number generator with a fixed seed.
 pub fn new_prng() -> rand::rngs::Xoshiro128PlusPlus {
@@ -48,14 +49,17 @@ pub struct NoteGenerator<'a> {
 /// ways to stress test a plugin's parameter handling.
 pub struct ParamFuzzer<'a> {
     /// The parameter info to generate random events for.
-    params: &'a ParamInfo,
+    pub params: &'a ParamInfo,
 
     /// Whether to snap generated parameter values to the parameter's minimum or maximum value.
-    snap_to_bounds: bool,
+    pub snap_to_bounds: bool,
+
+    /// Set parameter cookies to `null` instead of the actual cookie value.
+    pub no_cookies: bool,
 
     /// The range for the next event's timing relative to the previous event.
     /// This will be capped to 0 when generating events
-    sample_offset_range: RangeInclusive<i32>,
+    pub sample_offset_range: RangeInclusive<i32>,
 }
 
 /// A helper to generate random transport events in a couple different ways to stress test a plugin's transport handling.
@@ -683,6 +687,7 @@ impl<'a> ParamFuzzer<'a> {
     pub fn new(params: &'a ParamInfo) -> Self {
         ParamFuzzer {
             params,
+            no_cookies: false,
             snap_to_bounds: false,
             sample_offset_range: -10..=20,
         }
@@ -693,8 +698,13 @@ impl<'a> ParamFuzzer<'a> {
         self
     }
 
-    pub fn snap_to_bounds(mut self) -> Self {
-        self.snap_to_bounds = true;
+    pub fn with_no_cookies(mut self, no_cookies: bool) -> Self {
+        self.no_cookies = no_cookies;
+        self
+    }
+
+    pub fn snap_to_bounds(mut self, snap_to_bounds: bool) -> Self {
+        self.snap_to_bounds = snap_to_bounds;
         self
     }
 
@@ -737,7 +747,7 @@ impl<'a> ParamFuzzer<'a> {
                     flags: 0,
                 },
                 param_id: *param_id,
-                cookie: param_info.cookie,
+                cookie: if self.no_cookies { null_mut() } else { param_info.cookie },
                 note_id: -1,
                 port_index: -1,
                 channel: -1,
@@ -758,7 +768,7 @@ impl<'a> ParamFuzzer<'a> {
                     },
                 },
                 param_id: *param_id,
-                cookie: param_info.cookie,
+                cookie: if self.no_cookies { null_mut() } else { param_info.cookie },
                 note_id: -1,
                 port_index: -1,
                 channel: -1,
@@ -802,7 +812,7 @@ impl<'a> ParamFuzzer<'a> {
                     },
                 },
                 param_id: *param_id,
-                cookie: param_info.cookie,
+                cookie: if self.no_cookies { null_mut() } else { param_info.cookie },
                 note_id: -1,
                 port_index: -1,
                 channel: -1,
@@ -991,6 +1001,22 @@ pub fn random_layout_requests(config: &AudioPortConfig, prng: &mut impl Rng) -> 
         requests.push(AudioPortsRequest {
             is_input: false,
             port_index: index as u32,
+            request_info: random_request_info(prng),
+        });
+    }
+
+    // throw in random (maybe invalid) requests
+    while prng.random_bool(0.2) {
+        let is_input = prng.random_bool(0.5);
+        let port_index = if is_input {
+            prng.random_range(config.inputs.len() as u32..=config.inputs.len() as u32 + 10)
+        } else {
+            prng.random_range(config.outputs.len() as u32..=config.outputs.len() as u32 + 10)
+        };
+
+        requests.push(AudioPortsRequest {
+            is_input,
+            port_index,
             request_info: random_request_info(prng),
         });
     }

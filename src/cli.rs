@@ -29,11 +29,11 @@ pub fn validator_temp_dir() -> std::path::PathBuf {
 
 impl<T: ?Sized> IteratorExt for T where T: Iterator {}
 pub trait IteratorExt: Iterator {
-    fn parallel_fold<R: Send>(
+    fn parallel_fork_join<R: Send>(
         self,
         workers: Option<usize>,
-        map: impl Fn(Self::Item) -> R + Send + Sync,
-        mut fold: impl FnMut(R),
+        fork: impl Fn(Self::Item) -> R + Send + Sync,
+        mut join: impl FnMut(R),
     ) where
         Self: Sized + Send,
         Self::Item: Send,
@@ -46,7 +46,7 @@ pub trait IteratorExt: Iterator {
         };
 
         if workers <= 1 {
-            return self.map(map).for_each(fold);
+            return self.map(fork).for_each(join);
         }
 
         let inputs = Mutex::new(self.fuse());
@@ -54,7 +54,7 @@ pub trait IteratorExt: Iterator {
 
         std::thread::scope(|scope| {
             for _ in 0..workers {
-                let map = &map;
+                let map = &fork;
                 let inputs = &inputs;
                 let output_tx = output_tx.clone();
                 scope.spawn(move || {
@@ -68,7 +68,7 @@ pub trait IteratorExt: Iterator {
 
             drop(output_tx);
             while let Ok(item) = output_rx.recv() {
-                fold(item);
+                join(item);
             }
         });
     }
@@ -84,7 +84,7 @@ pub trait IteratorExt: Iterator {
         Self::Item: Send,
     {
         let mut vec = Vec::with_capacity(self.size_hint().0);
-        self.parallel_fold(workers, f, |item| vec.push(item));
+        self.parallel_fork_join(workers, f, |item| vec.push(item));
         vec.into_iter()
     }
 }

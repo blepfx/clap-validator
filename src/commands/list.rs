@@ -50,6 +50,7 @@ pub enum ListCommand {
         #[arg(short, long, conflicts_with = "json")]
         limit: Option<usize>,
     },
+
     /// Lists all available test cases.
     Tests {
         /// Print JSON instead of a human readable format.

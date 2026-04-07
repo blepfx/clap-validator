@@ -271,6 +271,7 @@ pub fn test_param_set_events(library: &PluginLibrary, plugin_id: &str, null_cook
     // we have to recreate the events because of cookies (they can be different between plugin instances)
     let param_info = params.info().context("Failure while fetching the parameters")?;
     let mut param_events = ParamFuzzer::new(&param_info)
+        .with_no_cookies(null_cookies)
         .randomize_params_at(&mut new_prng(), 0)
         .collect::<Vec<_>>();
 
@@ -358,11 +359,7 @@ pub fn test_param_fuzz_basic(library: &PluginLibrary, plugin_id: &str, snap_to_b
     // For each set of runs we'll generate new parameter values, and if the plugin supports notes
     // we'll also generate note events.
     let param_info = params.info().context("Could not fetch the parameters")?;
-    let mut param_fuzzer = ParamFuzzer::new(&param_info);
-    if snap_to_bounds {
-        param_fuzzer = param_fuzzer.snap_to_bounds();
-    }
-
+    let param_fuzzer = ParamFuzzer::new(&param_info).snap_to_bounds(snap_to_bounds);
     let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-1..=128);
 
     // We'll keep track of the current and the previous set of parameter value so we can write them

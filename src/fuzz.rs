@@ -1,3 +1,4 @@
+mod rng;
 mod runner;
 
 use crate::cli::sandbox::{SandboxConfig, SandboxOperation};
@@ -5,7 +6,7 @@ use crate::cli::{IteratorExt, panic_message};
 use crate::commands::Verbosity;
 use crate::commands::fuzz::FuzzSettings;
 use anyhow::{Context, Result};
-use rand::{Rng, SeedableRng};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
@@ -76,14 +77,14 @@ pub fn fuzz(verbosity: Verbosity, settings: &FuzzSettings) -> Result<Vec<FuzzRes
     let start = Instant::now();
     let running = AtomicBool::new(true);
     let mut results = vec![];
-    let mut prng = new_orchestrator_prng();
+    let mut prng = rng::new_orchestrator_prng();
 
     std::iter::repeat(&plugins)
         .flatten()
         .map(|(library, plugin_id)| (library, plugin_id, prng.next_u64()))
         .take_while(|_| settings.duration.is_none_or(|duration| start.elapsed() < duration)) // run while we have time
         .take_while(|_| running.load(Ordering::Relaxed)) // stop if we found a result
-        .parallel_fold(
+        .parallel_fork_join(
             settings.jobs,
             |(library, plugin_id, seed)| {
                 let status = SandboxedFuzzChunk {
@@ -93,7 +94,7 @@ pub fn fuzz(verbosity: Verbosity, settings: &FuzzSettings) -> Result<Vec<FuzzRes
                 }
                 .run_sandboxed(SandboxConfig {
                     verbosity,
-                    hide_output: true,
+                    hide_output: false,
                     timeout: Some(std::time::Duration::from_secs(60)),
                 })
                 .unwrap_or_else(|err| FuzzStatus::Crashed {
@@ -149,18 +150,6 @@ fn discover(paths: &[PathBuf], plugin_id: Option<&str>) -> Result<Vec<(PathBuf, 
     }
 
     Ok(result)
-}
-
-/// Creates a new PRNG that is seeded with the current time.
-///
-/// Used for generating the seeds for child PRNGs
-fn new_orchestrator_prng() -> rand::rngs::Xoshiro128PlusPlus {
-    let time = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-
-    rand::rngs::Xoshiro128PlusPlus::from_seed(time.to_le_bytes())
 }
 
 #[derive(Serialize, Deserialize)]

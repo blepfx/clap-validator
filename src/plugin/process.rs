@@ -297,6 +297,10 @@ fn check_process_call_consistency(
             )
         }
 
+        if matches!(event, Event::Transport(_)) {
+            anyhow::bail!("The plugin emitted a transport event during processing, which is not allowed.");
+        }
+
         last_event_time = event_time;
     }
 

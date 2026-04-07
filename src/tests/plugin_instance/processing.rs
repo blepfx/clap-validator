@@ -608,7 +608,6 @@ pub fn test_process_sleep_process_status(library: &PluginLibrary, plugin_id: &st
         let mut note_rng = NoteGenerator::new(&note_ports_config).with_sample_offset_range(-4..=64);
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
 
-        // this is an Arc so we can set it from the main thread if needed
         let mut is_sleeping = false;
         let mut quiet_time = 0;
 

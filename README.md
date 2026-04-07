@@ -35,7 +35,7 @@ By default, all tests are run during validation, including pedantic ones. You ca
 state-reproducibility-binary = false
 ```
 
-### Fuzzing (master branch)
+### Fuzzing
 clap-validator comes with a built-in multi-process fuzzer that can run the plugin through a series of random parameter changes, note on/off events, and transport changes while checking for crashes, hangs, and spec-compliance issues. Use `clap-validator fuzz` to run the fuzzer (4 parallel runners for 10.5 minutes):
 
 ```shell
@@ -63,6 +63,9 @@ clap-validator validate --in-process --include <test-case-name> /path/to/the/plu
 ```
 
 ### Tracing
+
+> [!WARNING] 
+> Tracing can cause some overhead AND because it emits events without any buffering (to avoid losing events in case of a crash), it can mask a plugin crash or change the timing of events enough to make some issues not reproducible. Use with caution.
 
 clap-validator can generate traces of plugin/host call execution during the in-process tests that could be used to diagnose issues or understand plugin behavior. To enable tracing, pass the `--trace` option to `clap-validator validate`. The generated trace files can be opened in [Perfetto](https://perfetto.dev/).
 

@@ -4,7 +4,7 @@ use crate::plugin::ext::audio_ports_activation::AudioPortsActivation;
 use crate::plugin::ext::audio_ports_config::{AudioPortsConfig, AudioPortsConfigInfo};
 use crate::plugin::ext::configurable_audio_ports::{AudioPortsRequest, AudioPortsRequestInfo, ConfigurableAudioPorts};
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
-use crate::plugin::instance::CallbackEvent;
+use crate::plugin::instance::{CallbackEvent, HostCapabilities};
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::process::{AudioBuffers, ProcessRun, ProcessScope};
 use crate::tests::TestStatus;
@@ -446,6 +446,10 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
     struct PortMask(u64);
 
     impl PortMask {
+        fn enabled(port_count: usize) -> Self {
+            Self((1u64.unbounded_shl(port_count as u32)).wrapping_sub(1))
+        }
+
         fn random(rng: &mut impl RngExt, port_count: usize) -> Self {
             Self(rng.next_u64() & (1u64.unbounded_shl(port_count as u32).wrapping_sub(1)))
         }
@@ -466,7 +470,13 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
     let mut prng = new_prng();
 
     let plugin = library
-        .create_plugin(plugin_id)
+        .create_plugin_with(
+            plugin_id,
+            HostCapabilities {
+                can_rescan_audio_ports: true,
+                ..Default::default()
+            },
+        )
         .context("Could not create the plugin instance")?;
     plugin.init().context("Error during initialization")?;
 
@@ -503,18 +513,21 @@ pub fn test_layout_audio_ports_activation(library: &PluginLibrary, plugin_id: &s
         .config()
         .context("Error while querying 'audio-ports' IO configuration")?;
 
-    let mut next_input_mask = PortMask::random(&mut prng, audio_ports_config.inputs.len());
-    let mut next_output_mask = PortMask::random(&mut prng, audio_ports_config.outputs.len());
+    let mut next_input_mask = PortMask::enabled(audio_ports_config.inputs.len());
+    let mut next_output_mask = PortMask::enabled(audio_ports_config.outputs.len());
 
     // 32 different attempts
     for _ in 0..32 {
         plugin.poll_callback(|event| match event {
-            // TODO: this is not supported currently (host impl reports it as false)
-            CallbackEvent::AudioPortsRescanAll => {
+            CallbackEvent::AudioPortsRescanList => {
                 // rescan ports, reset masks
                 audio_ports_config = audio_ports
                     .config()
                     .context("Error while querying 'audio-ports' IO configuration after rescan")?;
+
+                // invalidate the activation masks
+                next_input_mask = PortMask::enabled(audio_ports_config.inputs.len());
+                next_output_mask = PortMask::enabled(audio_ports_config.outputs.len());
 
                 Ok(())
             }

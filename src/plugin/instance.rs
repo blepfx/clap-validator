@@ -24,7 +24,8 @@ pub enum CallbackEvent {
     ParamsRescanAll,
 
     AudioPortsRescanNames,
-    AudioPortsRescanAll,
+    AudioPortsRescanInfo,
+    AudioPortsRescanList,
 
     NotePortsRescanNames,
     NotePortsRescanAll,

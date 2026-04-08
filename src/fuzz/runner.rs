@@ -7,7 +7,7 @@ use crate::plugin::ext::configurable_audio_ports::ConfigurableAudioPorts;
 use crate::plugin::ext::note_ports::NotePorts;
 use crate::plugin::ext::params::Params;
 use crate::plugin::ext::state::State;
-use crate::plugin::instance::{CallbackEvent, Plugin};
+use crate::plugin::instance::{CallbackEvent, HostCapabilities, Plugin};
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::process::{AudioBuffers, Event, InputEventQueue, OutputEventQueue, ProcessRun, ProcessScope};
 use crate::tests::rng::{NoteGenerator, ParamFuzzer, TransportFuzzer, random_layout_requests};
@@ -35,8 +35,28 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
     );
 
     let mut prng = Xoshiro128PlusPlus::seed_from_u64(seed);
+    let has_tail_extension = prng.random_bool(0.9);
+    let has_latency_extension = prng.random_bool(0.9);
+    let has_state_extension = prng.random_bool(0.9);
+    let has_params_extension = prng.random_bool(0.9);
+    let supports_clap_dialect = prng.random_bool(0.9);
+    let supports_midi_dialect = prng.random_bool(0.9);
+    let can_rescan_audio_ports = prng.random_bool(0.9);
+
     let library = PluginLibrary::load(library)?;
-    let plugin = library.create_plugin(plugin_id)?;
+    let plugin = library.create_plugin_with(
+        plugin_id,
+        HostCapabilities {
+            has_tail_extension,
+            has_latency_extension,
+            has_state_extension,
+            has_params_extension,
+            supports_clap_dialect,
+            supports_midi_dialect,
+            can_rescan_audio_ports,
+            ..Default::default()
+        },
+    )?;
 
     plugin.init()?;
 
@@ -52,11 +72,15 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
         .transpose()?
         .unwrap_or_default();
 
-    let mut param_info = plugin
-        .get_extension::<Params>()
-        .map(|params| params.info())
-        .transpose()?
-        .unwrap_or_default();
+    let mut param_info = if has_params_extension {
+        plugin
+            .get_extension::<Params>()
+            .map(|params| params.info())
+            .transpose()?
+            .unwrap_or_default()
+    } else {
+        Default::default()
+    };
 
     // randomize parameters and set via flush
     if !param_info.is_empty() {
@@ -119,7 +143,9 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
 
             plugin.poll_callback(|event| {
                 match event {
-                    CallbackEvent::AudioPortsRescanAll | CallbackEvent::AudioPortsConfigRescan => {
+                    CallbackEvent::AudioPortsRescanList
+                    | CallbackEvent::AudioPortsRescanInfo
+                    | CallbackEvent::AudioPortsConfigRescan => {
                         audio_config_changed = true;
                     }
                     CallbackEvent::ParamsRescanAll | CallbackEvent::ParamsRescanInfo => {
@@ -208,7 +234,7 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
                     }
 
                     // try saving the current state in parallel
-                    if prng.random_bool(0.01) {
+                    if prng.random_bool(0.01) && has_state_extension {
                         let last_saved_state = last_saved_state.clone();
                         let buffer_size = match prng.random_bool(0.5) {
                             true => Some(prng.random_range(1..=64)),
@@ -232,7 +258,7 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
                     }
 
                     // try loading the last saved state in parallel
-                    if prng.random_bool(0.01) {
+                    if prng.random_bool(0.01) && has_state_extension {
                         let last_saved_state = last_saved_state.clone();
                         let buffer_size = match prng.random_bool(0.5) {
                             true => Some(prng.random_range(1..=64)),

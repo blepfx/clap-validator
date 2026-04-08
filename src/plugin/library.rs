@@ -4,7 +4,7 @@ use super::instance::Plugin;
 use super::preset_discovery::PresetDiscoveryFactory;
 use super::util::{self, clap_call};
 use crate::cli::tracing::{Span, record};
-use crate::plugin::instance::PluginShared;
+use crate::plugin::instance::{HostCapabilities, PluginShared};
 use anyhow::{Context, Result};
 use clap_sys::entry::clap_plugin_entry;
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
@@ -269,11 +269,16 @@ impl PluginLibrary {
         !factory_pointer.is_null()
     }
 
+    /// Same as [`Self::create_plugin_with`] but with default [`HostCapabilities`].
+    pub fn create_plugin(&self, id: &str) -> Result<Plugin<'_>> {
+        self.create_plugin_with(id, HostCapabilities::default())
+    }
+
     /// Try to create the plugin with the given ID, and using the provided host instance. The plugin
     /// IDs supported by this plugin library can be found by calling
     /// [`metadata()`][Self::metadata()]. The returned plugin has not yet been initialized, and
     /// `destroy()` will be called automatically when the object is dropped.
-    pub fn create_plugin(&self, id: &str) -> Result<Plugin<'_>> {
+    pub fn create_plugin_with(&self, id: &str, capabilities: HostCapabilities) -> Result<Plugin<'_>> {
         if OS_MAIN_THREAD.load() != Some(std::thread::current().id()) {
             anyhow::bail!("Plugins must be created from the OS main thread.");
         }
@@ -302,7 +307,7 @@ impl PluginLibrary {
         }
 
         let id_cstring = CString::new(id).context("Plugin ID contained null bytes")?;
-        unsafe { PluginShared::create_plugin(plugin_factory, &id_cstring) }
+        unsafe { PluginShared::create_plugin(plugin_factory, &id_cstring, capabilities) }
     }
 
     /// Returns the plugin's preset discovery factory, if it has one.

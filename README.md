@@ -36,6 +36,10 @@ state-reproducibility-binary = false
 ```
 
 ### Fuzzing
+
+> [!WARNING] 
+> Fuzzing is experimental and can contain bugs that can cause false positives even if your plugin is perfectly fine.
+
 clap-validator comes with a built-in multi-process fuzzer that can run the plugin through a series of random parameter changes, note on/off events, and transport changes while checking for crashes, hangs, and spec-compliance issues. Use `clap-validator fuzz` to run the fuzzer (4 parallel runners for 10.5 minutes):
 
 ```shell

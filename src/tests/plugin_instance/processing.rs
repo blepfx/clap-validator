@@ -6,7 +6,7 @@ use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::ext::tail::Tail;
 use crate::plugin::instance::{CallbackEvent, ProcessStatus};
 use crate::plugin::library::PluginLibrary;
-use crate::plugin::process::{AudioBuffers, ConstantMask, ProcessRun, ProcessScope, check_channel_quiet};
+use crate::plugin::process::{AudioBuffers, ConstantMask, ProcessScope, check_channel_quiet};
 use crate::tests::TestStatus;
 use crate::tests::rng::{NoteGenerator, new_prng};
 use anyhow::{Context, Result};
@@ -172,16 +172,13 @@ pub fn test_process_audio_denormals(library: &PluginLibrary, plugin_id: &str) ->
     let time_normal = Instant::now();
     plugin.on_audio_thread(|plugin| -> Result<()> {
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
+        process.set_allow_denormals(true);
 
         for _ in 0..50 {
             plugin.poll_callback();
             process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
             process.audio_buffers().fill_white_noise(&mut prng);
-            process.run_with(ProcessRun {
-                block_size: BUFFER_SIZE,
-                output_ignore_mask: 0,
-                output_ignore_denormals: true,
-            })?;
+            process.run()?;
         }
 
         Ok(())
@@ -193,6 +190,7 @@ pub fn test_process_audio_denormals(library: &PluginLibrary, plugin_id: &str) ->
     let time_denormal = Instant::now();
     plugin.on_audio_thread(|plugin| -> Result<()> {
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
+        process.set_allow_denormals(true);
 
         for _ in 0..50 {
             for buffer in process.audio_buffers().iter_mut() {
@@ -211,11 +209,7 @@ pub fn test_process_audio_denormals(library: &PluginLibrary, plugin_id: &str) ->
 
             plugin.poll_callback();
             process.add_events(note_rng.generate_events(&mut prng, BUFFER_SIZE));
-            process.run_with(ProcessRun {
-                block_size: BUFFER_SIZE,
-                output_ignore_mask: 0,
-                output_ignore_denormals: true,
-            })?;
+            process.run()?;
         }
 
         Ok(())
@@ -462,11 +456,7 @@ pub fn test_process_random_block_sizes(library: &PluginLibrary, plugin_id: &str)
             process.audio_buffers().fill_white_noise(&mut prng);
             process.add_events(note_rng.generate_events(&mut prng, block_size));
             process
-                .run_with(ProcessRun {
-                    block_size,
-                    output_ignore_mask: 0,
-                    output_ignore_denormals: false,
-                })
+                .run_with(block_size)
                 .with_context(|| format!("Error while processing with buffer size of {}", block_size))?;
         }
 
@@ -742,7 +732,7 @@ pub fn test_process_reset_reactivate(library: &PluginLibrary, plugin_id: &str) -
         span.finish(());
 
         plugin.poll_callback();
-        process.restart();
+        process.deactivate();
         note_rng.reset();
 
         // second run, deactivate and reactivate the plugin

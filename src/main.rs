@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop)]
+
 use commands::{Arguments, Command, Verbosity};
 use std::process::ExitCode;
 use yansi::Paint;

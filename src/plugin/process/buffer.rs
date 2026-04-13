@@ -259,6 +259,10 @@ impl AudioBuffers {
             }
         }
     }
+
+    pub fn num_outputs(&self) -> usize {
+        self.clap_outputs.len()
+    }
 }
 
 impl AudioBuffer {

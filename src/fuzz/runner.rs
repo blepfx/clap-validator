@@ -2,6 +2,7 @@ use crate::cli::tracing::{Span, record};
 use crate::fuzz::FuzzStatus;
 use crate::fuzz::rng::{AudioFuzzer, random_buffer_size_range, random_sample_rate};
 use crate::plugin::ext::audio_ports::AudioPorts;
+use crate::plugin::ext::audio_ports_activation::{AudioPortsActivation, AudioPortsActivationAudio};
 use crate::plugin::ext::audio_ports_config::AudioPortsConfig;
 use crate::plugin::ext::configurable_audio_ports::ConfigurableAudioPorts;
 use crate::plugin::ext::note_ports::NotePorts;
@@ -9,7 +10,7 @@ use crate::plugin::ext::params::Params;
 use crate::plugin::ext::state::State;
 use crate::plugin::instance::{CallbackEvent, HostCapabilities, Plugin};
 use crate::plugin::library::PluginLibrary;
-use crate::plugin::process::{AudioBuffers, Event, InputEventQueue, OutputEventQueue, ProcessRun, ProcessScope};
+use crate::plugin::process::{AudioBuffers, Event, InputEventQueue, OutputEventQueue, ProcessScope};
 use crate::tests::rng::{NoteGenerator, ParamFuzzer, TransportFuzzer, random_layout_requests};
 use anyhow::Result;
 use rand::rngs::Xoshiro128PlusPlus;
@@ -89,7 +90,6 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
         let output_queue = OutputEventQueue::new();
 
         input_queue.add_events(param_fuzzer.randomize_params_at(&mut prng, 0));
-
         plugin
             .get_extension::<Params>()
             .ok_or(anyhow::anyhow!(
@@ -97,6 +97,13 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
             ))?
             .flush(&input_queue, &output_queue);
     }
+
+    // audio ports activation
+    let ext_activation = plugin.get_extension::<AudioPortsActivation>();
+    let can_activate_while_processing = ext_activation
+        .as_ref()
+        .map(|ext| ext.can_activate_while_processing())
+        .unwrap_or(false);
 
     // we use this to check state saving/loading (in parallel)
     let last_saved_state = Arc::new(Mutex::new(None));
@@ -123,6 +130,20 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
         // a quiet section is where we send no events and just process silent audio (used for tail and silence checks)
         let mut is_quiet = false;
         let mut blocks_to_process = prng.random_range(20000..200000u32).div_ceil(max_buffer_size);
+        let mut input_ports_active = vec![true; audio_config.inputs.len()];
+        let mut output_ports_active = vec![true; audio_config.outputs.len()];
+
+        if let Some(ext) = plugin.get_extension::<AudioPortsActivation>() {
+            for i in 0..audio_config.inputs.len() {
+                input_ports_active[i] = prng.random_bool(0.5);
+                ext.set_active(true, i as u32, input_ports_active[i], 0);
+            }
+
+            for i in 0..audio_config.outputs.len() {
+                output_ports_active[i] = prng.random_bool(0.5);
+                ext.set_active(false, i as u32, output_ports_active[i], 0);
+            }
+        }
 
         let _span = Span::begin(
             "FuzzerConfig",
@@ -167,6 +188,22 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
                     .map(|ports| ports.config())
                     .transpose()?
                     .unwrap_or_default();
+
+                // this invalidates audio activation state, so we have to reset it
+                input_ports_active = vec![true; audio_config.inputs.len()];
+                output_ports_active = vec![true; audio_config.outputs.len()];
+
+                if let Some(ext) = plugin.get_extension::<AudioPortsActivation>() {
+                    for i in 0..audio_config.inputs.len() {
+                        input_ports_active[i] = prng.random_bool(0.5);
+                        ext.set_active(true, i as u32, input_ports_active[i], 0);
+                    }
+
+                    for i in 0..audio_config.outputs.len() {
+                        output_ports_active[i] = prng.random_bool(0.5);
+                        ext.set_active(false, i as u32, output_ports_active[i], 0);
+                    }
+                }
             }
 
             if note_config_changed {
@@ -223,6 +260,28 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
 
                     let _span = Span::begin("FuzzerBlock", record! { num_samples: num_samples, is_quiet: is_quiet });
 
+                    // sometimes randomize activation flags if we can
+                    if can_activate_while_processing && prng.random_bool(0.05) {
+                        let Some(ext) = plugin.get_extension::<AudioPortsActivationAudio>() else {
+                            anyhow::bail!(
+                                "The plugin does not provide a valid 'audio-ports-activation' extension on subsequent \
+                                 calls to get_extension"
+                            )
+                        };
+
+                        process.activate()?;
+
+                        for i in 0..audio_config.inputs.len() {
+                            input_ports_active[i] = prng.random_bool(0.5);
+                            ext.set_active(true, i as u32, input_ports_active[i], 0);
+                        }
+
+                        for i in 0..audio_config.outputs.len() {
+                            output_ports_active[i] = prng.random_bool(0.5);
+                            ext.set_active(false, i as u32, output_ports_active[i], 0);
+                        }
+                    }
+
                     // sometimes we do a state reset
                     if prng.random_bool(0.05) {
                         process.reset();
@@ -230,7 +289,7 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
 
                     // sometimes we do a full restart (deactivate + activate)
                     if prng.random_bool(0.05) {
-                        process.restart();
+                        process.deactivate();
                     }
 
                     // try saving the current state in parallel
@@ -293,6 +352,10 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
                         }
                     }
 
+                    for i in 0..audio_config.outputs.len() {
+                        process.set_output_active(i as u32, output_ports_active[i]);
+                    }
+
                     if is_quiet {
                         // if quiet, do not send any events and fill the audio inputs with silence (and set constant flags)
                         process.audio_buffers().fill_silence();
@@ -320,6 +383,15 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
 
                         // randomize audio inputs
                         audio_fuzzer.fill(&mut prng, sample_rate, process.audio_buffers());
+
+                        // fill inputs that correspond to inactive ports with silence
+                        for port in process.audio_buffers().iter_mut() {
+                            if let Some(input) = port.port().input()
+                                && !input_ports_active[input]
+                            {
+                                port.fill_silence();
+                            }
+                        }
                     }
 
                     // unsynchronized poll, runs parallel to the audio thread (non-blocking)
@@ -328,12 +400,7 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
                     }
 
                     // do the process!!
-                    process.run_with(ProcessRun {
-                        block_size: num_samples,
-                        output_ignore_denormals: false,
-                        output_ignore_mask: 0,
-                    })?;
-
+                    process.run_with(num_samples)?;
                     blocks_to_process -= 1;
 
                     //TODO: post process validation

@@ -359,43 +359,40 @@ pub fn test_layout_configurable_audio_ports(library: &PluginLibrary, plugin_id: 
             }
 
             match request.request_info {
-                AudioPortsRequestInfo::Ambisonic { config, .. } => {
-                    if port.port_type.as_deref() == Some(CLAP_PORT_AMBISONIC) {
-                        let result = ambisonic
-                            .as_ref()
-                            .expect("already checked")
-                            .get_config(request.is_input, request.port_index);
+                AudioPortsRequestInfo::Ambisonic { config, .. }
+                    if port.port_type.as_deref() == Some(CLAP_PORT_AMBISONIC) =>
+                {
+                    let result = ambisonic
+                        .as_ref()
+                        .expect("already checked")
+                        .get_config(request.is_input, request.port_index);
 
-                        if result
-                            .is_none_or(|x| x.normalization != config.normalization && x.ordering != config.ordering)
-                        {
-                            anyhow::bail!(
-                                "Wrong ambisonic config set for {} port (index {}) in response to the layout request: \
-                                 \n{}",
-                                if request.is_input { "input" } else { "output" },
-                                request.port_index,
-                                print_layout(&requests),
-                            );
-                        }
+                    if result.is_none_or(|x| x.normalization != config.normalization && x.ordering != config.ordering) {
+                        anyhow::bail!(
+                            "Wrong ambisonic config set for {} port (index {}) in response to the layout request: \n{}",
+                            if request.is_input { "input" } else { "output" },
+                            request.port_index,
+                            print_layout(&requests),
+                        );
                     }
                 }
 
-                AudioPortsRequestInfo::Surround { channel_map } => {
-                    if port.port_type.as_deref() == Some(CLAP_PORT_SURROUND) {
-                        let result_map = surround.as_ref().expect("already checked").get_channel_map(
-                            request.is_input,
-                            request.port_index,
-                            channel_map.len() as u32,
-                        );
+                AudioPortsRequestInfo::Surround { channel_map }
+                    if port.port_type.as_deref() == Some(CLAP_PORT_SURROUND) =>
+                {
+                    let result_map = surround.as_ref().expect("already checked").get_channel_map(
+                        request.is_input,
+                        request.port_index,
+                        channel_map.len() as u32,
+                    );
 
-                        if channel_map != result_map {
-                            anyhow::bail!(
-                                "Wrong surround map set for {} port (index {}) in response to the layout request: \n{}",
-                                if request.is_input { "input" } else { "output" },
-                                request.port_index,
-                                print_layout(&requests),
-                            );
-                        }
+                    if channel_map != result_map {
+                        anyhow::bail!(
+                            "Wrong surround map set for {} port (index {}) in response to the layout request: \n{}",
+                            if request.is_input { "input" } else { "output" },
+                            request.port_index,
+                            print_layout(&requests),
+                        );
                     }
                 }
 

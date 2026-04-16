@@ -352,10 +352,6 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
                         }
                     }
 
-                    for i in 0..audio_config.outputs.len() {
-                        process.set_output_active(i as u32, output_ports_active[i]);
-                    }
-
                     if is_quiet {
                         // if quiet, do not send any events and fill the audio inputs with silence (and set constant flags)
                         process.audio_buffers().fill_silence();
@@ -392,6 +388,11 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
                                 port.fill_silence();
                             }
                         }
+                    }
+
+                    // set what output ports are active and what ports are not (so we can skip checks for inactive ports)
+                    for i in 0..audio_config.outputs.len() {
+                        process.set_output_active(i as u32, output_ports_active[i]);
                     }
 
                     // unsynchronized poll, runs parallel to the audio thread (non-blocking)

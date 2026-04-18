@@ -8,11 +8,13 @@ use crate::plugin::ext::configurable_audio_ports::ConfigurableAudioPorts;
 use crate::plugin::ext::note_ports::NotePorts;
 use crate::plugin::ext::params::Params;
 use crate::plugin::ext::state::State;
+use crate::plugin::ext::voice_info::VoiceInfo;
 use crate::plugin::instance::{CallbackEvent, HostCapabilities, Plugin};
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::process::{AudioBuffers, Event, InputEventQueue, OutputEventQueue, ProcessScope};
 use crate::tests::rng::{NoteGenerator, ParamFuzzer, TransportFuzzer, random_layout_requests};
 use anyhow::Result;
+use clap_sys::ext::voice_info::CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES;
 use rand::rngs::Xoshiro128PlusPlus;
 use rand::seq::{IndexedRandom, IteratorRandom};
 use rand::{Rng, RngExt, SeedableRng};
@@ -235,8 +237,23 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
                 let mut audio_fuzzer = AudioFuzzer::new();
                 let mut param_fuzzer = ParamFuzzer::new(&param_info).with_sample_offset_range(-10..=200);
                 let mut event_fuzzer = NoteGenerator::new(&note_config)
+                    .with_wildcard_events()
                     .with_params(&param_info)
                     .with_sample_offset_range(-10..=200);
+
+                // voice_info::get needs to be called in an active state
+                process.activate()?;
+
+                let supports_overlapping_notes = plugin.on_main_thread(|plugin| {
+                    plugin
+                        .get_extension::<VoiceInfo>()
+                        .and_then(|x| x.get())
+                        .is_some_and(|info| (info.flags & CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES) != 0)
+                });
+
+                if supports_overlapping_notes {
+                    event_fuzzer = event_fuzzer.with_overlapping_notes();
+                }
 
                 while blocks_to_process > 0 {
                     if process.wants_restart() {

@@ -4,12 +4,14 @@ use crate::cli::tracing::{Span, record};
 use crate::plugin::ext::audio_ports::{AudioPortConfig, AudioPorts};
 use crate::plugin::ext::note_ports::{NotePortConfig, NotePorts};
 use crate::plugin::ext::tail::Tail;
+use crate::plugin::ext::voice_info::VoiceInfo;
 use crate::plugin::instance::{CallbackEvent, ProcessStatus};
 use crate::plugin::library::PluginLibrary;
 use crate::plugin::process::{AudioBuffers, ConstantMask, ProcessScope, check_channel_quiet};
 use crate::tests::TestStatus;
 use crate::tests::rng::{NoteGenerator, new_prng};
 use anyhow::{Context, Result};
+use clap_sys::ext::voice_info::CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES;
 use either::Either;
 use rand::RngExt;
 use std::time::Instant;
@@ -244,7 +246,8 @@ pub fn test_process_audio_denormals(library: &PluginLibrary, plugin_id: &str) ->
 pub fn test_process_note_out_of_place(
     library: &PluginLibrary,
     plugin_id: &str,
-    consistent: bool,
+    inconsistent: bool,
+    wildcard: bool,
 ) -> Result<TestStatus> {
     let mut prng = new_prng();
 
@@ -282,16 +285,42 @@ pub fn test_process_note_out_of_place(
         });
     }
 
-    // We'll fill the input event queue with (consistent) random CLAP note and/or MIDI
-    // events depending on what's supported by the plugin supports
-    let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
-    let mut note_rng = NoteGenerator::new(&note_ports_config);
-    if !consistent {
-        note_rng = note_rng.with_inconsistent_events();
+    if wildcard && !note_ports_config.inputs.iter().any(|x| x.supports_clap()) {
+        return Ok(TestStatus::Skipped {
+            details: Some(String::from(
+                "The plugin does not have any input note ports that support CLAP events",
+            )),
+        });
     }
 
     plugin.on_audio_thread(|plugin| -> Result<()> {
+        // We'll fill the input event queue with (consistent) random CLAP note and/or MIDI
+        // events depending on what's supported by the plugin supports
+        let mut audio_buffers = AudioBuffers::new_out_of_place_f32(&audio_ports_config, BUFFER_SIZE);
+        let mut note_rng = NoteGenerator::new(&note_ports_config);
         let mut process = ProcessScope::new(&plugin, &mut audio_buffers)?;
+
+        // voice_info::get needs to be called in an active state
+        process.activate()?;
+
+        let supports_overlapping_notes = plugin.on_main_thread(|plugin| {
+            plugin
+                .get_extension::<VoiceInfo>()
+                .and_then(|x| x.get())
+                .is_some_and(|info| (info.flags & CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES) != 0)
+        });
+
+        if inconsistent {
+            note_rng = note_rng.with_inconsistent_events();
+        }
+
+        if supports_overlapping_notes {
+            note_rng = note_rng.with_overlapping_notes();
+        }
+
+        if wildcard {
+            note_rng = note_rng.with_wildcard_events();
+        }
 
         for _ in 0..5 {
             plugin.poll_callback();

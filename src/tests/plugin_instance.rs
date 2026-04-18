@@ -45,6 +45,7 @@ pub enum PluginInstanceTestCase {
     ProcessSleepProcessStatus,
     ProcessNoteOutOfPlaceBasic,
     ProcessNoteInconsistent,
+    ProcessNoteWildcard,
     ProcessVaryingSampleRates,
     ProcessVaryingBlockSizes,
     ProcessRandomBlockSizes,
@@ -140,6 +141,13 @@ impl PluginInstanceTestCase {
             Self::ProcessNoteInconsistent => String::from(
                 "Sends intentionally inconsistent and mismatching note and MIDI events to the plugin with its default \
                  parameter values and tests the output for consistency. Uses out-of-place audio processing.",
+            ),
+            Self::ProcessNoteWildcard => format!(
+                "Same as {}, but this time some note events have their note ID, port index, channel, or key set to \
+                 -1, which means they can match multiple notes at the same time. This tests whether the plugin can \
+                 handle such wildcard events without crashing or producing invalid output. Uses out-of-place audio \
+                 processing.",
+                Self::ProcessNoteOutOfPlaceBasic
             ),
             Self::ProcessVaryingSampleRates => String::from(
                 "Processes random audio and random note events through the plugin with its default parameter values \
@@ -276,8 +284,13 @@ impl PluginInstanceTestCase {
             Self::ProcessAudioDenormals => processing::test_process_audio_denormals(library, plugin_id),
             Self::ProcessSleepConstantMask => processing::test_process_sleep_constant_mask(library, plugin_id),
             Self::ProcessSleepProcessStatus => processing::test_process_sleep_process_status(library, plugin_id),
-            Self::ProcessNoteOutOfPlaceBasic => processing::test_process_note_out_of_place(library, plugin_id, true),
-            Self::ProcessNoteInconsistent => processing::test_process_note_out_of_place(library, plugin_id, false),
+            Self::ProcessNoteOutOfPlaceBasic => {
+                processing::test_process_note_out_of_place(library, plugin_id, false, false)
+            }
+            Self::ProcessNoteInconsistent => {
+                processing::test_process_note_out_of_place(library, plugin_id, true, false)
+            }
+            Self::ProcessNoteWildcard => processing::test_process_note_out_of_place(library, plugin_id, false, true),
             Self::ProcessVaryingSampleRates => processing::test_process_varying_sample_rates(library, plugin_id),
             Self::ProcessVaryingBlockSizes => processing::test_process_varying_block_sizes(library, plugin_id),
             Self::ProcessRandomBlockSizes => processing::test_process_random_block_sizes(library, plugin_id),

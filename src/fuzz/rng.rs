@@ -163,7 +163,8 @@ impl AudioSignal {
 
     pub fn fill(&mut self, rng: &mut impl Rng, sample_rate: f64, buffer: Either<&mut [f32], &mut [f64]>) {
         fn db_to_gain(db: f64) -> f64 {
-            10f64.powf(db / 20.0)
+            const MAX_GAIN_DB: f64 = 40.0;
+            10f64.powf(db.min(MAX_GAIN_DB) / 20.0)
         }
 
         let sample_rate_inv = 1.0 / sample_rate;

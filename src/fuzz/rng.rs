@@ -122,7 +122,7 @@ impl AudioSignal {
                 freq: sample_rate / 2.0,
                 freq_ramp: 0.0,
                 gain: 0.0,
-                gain_ramp: rng.random_range(-20.0..20.0),
+                gain_ramp: rng.random_range(-10.0..10.0),
             },
 
             // sine at near dc
@@ -131,7 +131,7 @@ impl AudioSignal {
                 freq: 1.0,
                 freq_ramp: 0.0,
                 gain: 0.0,
-                gain_ramp: rng.random_range(-20.0..20.0),
+                gain_ramp: rng.random_range(-10.0..10.0),
             },
 
             // random sine sweep
@@ -139,13 +139,13 @@ impl AudioSignal {
                 phase: rng.random_range(0.0..1.0),
                 freq: rng.random_range(20.0..20000.0),
                 freq_ramp: rng.random_range(-1000.0..1000.0),
-                gain: rng.random_range(-60.0..60.0),
+                gain: rng.random_range(-80.0..20.0),
                 gain_ramp: rng.random_range(-10.0..10.0),
             },
 
             // random noise ramp
             3 => Self::Noise {
-                gain: rng.random_range(-60.0..60.0),
+                gain: rng.random_range(-80.0..20.0),
                 gain_ramp: rng.random_range(-10.0..10.0),
             },
 

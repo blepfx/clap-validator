@@ -207,7 +207,7 @@ impl<'lib> Plugin<'lib> {
 
             if self.shared.requested_restart.swap(false) {
                 if i == 0 {
-                    log::warn!("The plugin seems to be stuck in an 'activate'/'request_restart' loop");
+                    anyhow::bail!("The plugin seems to be stuck in an 'activate'/'request_restart' loop");
                 } else {
                     self.deactivate();
                     continue;

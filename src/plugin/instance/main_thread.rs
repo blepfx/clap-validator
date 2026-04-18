@@ -179,10 +179,10 @@ impl<'lib> Plugin<'lib> {
         assert!(min_buffer_size >= 1);
         assert!(max_buffer_size >= min_buffer_size);
 
-        // we need to track the `Activating` state to validate that we call clap_host_latency::changed only within the activation call.
-        self.shared.set_status(PluginStatus::Activating);
+        for i in (0..10).rev() {
+            // we need to track the `Activating` state to validate that we call clap_host_latency::changed only within the activation call.
+            self.shared.set_status(PluginStatus::Activating);
 
-        for _ in 0..10 {
             let result = unsafe {
                 let span = Span::begin(
                     "clap_plugin::activate",
@@ -205,16 +205,16 @@ impl<'lib> Plugin<'lib> {
                 anyhow::bail!("'clap_plugin::activate()' returned false.")
             }
 
-            if self.shared.requested_callback.swap(false) {
-                self.deactivate();
-                continue;
+            if self.shared.requested_restart.swap(false) {
+                if i == 0 {
+                    log::warn!("The plugin seems to be stuck in an 'activate'/'request_restart' loop");
+                } else {
+                    self.deactivate();
+                    continue;
+                }
             }
 
-            break;
-        }
-
-        if self.shared.requested_callback.load() {
-            log::warn!("The plugin seems to be stuck in an 'activate' callback loop");
+            return Ok(());
         }
 
         Ok(())

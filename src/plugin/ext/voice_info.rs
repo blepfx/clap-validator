@@ -19,11 +19,8 @@ impl<'a> Extension for VoiceInfo<'a> {
     type Plugin = &'a Plugin<'a>;
     type Struct = clap_plugin_voice_info;
 
-    unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
-        Self {
-            plugin,
-            voice_info: extension_struct,
-        }
+    unsafe fn new(plugin: &'a Plugin<'a>, voice_info: NonNull<Self::Struct>) -> Self {
+        Self { plugin, voice_info }
     }
 }
 

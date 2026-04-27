@@ -50,10 +50,10 @@ impl<'a> Extension for ConfigurableAudioPorts<'a> {
     type Plugin = &'a Plugin<'a>;
     type Struct = clap_plugin_configurable_audio_ports;
 
-    unsafe fn new(plugin: &'a Plugin<'a>, extension_struct: NonNull<Self::Struct>) -> Self {
+    unsafe fn new(plugin: &'a Plugin<'a>, configurable_audio_ports: NonNull<Self::Struct>) -> Self {
         Self {
             plugin,
-            configurable_audio_ports: extension_struct,
+            configurable_audio_ports,
         }
     }
 }

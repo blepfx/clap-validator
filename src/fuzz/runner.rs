@@ -7,6 +7,7 @@ use crate::plugin::ext::audio_ports_config::AudioPortsConfig;
 use crate::plugin::ext::configurable_audio_ports::ConfigurableAudioPorts;
 use crate::plugin::ext::note_ports::NotePorts;
 use crate::plugin::ext::params::Params;
+use crate::plugin::ext::render::{Render, RenderMode};
 use crate::plugin::ext::state::State;
 use crate::plugin::ext::voice_info::VoiceInfo;
 use crate::plugin::instance::{CallbackEvent, HostCapabilities, Plugin};
@@ -145,6 +146,17 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
                 output_ports_active[i] = prng.random_bool(0.5);
                 ext.set_active(false, i as u32, output_ports_active[i], 0);
             }
+        }
+
+        if let Some(ext) = plugin.get_extension::<Render>()
+            && prng.random_bool(0.1)
+        {
+            let mode = match prng.random_bool(0.5) {
+                true => RenderMode::Offline,
+                false => RenderMode::Realtime,
+            };
+
+            ext.set(mode);
         }
 
         let _span = Span::begin(
@@ -309,6 +321,49 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
                         process.deactivate();
                     }
 
+                    if is_quiet {
+                        // if quiet, do not send any events and fill the audio inputs with silence (and set constant flags)
+                        process.audio_buffers().fill_silence();
+                    } else {
+                        // sometimes generate events with null cookies to test plugins handling of that
+                        param_fuzzer.no_cookies = prng.random_bool(0.1);
+
+                        // add random note and modulation events if we have the input ports
+                        process.add_events(event_fuzzer.generate_events(&mut prng, num_samples));
+
+                        // add random parameter change events if we have parameters
+                        process.add_events(param_fuzzer.generate_events(&mut prng, num_samples));
+
+                        // randomize transport
+                        process.transport().is_freerun = prng.random_bool(0.1); // null-transport
+                        transport_fuzzer.mutate(&mut prng, process.transport()); // mutate block transport
+
+                        // sometimes add a random transport event in the middle of the block
+                        if prng.random_bool(0.2) {
+                            let time_offset = prng.random_range(0..num_samples);
+                            let mut transport = process.transport().clone();
+                            transport.advance(time_offset as _, sample_rate);
+                            process.add_events([Event::Transport(transport.as_clap_transport(time_offset))]);
+                        }
+
+                        // randomize audio inputs
+                        audio_fuzzer.fill(&mut prng, sample_rate, process.audio_buffers());
+
+                        // fill inputs that correspond to inactive ports with silence
+                        for port in process.audio_buffers().iter_mut() {
+                            if let Some(input) = port.port().input()
+                                && !input_ports_active[input]
+                            {
+                                port.fill_silence();
+                            }
+                        }
+                    }
+
+                    // set what output ports are active and what ports are not (so we can skip checks for inactive ports)
+                    for i in 0..audio_config.outputs.len() {
+                        process.set_output_active(i as u32, output_ports_active[i]);
+                    }
+
                     // try saving the current state in parallel
                     if prng.random_bool(0.01) && has_state_extension {
                         let last_saved_state = last_saved_state.clone();
@@ -369,47 +424,21 @@ pub fn run_fuzzer(library: &Path, plugin_id: &str, seed: u64) -> Result<FuzzStat
                         }
                     }
 
-                    if is_quiet {
-                        // if quiet, do not send any events and fill the audio inputs with silence (and set constant flags)
-                        process.audio_buffers().fill_silence();
-                    } else {
-                        // sometimes generate events with null cookies to test plugins handling of that
-                        param_fuzzer.no_cookies = prng.random_bool(0.1);
+                    // try a random render mode (set in parallel)
+                    if prng.random_bool(0.01) {
+                        let mode = match prng.random_bool(0.5) {
+                            true => RenderMode::Offline,
+                            false => RenderMode::Realtime,
+                        };
 
-                        // add random note and modulation events if we have the input ports
-                        process.add_events(event_fuzzer.generate_events(&mut prng, num_samples));
+                        plugin.send_main_thread(move |plugin| {
+                            let Some(render) = plugin.get_extension::<Render>() else {
+                                return Ok(());
+                            };
 
-                        // add random parameter change events if we have parameters
-                        process.add_events(param_fuzzer.generate_events(&mut prng, num_samples));
-
-                        // randomize transport
-                        process.transport().is_freerun = prng.random_bool(0.1); // null-transport
-                        transport_fuzzer.mutate(&mut prng, process.transport()); // mutate block transport
-
-                        // sometimes add a random transport event in the middle of the block
-                        if prng.random_bool(0.2) {
-                            let time_offset = prng.random_range(0..num_samples);
-                            let mut transport = process.transport().clone();
-                            transport.advance(time_offset as _, sample_rate);
-                            process.add_events([Event::Transport(transport.as_clap_transport(time_offset))]);
-                        }
-
-                        // randomize audio inputs
-                        audio_fuzzer.fill(&mut prng, sample_rate, process.audio_buffers());
-
-                        // fill inputs that correspond to inactive ports with silence
-                        for port in process.audio_buffers().iter_mut() {
-                            if let Some(input) = port.port().input()
-                                && !input_ports_active[input]
-                            {
-                                port.fill_silence();
-                            }
-                        }
-                    }
-
-                    // set what output ports are active and what ports are not (so we can skip checks for inactive ports)
-                    for i in 0..audio_config.outputs.len() {
-                        process.set_output_active(i as u32, output_ports_active[i]);
+                            render.set(mode);
+                            Ok(())
+                        });
                     }
 
                     // unsynchronized poll, runs parallel to the audio thread (non-blocking)

@@ -377,33 +377,6 @@ impl AudioBuffer {
             Either::Right(data) => Either::Right(data[channel as usize][sample as usize]),
         }
     }
-
-    pub fn is_same(&self, other: &Self) -> bool {
-        if self.channels() != other.channels() {
-            return false;
-        }
-
-        for channel in 0..self.channels() {
-            let left = self.channel(channel);
-            let right = other.channel(channel);
-
-            match (left, right) {
-                (Either::Left(left), Either::Left(right)) => {
-                    if left != right {
-                        return false;
-                    }
-                }
-                (Either::Right(left), Either::Right(right)) => {
-                    if left != right {
-                        return false;
-                    }
-                }
-                _ => return false,
-            }
-        }
-
-        true
-    }
 }
 
 impl AudioBufferPort {

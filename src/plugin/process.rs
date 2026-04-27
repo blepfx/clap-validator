@@ -232,10 +232,18 @@ fn check_process_call_consistency(
         // Input-only buffers must not be overwritten during out of place processing
         match buffer.port() {
             AudioBufferPort::Input(index) => {
-                if !buffer.is_same(before) {
-                    anyhow::bail!(
-                        "The plugin has overwritten an input buffer (index {index}) during out-of-place processing."
-                    );
+                // find a mismatching sample
+                for channel in 0..buffer.channels() {
+                    for sample in 0..buffer.samples() {
+                        let x = buffer.get(channel, sample);
+                        let y = before.get(channel, sample);
+
+                        anyhow::ensure!(
+                            x == y,
+                            "The plugin has overwritten an input buffer (index {index}) during out-of-place \
+                             processing, at channel {channel} and sample index {sample}."
+                        );
+                    }
                 }
             }
 
@@ -245,17 +253,19 @@ fn check_process_call_consistency(
                     continue;
                 }
 
-                for i in 0..buffer.channels() {
-                    if buffer.get_output_constant_mask().is_channel_constant(i)
-                        && let Err(e) = check_channel_quiet(buffer.channel(i), true)
+                // check output constant masks
+                for channel in 0..buffer.channels() {
+                    if buffer.get_output_constant_mask().is_channel_constant(channel)
+                        && let Err(e) = check_channel_quiet(buffer.channel(channel), true)
                     {
                         anyhow::bail!(
-                            "The output channel {i} of port {port_idx} is not constant despite the constant flag \
-                             being set ({e:.2} dBFS)."
+                            "The output channel {channel} of port {port_idx} is not constant despite the constant \
+                             flag being set ({e:.2} dBFS)."
                         );
                     }
                 }
 
+                // check for invalid samples (unwritten, NaN, infinite, or denormal)
                 let invalid_sample = (0..buffer.channels())
                     .flat_map(|channel| (0..block_size).map(move |sample| (channel, sample)))
                     .find_map(|(channel, sample)| {
@@ -293,6 +303,26 @@ fn check_process_call_consistency(
                              {sample_idx} is {sample}."
                         );
                     }
+                }
+
+                // check for out-of-bounds overwritten samples
+                let overwritten_sample = (0..buffer.channels())
+                    .flat_map(|channel| (block_size..buffer.samples()).map(move |sample| (channel, sample)))
+                    .find_map(|(channel, sample)| {
+                        let bitwise_match = match (buffer.get(channel, sample), before.get(channel, sample)) {
+                            (Either::Left(x), Either::Left(y)) => x.to_bits() == y.to_bits(),
+                            (Either::Right(x), Either::Right(y)) => x.to_bits() == y.to_bits(),
+                            _ => false,
+                        };
+
+                        if !bitwise_match { Some((channel, sample)) } else { None }
+                    });
+
+                if let Some((channel_idx, sample_idx)) = overwritten_sample {
+                    anyhow::bail!(
+                        "The plugin has overwritten a sample beyond the current processing block size at channel \
+                         {channel_idx} and sample index {sample_idx}. The block size is {block_size}."
+                    );
                 }
             }
         }

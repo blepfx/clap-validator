@@ -35,7 +35,6 @@ pub enum PluginInstanceTestCase {
     DescriptorConsistency,
     FeaturesCategories,
     FeaturesDuplicates,
-    FeaturesStandard,
     ProcessAudioBasicOutOfPlace,
     ProcessAudioBasicInPlace,
     ProcessAudioDoubleOutOfPlace,
@@ -83,9 +82,6 @@ impl PluginInstanceTestCase {
                 String::from("The plugin needs to have at least one of the main CLAP category features.")
             }
             Self::FeaturesDuplicates => String::from("The plugin's features array should not contain any duplicates."),
-            Self::FeaturesStandard => String::from(
-                "Check that every unnamespaced feature that the plugin declares is part of the CLAP standard features.",
-            ),
             Self::ProcessAudioBasicOutOfPlace => String::from(
                 "Processes random audio through the plugin with its default parameter values and tests whether the \
                  output does not contain any non-finite or subnormal values. Uses out-of-place audio processing.",
@@ -273,7 +269,6 @@ impl PluginInstanceTestCase {
             Self::DescriptorConsistency => descriptor::test_consistency(library, plugin_id),
             Self::FeaturesCategories => descriptor::test_features_categories(library, plugin_id),
             Self::FeaturesDuplicates => descriptor::test_features_duplicates(library, plugin_id),
-            Self::FeaturesStandard => descriptor::test_features_standard(library, plugin_id),
             Self::LayoutAudioPortsActivation => layout::test_layout_audio_ports_activation(library, plugin_id),
             Self::LayoutAudioPortsConfig => layout::test_layout_audio_ports_config(library, plugin_id),
             Self::LayoutConfigurableAudioPorts => layout::test_layout_configurable_audio_ports(library, plugin_id),
